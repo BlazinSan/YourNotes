@@ -1,0 +1,65 @@
+{
+  "name": "opennotes",
+  "version": "0.0.0",
+  "author": "rajsriv <raj2005sriv@gmail.com>",
+  "homepage": "https://github.com/rajsriv/OpenNotes",
+  "private": true,
+  "type": "module",
+  "main": "electron-main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "electron": "wait-on tcp:5173 && VITE_DEV_SERVER_URL=http://localhost:5173 electron .",
+    "electron:dev": "concurrently -k \"npm run dev\" \"npm run electron\"",
+    "package": "npm run build && electron-builder -l"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.3",
+    "electron": "^42.4.0",
+    "electron-builder": "^26.15.2",
+    "vite": "^8.0.12",
+    "wait-on": "^9.0.10"
+  },
+  "dependencies": {
+    "dbus-next": "^0.10.2",
+    "marked": "^18.0.5"
+  },
+  "build": {
+    "appId": "com.raj.opennotes",
+    "productName": "OpenNotes",
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "icon": "icon.png",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "mac": {
+      "icon": "icon.png",
+      "target": [
+        "zip"
+      ],
+      "category": "public.app-category.productivity"
+    },
+    "linux": {
+      "icon": "icon.png",
+      "target": [
+        "AppImage",
+        "deb",
+        "pacman",
+        "rpm"
+      ],
+      "category": "Office"
+    },
+    "files": [
+      "dist/**/*",
+      "electron-main.cjs",
+      "preload.cjs",
+      "icon.png"
+    ]
+  }
+}
