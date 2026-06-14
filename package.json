@@ -42,7 +42,13 @@
     "mac": {
       "icon": "icon.png",
       "target": [
-        "zip"
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ],
       "category": "public.app-category.productivity"
     },
