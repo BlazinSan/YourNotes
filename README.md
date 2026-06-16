@@ -126,5 +126,14 @@ If you want to build the project from source:
    ./build-all.sh
    ```
 
+## Reporting Issues
+
+If you encounter a bug, have a feature request, or need help, please [open an issue](../../issues) on GitHub. 
+When creating an issue, try to include:
+- A clear and descriptive title
+- Steps to reproduce the bug (if applicable)
+- Your operating system and application version
+- Screenshots or error logs
+
 ## License
 MIT
