@@ -539,6 +539,17 @@
                   </select>
                 </div>
 
+                <div>
+                  <label style="display: block; font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em;">Currency</label>
+                  <select id="settings-currency" style="width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--panel-border); font-family: inherit; font-size: 1rem; outline: none; background: transparent; color: var(--text-primary); cursor: pointer; appearance: auto;" onchange="saveSettings()">
+                    <option value="₹">₹ (INR)</option>
+                    <option value="$">$ (USD)</option>
+                    <option value="€">€ (EUR)</option>
+                    <option value="£">£ (GBP)</option>
+                    <option value="¥">¥ (JPY)</option>
+                  </select>
+                </div>
+
                 <div style="margin-top: 40px; padding-top: 32px; border-top: 1px solid var(--panel-border);">
                   <button onclick="resetEverything()" style="width: 100%; padding: 14px; background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 12px; font-weight: 600; font-size: 1rem; cursor: pointer; transition: background 0.2s;">⚠️ Factory Reset</button>
                   <p style="text-align: center; color: var(--text-secondary); font-size: 0.85rem; margin-top: 12px;">This will permanently delete all data.</p>

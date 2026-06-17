@@ -2353,14 +2353,16 @@ window.deleteExpense = function(id) {
 
 function updateExpenseTotal() {
   const totalEl = document.getElementById('expense-total');
+  const currency = localStorage.getItem('opennotes_currency') || '₹';
   if (totalEl) {
     const total = expenses.reduce((sum, e) => sum + e.amount, 0);
-    totalEl.textContent = `₹${total.toFixed(2)}`;
+    totalEl.textContent = `${currency}${total.toFixed(2)}`;
   }
 }
 
 function renderExpenses() {
   const listEl = document.getElementById('expense-list');
+  const currency = localStorage.getItem('opennotes_currency') || '₹';
   if (!listEl) return;
   
   listEl.innerHTML = '';
@@ -2371,7 +2373,7 @@ function renderExpenses() {
     div.innerHTML = `
       <input type="text" value="${e.title.replace(/"/g, '&quot;')}" onchange="editExpense(${e.id}, 'title', this.value)" style="flex: 2; padding: 6px 10px; border-radius: 6px; border: 1px solid transparent; font-family: inherit; font-size: 0.95rem; font-weight: 500; outline: none; background: transparent; transition: all 0.2s; color: var(--text-primary);" onfocus="this.style.background='#fff'; this.style.borderColor='var(--panel-border)';" onblur="this.style.background='transparent'; this.style.borderColor='transparent'; renderExpenses();" />
       <div style="flex: 1; position: relative;">
-        <span style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); font-weight: 600; color: var(--text-secondary); pointer-events: none;">₹</span>
+        <span style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); font-weight: 600; color: var(--text-secondary); pointer-events: none;">${currency}</span>
         <input type="number" value="${e.amount}" onchange="editExpense(${e.id}, 'amount', this.value)" style="width: 100%; padding: 6px 10px 6px 20px; border-radius: 6px; border: 1px solid transparent; font-family: inherit; font-size: 0.95rem; font-weight: 600; outline: none; background: transparent; transition: all 0.2s; color: var(--text-primary);" onfocus="this.style.background='#fff'; this.style.borderColor='var(--panel-border)';" onblur="this.style.background='transparent'; this.style.borderColor='transparent'; renderExpenses();" />
       </div>
       <button onclick="deleteExpense(${e.id})" style="background: rgba(239, 68, 68, 0.1); border: none; color: #ef4444; border-radius: 6px; width: 28px; height: 28px; cursor: pointer; font-size: 1.1rem; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">&times;</button>
@@ -2468,10 +2470,12 @@ window.saveSettings = function() {
   const name = document.getElementById('settings-name').value.trim();
   const desig = document.getElementById('settings-designation').value.trim();
   const theme = document.getElementById('settings-theme').value;
+  const currency = document.getElementById('settings-currency').value;
   
   if (name) localStorage.setItem('opennotes_profile_name', name);
   if (desig) localStorage.setItem('opennotes_profile_type', desig);
   localStorage.setItem('opennotes_theme', theme);
+  localStorage.setItem('opennotes_currency', currency);
   
   applySettings();
 };
@@ -2480,12 +2484,18 @@ window.applySettings = function() {
   const name = localStorage.getItem('opennotes_profile_name') || 'Amanda Smith';
   const desig = localStorage.getItem('opennotes_profile_type') || 'Professional Account';
   const theme = localStorage.getItem('opennotes_theme') || 'light';
+  const currency = localStorage.getItem('opennotes_currency') || '₹';
   
   const nameEls = document.querySelectorAll('#sidebar-profile-name');
   const desigEls = document.querySelectorAll('#sidebar-profile-type');
   
   nameEls.forEach(el => el.textContent = name);
   desigEls.forEach(el => el.textContent = desig);
+  
+  const bannerNameText = document.getElementById('banner-name-text');
+  const bannerRoleText = document.getElementById('banner-role-text');
+  if (bannerNameText) bannerNameText.textContent = `${name}.`;
+  if (bannerRoleText) bannerRoleText.textContent = desig;
   
   if (theme === 'dark') {
     document.body.classList.add('theme-dark');
@@ -2496,10 +2506,18 @@ window.applySettings = function() {
   const nameInput = document.getElementById('settings-name');
   const desigInput = document.getElementById('settings-designation');
   const themeInput = document.getElementById('settings-theme');
+  const currencyInput = document.getElementById('settings-currency');
   
   if (nameInput) nameInput.value = name;
   if (desigInput) desigInput.value = desig;
   if (themeInput) themeInput.value = theme;
+  if (currencyInput) currencyInput.value = currency;
+
+  const newExpenseAmount = document.getElementById('new-expense-amount');
+  if (newExpenseAmount) newExpenseAmount.placeholder = `Amount (${currency})`;
+
+  updateExpenseTotal();
+  renderExpenses();
 };
 
 window.resetEverything = function() {
