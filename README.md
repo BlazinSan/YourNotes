@@ -1,7 +1,8 @@
 <div align="center">
-  <img src="icon.png" width="128" alt="OpenNotes Icon">
-  <h1>OpenNotes</h1>
+  <img src="icon.png" width="128" alt="YourNotes Icon">
+  <h1>YourNotes</h1>
   <p>A beautiful, modern, cross-platform productivity workspace and note-taking application designed to keep your tasks, projects, college notes, and habits organized.</p>
+  <p><i>YourNotes is a maintained fork of <a href="https://github.com/rajsriv/OpenNotes">OpenNotes</a> (MIT).</i></p>
   <p>
     <img src="https://img.shields.io/badge/Electron-191970?style=flat&logo=Electron&logoColor=white" alt="Electron" />
     <img src="https://img.shields.io/badge/Vite-B73BFE?style=flat&logo=vite&logoColor=FFD62E" alt="Vite" />
@@ -17,66 +18,57 @@
 - **Built-in Document Viewer:** View your PDFs or rich-text notes in a beautiful fullscreen experience.
 - **Cross-Platform:** Available on Linux, Windows, and macOS.
 - **Dark & Light Themes:** Premium design that adapts to your system preferences.
+- **Multi-language UI:** English, Arabic (RTL), Chinese, and Malay.
+- **All world currencies:** Full ISO 4217 list for the expense tracker.
+- **Fahrenheit / Celsius** temperature toggle.
+- **Lofi music player** beside the Focus Session (royalty-free streams or your own files).
+- **Unified back navigation** on every panel.
 
 ## Gallery
 
-Experience the premium design and powerful features of OpenNotes:
+Experience the premium design and powerful features of YourNotes:
 
 <table align="center">
   <tr>
     <td align="center" width="50%">
-      <img src="gallery/ON1.jpg" width="100%">
+      <img src="gallery/YN1_dashboard.png" width="100%">
       <br>
       <b>Dashboard & Overview</b><br>
-      <i>Get a bird's-eye view of your daily tasks, recent notes, and ongoing projects.</i>
+      <i>Get a bird's-eye view of your notes and projects, with a graph map of links.</i>
     </td>
     <td align="center" width="50%">
-      <img src="gallery/ON2.jpg" width="100%">
+      <img src="gallery/YN2_session.png" width="100%">
       <br>
-      <b>Project & Task Tracker</b><br>
-      <i>Organize your workflow with structured kanban boards and actionable to-do lists.</i>
+      <b>Session + Lofi Player</b><br>
+      <i>Focus timer, daily log, expenses, and a royalty-free lofi music player.</i>
     </td>
   </tr>
   <tr>
     <td align="center">
-      <img src="gallery/ON3.jpg" width="100%">
+      <img src="gallery/YN3_tasks.png" width="100%">
+      <br>
+      <b>Tasks, Calendar & Habits</b><br>
+      <i>Plan deadlines, track habits and goals, and manage projects in one place.</i>
+    </td>
+    <td align="center">
+      <img src="gallery/YN4_settings.png" width="100%">
+      <br>
+      <b>Settings</b><br>
+      <i>Language (EN/AR/ZH/MS), °F/°C toggle, every world currency, and themes.</i>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="gallery/YN5_college.png" width="100%">
       <br>
       <b>College Notes Organizer</b><br>
-      <i>Sort and manage your academic materials effortlessly using subject folders.</i>
+      <i>Sort and manage your academic PDFs and notes using subject folders.</i>
     </td>
     <td align="center">
-      <img src="gallery/ON4.jpg" width="100%">
-      <br>
-      <b>PDF Document Viewer</b><br>
-      <i>Read and review your PDF textbooks and lecture slides seamlessly.</i>
-    </td>
-  </tr>
-  <tr>
-    <td align="center">
-      <img src="gallery/ON5.jpg" width="100%">
-      <br>
-      <b>Rich Text Editor</b><br>
-      <i>Format your text beautifully with our built-in premium rich text tools.</i>
-    </td>
-    <td align="center">
-      <img src="gallery/ON6.jpg" width="100%">
-      <br>
-      <b>Fullscreen Experience</b><br>
-      <i>Eliminate distractions and immerse yourself completely in your reading or writing.</i>
-    </td>
-  </tr>
-  <tr>
-    <td align="center">
-      <img src="gallery/ON7.jpg" width="100%">
+      <img src="gallery/YN6_dark.png" width="100%">
       <br>
       <b>Dark Mode</b><br>
       <i>A sleek, high-contrast dark theme designed to reduce eye strain.</i>
-    </td>
-    <td align="center">
-      <img src="gallery/ON8.jpg" width="100%">
-      <br>
-      <b>Light Mode</b><br>
-      <i>A clean, vibrant light theme for an energizing daytime workspace.</i>
     </td>
   </tr>
 </table>
@@ -94,7 +86,7 @@ Go to the [Releases](../../releases) page to download the latest version. Depend
 * **`.pacman`**: Download this if you are using **Arch Linux, Manjaro**, or EndeavourOS.
 
 ### 🪟 Windows Users
-* **`.exe` (Setup / Installer)**: Download this standard installer. Double-click it to install OpenNotes on your Windows PC.
+* **`.exe` (Setup / Installer)**: Download this standard installer. Double-click it to install YourNotes on your Windows PC. Build it yourself with `npm run package`.
 
 ### 🍎 macOS Users
 * **`.zip` (macOS)**: Download and extract this file to get the macOS application. Drag it to your Applications folder.

@@ -244,7 +244,7 @@ function init() {
   if (notes.length === 0) {
     const newNote = {
       id: Date.now().toString(),
-      title: 'Welcome to OpenNotes',
+      title: 'Welcome to YourNotes',
       body: 'This is your first note. Start typing...',
       createdAt: Date.now(),
       updatedAt: Date.now()
@@ -806,6 +806,15 @@ window.showPanel = function(panelId, btnId) {
     const btn = document.getElementById(btnId);
     if (btn) btn.classList.add('active');
   }
+};
+
+// Unified "Back" target for every panel — returns to the Projects/dashboard grid
+window.goToDashboard = function() {
+  setActiveNote(null);
+  currentHomeView = 'grid';
+  showPanel('home-grid', 'nav-projects-btn');
+  const g = document.getElementById('view-grid-btn');
+  if (g) g.classList.add('active');
 };
 
 window.toggleDashboardBanner = function(e) {
@@ -2471,51 +2480,66 @@ window.saveSettings = function() {
   const desig = document.getElementById('settings-designation').value.trim();
   const theme = document.getElementById('settings-theme').value;
   const currency = document.getElementById('settings-currency').value;
-  
+  const language = document.getElementById('settings-language').value;
+  const tempUnit = document.getElementById('settings-temp-unit').value;
+
   if (name) localStorage.setItem('opennotes_profile_name', name);
   if (desig) localStorage.setItem('opennotes_profile_type', desig);
   localStorage.setItem('opennotes_theme', theme);
   localStorage.setItem('opennotes_currency', currency);
-  
+  localStorage.setItem('opennotes_language', language);
+  localStorage.setItem('opennotes_temp_unit', tempUnit);
+
   applySettings();
 };
 
 window.applySettings = function() {
-  const name = localStorage.getItem('opennotes_profile_name') || 'Amanda Smith';
-  const desig = localStorage.getItem('opennotes_profile_type') || 'Professional Account';
+  // Harmonize with onboarding keys (userName/userRole) so the name set during onboarding sticks.
+  const name = localStorage.getItem('opennotes_profile_name') || localStorage.getItem('userName') || 'Guest';
+  const desig = localStorage.getItem('opennotes_profile_type') || localStorage.getItem('userRole') || 'Job';
   const theme = localStorage.getItem('opennotes_theme') || 'light';
   const currency = localStorage.getItem('opennotes_currency') || '₹';
-  
+  const language = localStorage.getItem('opennotes_language') || 'en';
+  const tempUnit = localStorage.getItem('opennotes_temp_unit') || 'F';
+
   const nameEls = document.querySelectorAll('#sidebar-profile-name');
   const desigEls = document.querySelectorAll('#sidebar-profile-type');
-  
+
   nameEls.forEach(el => el.textContent = name);
   desigEls.forEach(el => el.textContent = desig);
-  
+
   const bannerNameText = document.getElementById('banner-name-text');
   const bannerRoleText = document.getElementById('banner-role-text');
   if (bannerNameText) bannerNameText.textContent = `${name}.`;
   if (bannerRoleText) bannerRoleText.textContent = desig;
-  
+
   if (theme === 'dark') {
     document.body.classList.add('theme-dark');
   } else {
     document.body.classList.remove('theme-dark');
   }
-  
+
+  populateCurrencies(currency);
+
   const nameInput = document.getElementById('settings-name');
   const desigInput = document.getElementById('settings-designation');
   const themeInput = document.getElementById('settings-theme');
   const currencyInput = document.getElementById('settings-currency');
-  
+  const languageInput = document.getElementById('settings-language');
+  const tempInput = document.getElementById('settings-temp-unit');
+
   if (nameInput) nameInput.value = name;
   if (desigInput) desigInput.value = desig;
   if (themeInput) themeInput.value = theme;
   if (currencyInput) currencyInput.value = currency;
+  if (languageInput) languageInput.value = language;
+  if (tempInput) tempInput.value = tempUnit;
 
   const newExpenseAmount = document.getElementById('new-expense-amount');
   if (newExpenseAmount) newExpenseAmount.placeholder = `Amount (${currency})`;
 
+  applyLanguage(language);
+  updateAmbientTemp();
   updateExpenseTotal();
   renderExpenses();
 };
@@ -2542,75 +2566,242 @@ window.resetEverything = function() {
   };
 };
 
+// -----------------------------------------
+// Currencies (ISO 4217 — full active list)
+// value = the symbol used to prefix amounts; label shows name + code + symbol
+// -----------------------------------------
+const CURRENCIES = [
+  ['AED','UAE Dirham','د.إ'],['AFN','Afghan Afghani','؋'],['ALL','Albanian Lek','L'],['AMD','Armenian Dram','֏'],
+  ['ANG','Netherlands Antillean Guilder','ƒ'],['AOA','Angolan Kwanza','Kz'],['ARS','Argentine Peso','$'],['AUD','Australian Dollar','A$'],
+  ['AWG','Aruban Florin','ƒ'],['AZN','Azerbaijani Manat','₼'],['BAM','Bosnia-Herzegovina Mark','KM'],['BBD','Barbadian Dollar','Bds$'],
+  ['BDT','Bangladeshi Taka','৳'],['BGN','Bulgarian Lev','лв'],['BHD','Bahraini Dinar','.د.ب'],['BIF','Burundian Franc','FBu'],
+  ['BMD','Bermudan Dollar','$'],['BND','Brunei Dollar','B$'],['BOB','Bolivian Boliviano','Bs.'],['BRL','Brazilian Real','R$'],
+  ['BSD','Bahamian Dollar','$'],['BTN','Bhutanese Ngultrum','Nu.'],['BWP','Botswanan Pula','P'],['BYN','Belarusian Ruble','Br'],
+  ['BZD','Belize Dollar','BZ$'],['CAD','Canadian Dollar','C$'],['CDF','Congolese Franc','FC'],['CHF','Swiss Franc','CHF'],
+  ['CLP','Chilean Peso','$'],['CNY','Chinese Yuan','¥'],['COP','Colombian Peso','$'],['CRC','Costa Rican Colón','₡'],
+  ['CUP','Cuban Peso','$'],['CVE','Cape Verdean Escudo','$'],['CZK','Czech Koruna','Kč'],['DJF','Djiboutian Franc','Fdj'],
+  ['DKK','Danish Krone','kr'],['DOP','Dominican Peso','RD$'],['DZD','Algerian Dinar','دج'],['EGP','Egyptian Pound','£'],
+  ['ERN','Eritrean Nakfa','Nfk'],['ETB','Ethiopian Birr','Br'],['EUR','Euro','€'],['FJD','Fijian Dollar','FJ$'],
+  ['FKP','Falkland Islands Pound','£'],['GBP','British Pound','£'],['GEL','Georgian Lari','₾'],['GHS','Ghanaian Cedi','₵'],
+  ['GIP','Gibraltar Pound','£'],['GMD','Gambian Dalasi','D'],['GNF','Guinean Franc','FG'],['GTQ','Guatemalan Quetzal','Q'],
+  ['GYD','Guyanaese Dollar','G$'],['HKD','Hong Kong Dollar','HK$'],['HNL','Honduran Lempira','L'],['HRK','Croatian Kuna','kn'],
+  ['HTG','Haitian Gourde','G'],['HUF','Hungarian Forint','Ft'],['IDR','Indonesian Rupiah','Rp'],['ILS','Israeli New Shekel','₪'],
+  ['INR','Indian Rupee','₹'],['IQD','Iraqi Dinar','ع.د'],['IRR','Iranian Rial','﷼'],['ISK','Icelandic Króna','kr'],
+  ['JMD','Jamaican Dollar','J$'],['JOD','Jordanian Dinar','د.ا'],['JPY','Japanese Yen','¥'],['KES','Kenyan Shilling','KSh'],
+  ['KGS','Kyrgystani Som','с'],['KHR','Cambodian Riel','៛'],['KMF','Comorian Franc','CF'],['KPW','North Korean Won','₩'],
+  ['KRW','South Korean Won','₩'],['KWD','Kuwaiti Dinar','د.ك'],['KYD','Cayman Islands Dollar','$'],['KZT','Kazakhstani Tenge','₸'],
+  ['LAK','Laotian Kip','₭'],['LBP','Lebanese Pound','ل.ل'],['LKR','Sri Lankan Rupee','Rs'],['LRD','Liberian Dollar','L$'],
+  ['LSL','Lesotho Loti','L'],['LYD','Libyan Dinar','ل.د'],['MAD','Moroccan Dirham','د.م.'],['MDL','Moldovan Leu','L'],
+  ['MGA','Malagasy Ariary','Ar'],['MKD','Macedonian Denar','ден'],['MMK','Myanmar Kyat','K'],['MNT','Mongolian Tugrik','₮'],
+  ['MOP','Macanese Pataca','MOP$'],['MRU','Mauritanian Ouguiya','UM'],['MUR','Mauritian Rupee','₨'],['MVR','Maldivian Rufiyaa','Rf'],
+  ['MWK','Malawian Kwacha','MK'],['MXN','Mexican Peso','$'],['MYR','Malaysian Ringgit','RM'],['MZN','Mozambican Metical','MT'],
+  ['NAD','Namibian Dollar','N$'],['NGN','Nigerian Naira','₦'],['NIO','Nicaraguan Córdoba','C$'],['NOK','Norwegian Krone','kr'],
+  ['NPR','Nepalese Rupee','₨'],['NZD','New Zealand Dollar','NZ$'],['OMR','Omani Rial','ر.ع.'],['PAB','Panamanian Balboa','B/.'],
+  ['PEN','Peruvian Sol','S/'],['PGK','Papua New Guinean Kina','K'],['PHP','Philippine Peso','₱'],['PKR','Pakistani Rupee','₨'],
+  ['PLN','Polish Zloty','zł'],['PYG','Paraguayan Guarani','₲'],['QAR','Qatari Rial','ر.ق'],['RON','Romanian Leu','lei'],
+  ['RSD','Serbian Dinar','дин.'],['RUB','Russian Ruble','₽'],['RWF','Rwandan Franc','FRw'],['SAR','Saudi Riyal','ر.س'],
+  ['SBD','Solomon Islands Dollar','SI$'],['SCR','Seychellois Rupee','₨'],['SDG','Sudanese Pound','ج.س.'],['SEK','Swedish Krona','kr'],
+  ['SGD','Singapore Dollar','S$'],['SHP','Saint Helena Pound','£'],['SLL','Sierra Leonean Leone','Le'],['SOS','Somali Shilling','Sh'],
+  ['SRD','Surinamese Dollar','$'],['SSP','South Sudanese Pound','£'],['STN','São Tomé Dobra','Db'],['SYP','Syrian Pound','£'],
+  ['SZL','Swazi Lilangeni','L'],['THB','Thai Baht','฿'],['TJS','Tajikistani Somoni','ЅМ'],['TMT','Turkmenistani Manat','m'],
+  ['TND','Tunisian Dinar','د.ت'],['TOP','Tongan Paʻanga','T$'],['TRY','Turkish Lira','₺'],['TTD','Trinidad & Tobago Dollar','TT$'],
+  ['TWD','New Taiwan Dollar','NT$'],['TZS','Tanzanian Shilling','TSh'],['UAH','Ukrainian Hryvnia','₴'],['UGX','Ugandan Shilling','USh'],
+  ['USD','US Dollar','$'],['UYU','Uruguayan Peso','$U'],['UZS','Uzbekistani Som','soʼm'],['VES','Venezuelan Bolívar','Bs.'],
+  ['VND','Vietnamese Dong','₫'],['VUV','Vanuatu Vatu','VT'],['WST','Samoan Tala','WS$'],['XAF','Central African CFA Franc','FCFA'],
+  ['XCD','East Caribbean Dollar','EC$'],['XOF','West African CFA Franc','CFA'],['XPF','CFP Franc','₣'],['YER','Yemeni Rial','﷼'],
+  ['ZAR','South African Rand','R'],['ZMW','Zambian Kwacha','ZK'],['ZWL','Zimbabwean Dollar','Z$']
+];
+
+function populateCurrencies(selected) {
+  const sel = document.getElementById('settings-currency');
+  if (!sel) return;
+  if (!sel.dataset.filled) {
+    const frag = document.createDocumentFragment();
+    CURRENCIES.forEach(([code, name, symbol]) => {
+      const opt = document.createElement('option');
+      opt.value = symbol;
+      opt.textContent = `${name} (${code}) ${symbol}`;
+      frag.appendChild(opt);
+    });
+    sel.appendChild(frag);
+    sel.dataset.filled = '1';
+  }
+  if (selected) sel.value = selected;
+}
+
+// -----------------------------------------
+// i18n — translates the visible UI chrome.
+// ponytail: covers static chrome (nav, onboarding, settings, panel headers, back buttons).
+// JS-generated text (alerts, toasts, dynamic lists) and user note content stay as-is — that is
+// the known ceiling; extend the dictionaries + add data-i18n hooks to widen coverage.
+// -----------------------------------------
+const translations = {
+  en: {
+    'common.back':'Back',
+    'onboarding.welcome':'Welcome to YourNotes','onboarding.subtitle':"Let's set up your personal workspace.",
+    'onboarding.name_q':"What's your name?",'onboarding.name_ph':'e.g. John Doe',
+    'onboarding.job_q':"What's your job?",'onboarding.job_ph':'e.g. Software Engineer','onboarding.enter':'Enter Workspace',
+    'nav.workspace':'Workspace','nav.dashboard':'Dashboard','nav.projects':'Projects','nav.tasks':'Tasks',
+    'nav.session':'Session','nav.scratchpad':'Scratchpad','nav.college':'College Notes','nav.quicklinks':'Quicklinks',
+    'nav.add_link':'Add Link','nav.settings':'Settings',
+    'session.title':'Dashboard Session','session.subtitle':'Focus, log, and track your daily rhythm.',
+    'session.focus':'Focus Session','session.focus_sub':'Deep work in progress',
+    'session.lofi':'Lofi Music','session.lofi_sub':'Royalty-free focus beats','session.lofi_load':'Load your own track',
+    'scratchpad.title':'Scratchpad','scratchpad.saving':'Auto-saving...',
+    'settings.title':'Settings','settings.subtitle':'Manage your preferences','settings.name':'Your Name','settings.job':'Job',
+    'settings.job_ph':'e.g. Software Engineer','settings.language':'Language','settings.theme':'Theme',
+    'settings.theme_light':'Day (Light)','settings.theme_dark':'Night (Dark)','settings.temp_unit':'Temperature Unit',
+    'settings.currency':'Currency','settings.reset':'⚠️ Factory Reset','settings.reset_note':'This will permanently delete all data.',
+    'college.title':'College Notes','college.subtitle':'Organize your college lectures, curriculum, and study PDF notes.',
+    'tasks.menu':'Tasks Menu'
+  },
+  ar: {
+    'common.back':'رجوع',
+    'onboarding.welcome':'مرحبًا بك في YourNotes','onboarding.subtitle':'لنُجهّز مساحة عملك الشخصية.',
+    'onboarding.name_q':'ما اسمك؟','onboarding.name_ph':'مثال: محمد أحمد',
+    'onboarding.job_q':'ما هي وظيفتك؟','onboarding.job_ph':'مثال: مهندس برمجيات','onboarding.enter':'ادخل إلى مساحة العمل',
+    'nav.workspace':'مساحة العمل','nav.dashboard':'لوحة التحكم','nav.projects':'المشاريع','nav.tasks':'المهام',
+    'nav.session':'الجلسة','nav.scratchpad':'المسودة','nav.college':'ملاحظات الكلية','nav.quicklinks':'روابط سريعة',
+    'nav.add_link':'إضافة رابط','nav.settings':'الإعدادات',
+    'session.title':'جلسة لوحة التحكم','session.subtitle':'ركّز وسجّل وتابع إيقاع يومك.',
+    'session.focus':'جلسة تركيز','session.focus_sub':'عمل عميق قيد التنفيذ',
+    'session.lofi':'موسيقى لو-فاي','session.lofi_sub':'إيقاعات تركيز خالية من حقوق الملكية','session.lofi_load':'حمّل مقطعك الخاص',
+    'scratchpad.title':'المسودة','scratchpad.saving':'جارٍ الحفظ التلقائي...',
+    'settings.title':'الإعدادات','settings.subtitle':'إدارة تفضيلاتك','settings.name':'اسمك','settings.job':'الوظيفة',
+    'settings.job_ph':'مثال: مهندس برمجيات','settings.language':'اللغة','settings.theme':'المظهر',
+    'settings.theme_light':'نهاري (فاتح)','settings.theme_dark':'ليلي (داكن)','settings.temp_unit':'وحدة الحرارة',
+    'settings.currency':'العملة','settings.reset':'⚠️ إعادة ضبط المصنع','settings.reset_note':'سيؤدي هذا إلى حذف جميع البيانات نهائيًا.',
+    'college.title':'ملاحظات الكلية','college.subtitle':'نظّم محاضرات كليتك ومناهجك وملاحظات الدراسة بصيغة PDF.',
+    'tasks.menu':'قائمة المهام'
+  },
+  zh: {
+    'common.back':'返回',
+    'onboarding.welcome':'欢迎使用 YourNotes','onboarding.subtitle':'让我们设置你的个人工作区。',
+    'onboarding.name_q':'你叫什么名字？','onboarding.name_ph':'例如：张伟',
+    'onboarding.job_q':'你的职业是什么？','onboarding.job_ph':'例如：软件工程师','onboarding.enter':'进入工作区',
+    'nav.workspace':'工作区','nav.dashboard':'仪表板','nav.projects':'项目','nav.tasks':'任务',
+    'nav.session':'专注','nav.scratchpad':'便签','nav.college':'课堂笔记','nav.quicklinks':'快捷链接',
+    'nav.add_link':'添加链接','nav.settings':'设置',
+    'session.title':'仪表板专注','session.subtitle':'专注、记录并跟踪你的日常节奏。',
+    'session.focus':'专注时段','session.focus_sub':'深度工作进行中',
+    'session.lofi':'Lofi 音乐','session.lofi_sub':'可商用的专注节拍','session.lofi_load':'加载你自己的音轨',
+    'scratchpad.title':'便签','scratchpad.saving':'自动保存中...',
+    'settings.title':'设置','settings.subtitle':'管理你的偏好','settings.name':'你的名字','settings.job':'职业',
+    'settings.job_ph':'例如：软件工程师','settings.language':'语言','settings.theme':'主题',
+    'settings.theme_light':'白天（浅色）','settings.theme_dark':'夜间（深色）','settings.temp_unit':'温度单位',
+    'settings.currency':'货币','settings.reset':'⚠️ 恢复出厂设置','settings.reset_note':'这将永久删除所有数据。',
+    'college.title':'课堂笔记','college.subtitle':'整理你的大学讲座、课程和学习 PDF 笔记。',
+    'tasks.menu':'任务菜单'
+  },
+  ms: {
+    'common.back':'Kembali',
+    'onboarding.welcome':'Selamat datang ke YourNotes','onboarding.subtitle':'Mari sediakan ruang kerja peribadi anda.',
+    'onboarding.name_q':'Siapa nama anda?','onboarding.name_ph':'cth. Ahmad bin Ali',
+    'onboarding.job_q':'Apakah pekerjaan anda?','onboarding.job_ph':'cth. Jurutera Perisian','onboarding.enter':'Masuk Ruang Kerja',
+    'nav.workspace':'Ruang Kerja','nav.dashboard':'Papan Pemuka','nav.projects':'Projek','nav.tasks':'Tugasan',
+    'nav.session':'Sesi','nav.scratchpad':'Buku Nota','nav.college':'Nota Kolej','nav.quicklinks':'Pautan Pantas',
+    'nav.add_link':'Tambah Pautan','nav.settings':'Tetapan',
+    'session.title':'Sesi Papan Pemuka','session.subtitle':'Fokus, log, dan jejaki rutin harian anda.',
+    'session.focus':'Sesi Fokus','session.focus_sub':'Kerja mendalam sedang berjalan',
+    'session.lofi':'Muzik Lofi','session.lofi_sub':'Rentak fokus bebas royalti','session.lofi_load':'Muat trek anda sendiri',
+    'scratchpad.title':'Buku Nota','scratchpad.saving':'Menyimpan automatik...',
+    'settings.title':'Tetapan','settings.subtitle':'Urus pilihan anda','settings.name':'Nama Anda','settings.job':'Pekerjaan',
+    'settings.job_ph':'cth. Jurutera Perisian','settings.language':'Bahasa','settings.theme':'Tema',
+    'settings.theme_light':'Siang (Cerah)','settings.theme_dark':'Malam (Gelap)','settings.temp_unit':'Unit Suhu',
+    'settings.currency':'Mata Wang','settings.reset':'⚠️ Set Semula Kilang','settings.reset_note':'Ini akan memadam semua data secara kekal.',
+    'college.title':'Nota Kolej','college.subtitle':'Susun kuliah, kurikulum dan nota PDF pembelajaran kolej anda.',
+    'tasks.menu':'Menu Tugasan'
+  }
+};
+
+function applyLanguage(lang) {
+  const dict = translations[lang] || translations.en;
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    if (dict[key] != null) el.textContent = dict[key];
+  });
+  document.querySelectorAll('[data-i18n-ph]').forEach(el => {
+    const key = el.getAttribute('data-i18n-ph');
+    if (dict[key] != null) el.setAttribute('placeholder', dict[key]);
+  });
+  document.documentElement.lang = lang;
+  document.documentElement.dir = (lang === 'ar') ? 'rtl' : 'ltr';
+}
+
+// -----------------------------------------
+// Ambient temperature (F/C). No live weather feed exists — 72°F is the original
+// placeholder; we just convert the fixed base to the chosen unit.
+// -----------------------------------------
+function updateAmbientTemp() {
+  const el = document.getElementById('ambient-temp');
+  if (!el) return;
+  const unit = localStorage.getItem('opennotes_temp_unit') || 'F';
+  const baseF = 72;
+  el.textContent = unit === 'C' ? `${Math.round((baseF - 32) * 5 / 9)}°C` : `${baseF}°F`;
+}
+
+// -----------------------------------------
+// Lofi player (beside Focus Session)
+// -----------------------------------------
+let lofiPlaying = false;
+function lofiEl() { return document.getElementById('lofi-audio'); }
+function lofiVol() { const v = document.getElementById('lofi-volume'); return v ? parseFloat(v.value) : 0.6; }
+
+function setLofiIcon(playing) {
+  const btn = document.getElementById('lofi-toggle');
+  if (!btn) return;
+  btn.innerHTML = playing
+    ? '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>'
+    : '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>';
+}
+
+window.toggleLofi = function() {
+  const audio = lofiEl();
+  const sel = document.getElementById('lofi-track');
+  if (!audio) return;
+  if (!audio.src && sel) audio.src = sel.value;
+  if (audio.paused) {
+    audio.volume = lofiVol();
+    audio.play().then(() => { lofiPlaying = true; setLofiIcon(true); })
+      .catch(() => alert('Could not play this track. Check your connection, or use "Load your own track".'));
+  } else {
+    audio.pause();
+    lofiPlaying = false;
+    setLofiIcon(false);
+  }
+};
+
+window.changeLofiTrack = function() {
+  const sel = document.getElementById('lofi-track');
+  const audio = lofiEl();
+  if (!sel || !audio) return;
+  audio.src = sel.value;
+  const np = document.getElementById('lofi-now-playing');
+  if (np) np.textContent = sel.options[sel.selectedIndex].text;
+  if (lofiPlaying) { audio.volume = lofiVol(); audio.play().catch(() => {}); }
+};
+
+window.setLofiVolume = function(v) { const a = lofiEl(); if (a) a.volume = parseFloat(v); };
+
+window.loadLofiFile = function(e) {
+  const file = e.target.files[0];
+  const audio = lofiEl();
+  if (!file || !audio) return;
+  audio.src = URL.createObjectURL(file);
+  const np = document.getElementById('lofi-now-playing');
+  if (np) np.textContent = file.name;
+  audio.volume = lofiVol();
+  audio.play().then(() => { lofiPlaying = true; setLofiIcon(true); }).catch(() => {});
+};
+
 // Initial load
 applySettings();
 
 // -----------------------------------------
-// MPRIS Integration & Notch Clock
+// Native menu: File > New Note
 // -----------------------------------------
-function updateIslandClock() {
-  const clockEl = document.getElementById('island-clock-time');
-  if (clockEl) {
-    const now = new Date();
-    clockEl.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  }
-}
-setInterval(updateIslandClock, 1000);
-updateIslandClock();
-
-if (window.electronAPI && window.electronAPI.onMprisUpdate) {
-  window.electronAPI.onMprisUpdate((data) => {
-    const island = document.getElementById('dynamic-island');
-    const titleEl = document.getElementById('mpris-title');
-    const artistEl = document.getElementById('mpris-artist');
-    const statusEl = document.getElementById('mpris-status');
-    
-    if (data.status === 'Stopped') {
-      if (island) {
-        island.classList.remove('state-music');
-        island.classList.add('state-time');
-      }
-      return;
-    }
-    
-    if (island) {
-      island.classList.remove('state-time');
-      island.classList.add('state-music');
-    }
-    
-    if (titleEl) titleEl.textContent = data.title || 'Unknown Title';
-    if (artistEl) artistEl.textContent = data.artist || 'Unknown Artist';
-    
-    if (statusEl) {
-      const playBtn = document.getElementById('mpris-play-btn');
-      if (data.status === 'Playing') {
-        statusEl.innerHTML = '<div style="display:flex;gap:2px;align-items:flex-end;height:12px;"><div style="width:3px;height:100%;background:currentColor;animation:pulse 1s infinite"></div><div style="width:3px;height:60%;background:currentColor;animation:pulse 1s infinite 0.2s"></div><div style="width:3px;height:80%;background:currentColor;animation:pulse 1s infinite 0.4s"></div></div>';
-        if (playBtn) playBtn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="currentColor"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>';
-      } else {
-        statusEl.textContent = 'PAUSED';
-        if (playBtn) playBtn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>';
-      }
-    }
-  });
-
-  // Request the initial state in case music is already playing
-  window.electronAPI.requestMprisState();
-
-  // Attach control listeners securely
-  const bindControls = () => {
-    const prev = document.getElementById('mpris-prev-btn');
-    const play = document.getElementById('mpris-play-btn');
-    const next = document.getElementById('mpris-next-btn');
-    
-    if (prev && play && next) {
-      prev.onclick = () => window.electronAPI.mprisControl('Previous');
-      play.onclick = () => window.electronAPI.mprisControl('PlayPause');
-      next.onclick = () => window.electronAPI.mprisControl('Next');
-    } else {
-      setTimeout(bindControls, 500);
-    }
-  };
-  bindControls();
+if (window.electronAPI && window.electronAPI.onNewNote) {
+  window.electronAPI.onNewNote(() => createNote());
 }
 
 // -----------------------------------------

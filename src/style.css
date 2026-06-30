@@ -1170,6 +1170,7 @@ body {
 .tasks-row {
   display: flex;
   flex-direction: row;
+  flex-wrap: wrap;
   gap: 40px;
 }
 
@@ -2166,195 +2167,33 @@ body {
   100% { transform: translate(-200px, -100px) scale(1.1); }
 }
 
-/* Dynamic Island */
-.dynamic-island {
-  position: fixed;
-  top: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  background: #121314;
-  color: #fff;
-  border-bottom-left-radius: 20px;
-  border-bottom-right-radius: 20px;
-  z-index: 10000;
-  transition: width 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), height 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.5s, filter 0.4s ease;
-  box-shadow: 0 20px 40px rgba(0,0,0,0.4);
-}
-
-.island-inner {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  border-bottom-left-radius: 20px;
-  border-bottom-right-radius: 20px;
-}
-
-/* Time State (Collapsed) */
-.dynamic-island.state-time {
-  width: 140px;
-  height: 36px;
-}
-
-/* Music State (Expanded) */
-.dynamic-island.state-music {
-  width: 320px;
-  height: 60px;
-}
-
-/* Hover State (Music Expanded with Controls) */
-.dynamic-island.state-music:hover {
-  height: 110px;
-}
-
-/* Inner views */
-.island-time-view {
-  position: absolute;
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--text-secondary);
-  transition: all 0.4s;
-  opacity: 1;
-  pointer-events: none;
-}
-
-.dynamic-island.state-music .island-time-view {
-  opacity: 0;
-  transform: translateY(-20px);
-}
-
-.island-music-view {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  height: 100%;
-  padding: 12px 20px;
-  opacity: 0;
-  pointer-events: none;
-  transition: all 0.4s;
-  transform: translateY(20px);
-  box-sizing: border-box;
-}
-
-.dynamic-island.state-music .island-music-view {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translateY(0);
-}
-
-.island-main {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  width: 100%;
-}
-
-.island-controls {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 32px;
-  margin-top: 16px;
-  opacity: 0;
-  transition: opacity 0.3s;
-}
-
-.dynamic-island.state-music:hover .island-controls {
-  opacity: 1;
-}
-
-.island-btn {
-  background: transparent;
+/* Unified panel back button (shared across all pages) */
+.panel-back-btn {
+  align-self: flex-start;
+  background: var(--overlay-medium);
   border: none;
-  color: #fff;
-  cursor: pointer;
-  opacity: 0.7;
-  transition: all 0.2s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.island-btn:hover {
-  opacity: 1;
-  transform: scale(1.1);
-  color: var(--accent-color);
-}
-
-/* Inverted curves for the top ceiling attachment */
-.dynamic-island::before,
-.dynamic-island::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  width: 16px;
-  height: 16px;
-  pointer-events: none;
-}
-
-.dynamic-island::before {
-  left: -16px;
-  background: radial-gradient(circle at 0 100%, transparent 15.5px, #121314 16px);
-}
-
-.dynamic-island::after {
-  right: -16px;
-  background: radial-gradient(circle at 100% 100%, transparent 15.5px, #121314 16px);
-}
-
-.dynamic-island.hidden {
-  top: -100px;
-  opacity: 0;
-  transform: translateX(-50%);
-  pointer-events: none;
-}
-
-.island-icon {
-  color: var(--accent-color);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  animation: float-pulse 3s infinite ease-in-out;
-}
-
-@keyframes float-pulse {
-  0% { transform: scale(1); opacity: 0.8; }
-  50% { transform: scale(1.1); opacity: 1; }
-  100% { transform: scale(1); opacity: 0.8; }
-}
-
-.island-content {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-.island-title {
-  font-size: 0.95rem;
+  padding: 10px 16px;
+  border-radius: 20px;
+  font-family: inherit;
   font-weight: 600;
-  text-overflow: ellipsis;
-  overflow: hidden;
-  letter-spacing: -0.2px;
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
 }
 
-.island-artist {
-  font-size: 0.8rem;
-  color: rgba(255, 255, 255, 0.6);
-  text-overflow: ellipsis;
-  overflow: hidden;
+.panel-back-btn:hover {
+  background: var(--overlay-heavy);
+  color: var(--text-primary);
 }
 
-.island-status {
-  font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  color: var(--accent-color);
+/* RTL support (Arabic) */
+[dir="rtl"] .panel-back-btn svg,
+[dir="rtl"] .back-btn svg {
+  transform: scaleX(-1);
 }
 
 /* --- Resize Overlay Logic --- */
@@ -2382,7 +2221,7 @@ body {
 }
 
 @media (max-width: 1000px), (max-height: 650px) {
-  #app, .dynamic-island {
+  #app {
     filter: blur(16px);
     pointer-events: none;
   }

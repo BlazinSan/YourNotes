@@ -1,7 +1,7 @@
 #!/bin/bash
 
 echo "========================================"
-echo "   🚀 Building OpenNotes All Platforms"
+echo "   🚀 Building YourNotes All Platforms"
 echo "========================================"
 
 # Step 1: Build the Vite frontend payload

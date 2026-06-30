@@ -1,6 +1,6 @@
 {
-  "desktopName": "opennotes.desktop",
-  "name": "opennotes",
+  "desktopName": "yournotes.desktop",
+  "name": "yournotes",
   "version": "0.0.0",
   "author": "rajsriv <raj2005sriv@gmail.com>",
   "homepage": "https://github.com/rajsriv/OpenNotes",
@@ -11,9 +11,10 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "electron": "wait-on tcp:5173 && VITE_DEV_SERVER_URL=http://localhost:5173 electron .",
+    "electron": "wait-on tcp:5173 && electron .",
     "electron:dev": "concurrently -k \"npm run dev\" \"npm run electron\"",
-    "package": "npm run build && electron-builder -l"
+    "package": "npm run build && electron-builder -w",
+    "package:linux": "npm run build && electron-builder -l"
   },
   "devDependencies": {
     "concurrently": "^10.0.3",
@@ -23,12 +24,11 @@
     "wait-on": "^9.0.10"
   },
   "dependencies": {
-    "dbus-next": "^0.10.2",
     "marked": "^18.0.5"
   },
   "build": {
-    "appId": "com.raj.opennotes",
-    "productName": "OpenNotes",
+    "appId": "com.raj.yournotes",
+    "productName": "YourNotes",
     "directories": {
       "output": "release"
     },
@@ -53,7 +53,7 @@
       "category": "public.app-category.productivity"
     },
     "linux": {
-      "executableName": "opennotes",
+      "executableName": "yournotes",
       "icon": "build/icons",
       "target": [
         "AppImage",
@@ -65,8 +65,8 @@
       "syncDesktopName": true,
       "desktop": {
         "entry": {
-          "StartupWMClass": "opennotes",
-          "Icon": "/usr/share/icons/hicolor/512x512/apps/opennotes.png"
+          "StartupWMClass": "yournotes",
+          "Icon": "/usr/share/icons/hicolor/512x512/apps/yournotes.png"
         }
       }
     },

@@ -2,9 +2,13 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- CSP: blocks remote/injected scripts & framing. 'unsafe-inline' is required because the
+         app uses inline event handlers/styles throughout (ponytail: rewriting all of them is out of
+         scope; the meta CSP + Electron contextIsolation are the defense-in-depth ceiling here). -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; connect-src 'self' https:; object-src 'none'; base-uri 'none'; frame-src 'self' data: blob:" />
     <link rel="icon" type="image/png" href="/icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>OpenNotes</title>
+    <title>YourNotes</title>
     <!-- Google Fonts: Inter -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -15,53 +19,20 @@
     <!-- Onboarding Overlay -->
     <div id="onboarding-overlay" class="onboarding-overlay" style="display: none;">
       <div class="onboarding-card">
-        <h2>Welcome to OpenNotes</h2>
-        <p>Let's set up your personal workspace.</p>
-        
-        <div class="onboarding-input-group">
-          <label for="onboarding-name">What's your name?</label>
-          <input type="text" id="onboarding-name" placeholder="e.g. John Doe" />
-        </div>
-        
-        <div class="onboarding-input-group">
-          <label for="onboarding-role">What do you do?</label>
-          <input type="text" id="onboarding-role" placeholder="e.g. Software Engineer" />
-        </div>
-        
-        <button id="onboarding-submit" class="onboarding-btn">Enter Workspace</button>
-      </div>
-    </div>
+        <h2 data-i18n="onboarding.welcome">Welcome to YourNotes</h2>
+        <p data-i18n="onboarding.subtitle">Let's set up your personal workspace.</p>
 
-    <div id="dynamic-island" class="dynamic-island state-time">
-      <div class="island-inner">
-        <!-- Time View -->
-        <div class="island-time-view" id="island-clock-time">12:00 PM</div>
-
-        <!-- Music View -->
-        <div class="island-music-view">
-          <div class="island-main">
-            <div class="island-icon">
-              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><circle cx="5.5" cy="17.5" r="2.5"></circle><circle cx="17.5" cy="15.5" r="2.5"></circle><path d="M8 17V5l12-2v12"></path></svg>
-            </div>
-            <div class="island-content">
-              <div id="mpris-title" class="island-title">Not Playing</div>
-              <div id="mpris-artist" class="island-artist">--</div>
-            </div>
-            <div id="mpris-status" class="island-status"></div>
-          </div>
-          
-          <div class="island-controls">
-            <button class="island-btn" id="mpris-prev-btn">
-              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><polygon points="19 20 9 12 19 4 19 20"></polygon><line x1="5" y1="19" x2="5" y2="5"></line></svg>
-            </button>
-            <button class="island-btn" id="mpris-play-btn">
-              <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-            </button>
-            <button class="island-btn" id="mpris-next-btn">
-              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" y1="5" x2="19" y2="19"></line></svg>
-            </button>
-          </div>
+        <div class="onboarding-input-group">
+          <label for="onboarding-name" data-i18n="onboarding.name_q">What's your name?</label>
+          <input type="text" id="onboarding-name" placeholder="e.g. John Doe" data-i18n-ph="onboarding.name_ph" />
         </div>
+
+        <div class="onboarding-input-group">
+          <label for="onboarding-role" data-i18n="onboarding.job_q">What's your job?</label>
+          <input type="text" id="onboarding-role" placeholder="e.g. Software Engineer" data-i18n-ph="onboarding.job_ph" />
+        </div>
+
+        <button id="onboarding-submit" class="onboarding-btn" data-i18n="onboarding.enter">Enter Workspace</button>
       </div>
     </div>
 
@@ -72,7 +43,7 @@
           <!-- Dashboard Sidebar (Home Page Only) -->
           <div class="dashboard-only" style="display: flex; flex-direction: column; height: 100%;">
             <div class="sidebar-brand">
-              <h1>OpenNotes</h1>
+              <h1>YourNotes</h1>
             </div>
             
             <div class="sidebar-profile">
@@ -88,24 +59,24 @@
 
             <div class="sidebar-nav">
               <div class="nav-section">
-                <div class="nav-title">Workspace</div>
-                <a href="#" class="nav-link" id="nav-dashboard-btn" onclick="toggleDashboardBanner(); return false;"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg> Dashboard</a>
-                <a href="#" class="nav-link active" id="nav-projects-btn" onclick="document.getElementById('view-grid-btn').click(); return false;"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg> Projects</a>
-                <a href="#" class="nav-link" id="nav-tasks-btn" onclick="toggleTasksPanel(); return false;"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg> Tasks</a>
-                <a href="#" class="nav-link" id="nav-session-btn" onclick="showPanel('home-session', 'nav-session-btn'); return false;"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg> Session</a>
-                <a href="#" class="nav-link" id="nav-scratchpad-btn" onclick="showPanel('home-scratchpad', 'nav-scratchpad-btn'); return false;"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg> Scratchpad</a>
-                <a href="#" class="nav-link" id="nav-college-btn" onclick="toggleCollegePanel(); return false;"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M22 10v6M2 10l10-5 10 5-10 5z"></path><path d="M6 12v5c0 2 2 3 6 3s6-1 6-3v-5"></path></svg> College Notes</a>
+                <div class="nav-title" data-i18n="nav.workspace">Workspace</div>
+                <a href="#" class="nav-link" id="nav-dashboard-btn" onclick="toggleDashboardBanner(); return false;"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg> <span data-i18n="nav.dashboard">Dashboard</span></a>
+                <a href="#" class="nav-link active" id="nav-projects-btn" onclick="document.getElementById('view-grid-btn').click(); return false;"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg> <span data-i18n="nav.projects">Projects</span></a>
+                <a href="#" class="nav-link" id="nav-tasks-btn" onclick="toggleTasksPanel(); return false;"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg> <span data-i18n="nav.tasks">Tasks</span></a>
+                <a href="#" class="nav-link" id="nav-session-btn" onclick="showPanel('home-session', 'nav-session-btn'); return false;"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg> <span data-i18n="nav.session">Session</span></a>
+                <a href="#" class="nav-link" id="nav-scratchpad-btn" onclick="showPanel('home-scratchpad', 'nav-scratchpad-btn'); return false;"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg> <span data-i18n="nav.scratchpad">Scratchpad</span></a>
+                <a href="#" class="nav-link" id="nav-college-btn" onclick="toggleCollegePanel(); return false;"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M22 10v6M2 10l10-5 10 5-10 5z"></path><path d="M6 12v5c0 2 2 3 6 3s6-1 6-3v-5"></path></svg> <span data-i18n="nav.college">College Notes</span></a>
               </div>
-              
+
               <div class="nav-section" style="margin-top: 32px;">
                 <div class="nav-title" style="display: flex; justify-content: space-between; align-items: center;">
-                  Quicklinks
+                  <span data-i18n="nav.quicklinks">Quicklinks</span>
                   <button onclick="toggleQuicklinkForm()" style="background: none; border: none; color: var(--accent-color); cursor: pointer; font-size: 1.2rem; display: flex; align-items: center; justify-content: center; height: 16px;">+</button>
                 </div>
                 <div id="quicklink-form" style="display: none; flex-direction: column; gap: 8px; margin-bottom: 12px;">
                   <input type="text" id="new-quicklink-title" placeholder="Title (e.g. Figma)" style="padding: 6px 10px; border-radius: 6px; border: 1px solid var(--panel-border); font-family: inherit; font-size: 0.85rem; outline: none; background: transparent; color: var(--text-primary);" />
                   <input type="text" id="new-quicklink-url" placeholder="URL (e.g. figma.com)" style="padding: 6px 10px; border-radius: 6px; border: 1px solid var(--panel-border); font-family: inherit; font-size: 0.85rem; outline: none; background: transparent; color: var(--text-primary);" />
-                  <button onclick="saveNewQuicklink()" style="background: var(--accent-color); color: #fff; border: none; padding: 6px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.85rem;">Add Link</button>
+                  <button onclick="saveNewQuicklink()" style="background: var(--accent-color); color: #fff; border: none; padding: 6px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.85rem;" data-i18n="nav.add_link">Add Link</button>
                 </div>
                 <div id="quicklinks-container" style="display: flex; flex-direction: column; gap: 4px;">
                   <!-- JS injected quicklinks -->
@@ -116,7 +87,7 @@
             <div style="margin-top: auto; padding: 0 24px 24px 24px;">
               <a href="#" class="nav-link" id="nav-settings-btn" style="display: flex; gap: 12px; align-items: center; color: var(--text-secondary); text-decoration: none;" onclick="showPanel('home-settings', 'nav-settings-btn'); return false;">
                 <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
-                Settings
+                <span data-i18n="nav.settings">Settings</span>
               </a>
             </div>
           </div>
@@ -124,7 +95,7 @@
           <!-- Editor Sidebar (Editor Mode Only) -->
           <div class="editor-only" style="display: flex; flex-direction: column; height: 100%;">
             <div class="sidebar-header-old" style="padding: 24px 20px 16px; display: flex; justify-content: space-between; align-items: center;">
-              <h1 id="editor-home-btn" title="Return to Dashboard" style="cursor: pointer; font-size: 1.25rem; font-weight: 600; letter-spacing: -0.02em; background: linear-gradient(135deg, #4a3c31, #8c7a6b); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">OpenNotes</h1>
+              <h1 id="editor-home-btn" title="Return to Dashboard" style="cursor: pointer; font-size: 1.25rem; font-weight: 600; letter-spacing: -0.02em; background: linear-gradient(135deg, #4a3c31, #8c7a6b); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">YourNotes</h1>
               <button id="new-note-btn" class="glass-btn">
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
               </button>
@@ -181,9 +152,9 @@
               
               <div class="banner-text-overlay">
                 <div class="banner-text-top">
-                  <div class="banner-line-1">OpenNotes</div>
-                  <div class="banner-line-2">Dashboard</div>
-                  <div class="banner-line-3" id="banner-role-text">Professional Account</div>
+                  <div class="banner-line-1">YourNotes</div>
+                  <div class="banner-line-2" data-i18n="nav.dashboard">Dashboard</div>
+                  <div class="banner-line-3" id="banner-role-text">Job</div>
                 </div>
                 <div class="banner-text-bottom" id="banner-name-text">
                   Guest.
@@ -235,7 +206,8 @@
             <div class="home-tasks" id="home-tasks" style="display: none; height: 100%; flex-direction: row; gap: 0; padding: 0; background: var(--bg-color);">
               <!-- Tasks Inner Sidebar -->
               <div class="tasks-inner-sidebar" style="width: 220px; border-right: 1px solid var(--panel-border); display: flex; flex-direction: column; padding: 32px 16px; background: transparent;">
-                <div style="font-size: 0.75rem; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 16px 12px;">Tasks Menu</div>
+                <button class="panel-back-btn" onclick="goToDashboard()" style="margin: 0 0 20px 0;"><svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg> <span data-i18n="common.back">Back</span></button>
+                <div style="font-size: 0.75rem; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 16px 12px;" data-i18n="tasks.menu">Tasks Menu</div>
                 <a href="#" class="nav-link active" id="inner-nav-todo" onclick="showInnerTaskTab('todo'); return false;"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg> Todo & Calendar</a>
                 <a href="#" class="nav-link" id="inner-nav-habits" onclick="showInnerTaskTab('habits'); return false;"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg> Habit Tracker</a>
                 <a href="#" class="nav-link" id="inner-nav-goals" onclick="showInnerTaskTab('goals'); return false;"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg> Goals</a>
@@ -399,9 +371,10 @@
             
             <!-- Session Panel -->
             <div class="home-session" id="home-session" style="display: none; height: 100%; flex-direction: column; gap: 40px; overflow-y: auto; padding: 40px; background: var(--bg-color);">
+              <button class="panel-back-btn" onclick="goToDashboard()"><svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg> <span data-i18n="common.back">Back</span></button>
               <div class="tasks-header" style="margin-bottom: 0;">
-                <h3>Dashboard Session</h3>
-                <p style="color: var(--text-secondary); margin-top: 8px;">Focus, log, and track your daily rhythm.</p>
+                <h3 data-i18n="session.title">Dashboard Session</h3>
+                <p style="color: var(--text-secondary); margin-top: 8px;" data-i18n="session.subtitle">Focus, log, and track your daily rhythm.</p>
               </div>
               
               <div class="tasks-row" style="flex: none;">
@@ -411,15 +384,15 @@
                   <p id="ambient-date" style="font-size: 1.1rem; color: var(--text-secondary); font-weight: 500; margin-top: 8px;">Friday, October 24</p>
                   <div style="display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 16px; color: var(--accent-color);">
                     <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none"><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="M4.93 4.93l1.41 1.41"></path><path d="M17.66 17.66l1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="M4.93 19.07l1.41-1.41"></path><path d="M17.66 6.34l1.41-1.41"></path><circle cx="12" cy="12" r="5"></circle></svg>
-                    <span style="font-weight: 600; font-size: 1.2rem;">72°F</span>
+                    <span id="ambient-temp" style="font-weight: 600; font-size: 1.2rem;">72°F</span>
                   </div>
                 </div>
-                
+
                 <!-- Pomodoro Timer (1) -->
                 <div class="tool-section" style="flex: 1.5; min-height: 200px; display: flex; flex-direction: row; align-items: center; justify-content: space-between;">
                   <div style="display: flex; flex-direction: column;">
-                    <h4 style="font-size: 1.1rem; color: var(--text-primary); margin-bottom: 4px;">Focus Session</h4>
-                    <p style="color: var(--text-secondary); font-size: 0.9rem;">Deep work in progress</p>
+                    <h4 style="font-size: 1.1rem; color: var(--text-primary); margin-bottom: 4px;" data-i18n="session.focus">Focus Session</h4>
+                    <p style="color: var(--text-secondary); font-size: 0.9rem;" data-i18n="session.focus_sub">Deep work in progress</p>
                     <div style="margin-top: 24px; display: flex; gap: 12px;" id="pomodoro-buttons">
                       <button onclick="startPomodoro(25); updatePomodoroActive(this)" style="background: var(--text-primary); color: var(--bg-color); border: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; cursor: pointer;">25m</button>
                       <button onclick="startPomodoro(60); updatePomodoroActive(this)" style="background: var(--overlay-medium); color: var(--text-primary); border: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; cursor: pointer;">1 hr</button>
@@ -429,6 +402,31 @@
                   <div style="position: relative; width: 140px; height: 140px; border-radius: 50%; border: 8px solid var(--overlay-light); display: flex; align-items: center; justify-content: center; border-left-color: var(--accent-color); transform: rotate(-45deg);">
                     <div id="pomodoro-display" style="transform: rotate(45deg); font-size: 2rem; font-weight: 800; color: var(--accent-color);">25:00</div>
                   </div>
+                </div>
+
+                <!-- Lofi Music Player -->
+                <div class="tool-section" style="flex: 1.2; min-height: 200px; display: flex; flex-direction: column; justify-content: center; gap: 14px;">
+                  <h4 style="font-size: 1.1rem; color: var(--text-primary); display: flex; align-items: center; gap: 8px;">
+                    <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><circle cx="5.5" cy="17.5" r="2.5"></circle><circle cx="17.5" cy="15.5" r="2.5"></circle><path d="M8 17V5l12-2v12"></path></svg>
+                    <span data-i18n="session.lofi">Lofi Music</span>
+                  </h4>
+                  <p style="color: var(--text-secondary); font-size: 0.85rem; margin-top: -8px;" id="lofi-now-playing" data-i18n="session.lofi_sub">Royalty-free focus beats</p>
+                  <select id="lofi-track" onchange="changeLofiTrack()" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--panel-border); background: transparent; color: var(--text-primary); font-family: inherit; cursor: pointer; appearance: auto;">
+                    <!-- ponytail: these are royalty-free (Pixabay Content License — free for commercial use, no
+                         attribution). If a CDN URL ever 404s, swap it here or use "Load your own track". -->
+                    <option value="https://cdn.pixabay.com/download/audio/2022/05/27/audio_1808fbf07a.mp3?filename=lofi-study-112191.mp3">Lofi Study</option>
+                    <option value="https://cdn.pixabay.com/download/audio/2021/08/09/audio_8a8c2e7d9d.mp3?filename=lofi-chill-medium-version-159456.mp3">Chill Beats</option>
+                    <option value="https://cdn.pixabay.com/download/audio/2023/07/30/audio_e0908e8569.mp3?filename=good-night-160166.mp3">Good Night</option>
+                  </select>
+                  <div style="display: flex; align-items: center; gap: 12px;">
+                    <button id="lofi-toggle" onclick="toggleLofi()" style="background: var(--accent-color); color: #fff; border: none; width: 44px; height: 44px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                      <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                    </button>
+                    <input type="range" id="lofi-volume" min="0" max="1" step="0.05" value="0.6" oninput="setLofiVolume(this.value)" style="flex: 1; accent-color: var(--accent-color); cursor: pointer;" />
+                  </div>
+                  <button onclick="document.getElementById('lofi-file').click()" style="background: var(--overlay-medium); color: var(--text-primary); border: none; padding: 8px; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 0.85rem;" data-i18n="session.lofi_load">Load your own track</button>
+                  <input type="file" id="lofi-file" accept="audio/*" style="display: none;" onchange="loadLofiFile(event)" />
+                  <audio id="lofi-audio" loop></audio>
                 </div>
               </div>
 
@@ -499,9 +497,10 @@
               
               <!-- Brain Dump (4) -->
               <div style="flex: 1; display: flex; flex-direction: column; width: 100%;">
+                <button class="panel-back-btn" onclick="goToDashboard()" style="margin-bottom: 20px;"><svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg> <span data-i18n="common.back">Back</span></button>
                 <div class="tasks-header" style="margin-bottom: 24px;">
-                  <h3>Scratchpad</h3>
-                  <span style="color: var(--text-secondary); font-size: 0.9rem;">Auto-saving...</span>
+                  <h3 data-i18n="scratchpad.title">Scratchpad</h3>
+                  <span style="color: var(--text-secondary); font-size: 0.9rem;" data-i18n="scratchpad.saving">Auto-saving...</span>
                 </div>
                 <div style="flex: 1; background: var(--panel-bg); border-radius: 24px; box-shadow: 0 10px 40px var(--shadow-color-focus); border: 1px solid var(--panel-border); padding: 32px; display: flex; flex-direction: column;">
                   <div id="scratchpad-content" contenteditable="true" style="flex: 1; outline: none; font-size: 1.1rem; line-height: 1.6; color: var(--text-primary); font-family: 'Inter', sans-serif;">
@@ -515,44 +514,58 @@
 
             <!-- Settings Panel -->
             <div class="home-settings" id="home-settings" style="display: none; height: 100%; flex-direction: column; overflow-y: auto; padding: 40px; background: var(--bg-color);">
+              <button class="panel-back-btn" onclick="goToDashboard()" style="margin-bottom: 20px;"><svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg> <span data-i18n="common.back">Back</span></button>
               <div class="tasks-header" style="margin-bottom: 24px;">
-                <h3>Settings</h3>
-                <span style="color: var(--text-secondary); font-size: 0.9rem;">Manage your preferences</span>
+                <h3 data-i18n="settings.title">Settings</h3>
+                <span style="color: var(--text-secondary); font-size: 0.9rem;" data-i18n="settings.subtitle">Manage your preferences</span>
               </div>
-                
+
               <div style="display: flex; flex-direction: column; gap: 24px; max-width: 600px;">
                 <div>
-                  <label style="display: block; font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em;">Your Name</label>
+                  <label style="display: block; font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em;" data-i18n="settings.name">Your Name</label>
                   <input type="text" id="settings-name" style="width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--panel-border); font-family: inherit; font-size: 1rem; outline: none; background: transparent; color: var(--text-primary);" placeholder="Name" onchange="saveSettings()" />
                 </div>
 
                 <div>
-                  <label style="display: block; font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em;">Designation</label>
-                  <input type="text" id="settings-designation" style="width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--panel-border); font-family: inherit; font-size: 1rem; outline: none; background: transparent; color: var(--text-primary);" placeholder="e.g. Professional Account" onchange="saveSettings()" />
+                  <label style="display: block; font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em;" data-i18n="settings.job">Job</label>
+                  <input type="text" id="settings-designation" style="width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--panel-border); font-family: inherit; font-size: 1rem; outline: none; background: transparent; color: var(--text-primary);" placeholder="e.g. Software Engineer" onchange="saveSettings()" data-i18n-ph="settings.job_ph" />
                 </div>
 
                 <div>
-                  <label style="display: block; font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em;">Theme</label>
+                  <label style="display: block; font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em;" data-i18n="settings.language">Language</label>
+                  <select id="settings-language" style="width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--panel-border); font-family: inherit; font-size: 1rem; outline: none; background: transparent; color: var(--text-primary); cursor: pointer; appearance: auto;" onchange="saveSettings()">
+                    <option value="en">English</option>
+                    <option value="ar">العربية (Arabic)</option>
+                    <option value="zh">中文 (Chinese)</option>
+                    <option value="ms">Bahasa Melayu (Malay)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style="display: block; font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em;" data-i18n="settings.theme">Theme</label>
                   <select id="settings-theme" style="width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--panel-border); font-family: inherit; font-size: 1rem; outline: none; background: transparent; color: var(--text-primary); cursor: pointer; appearance: auto;" onchange="saveSettings()">
-                    <option value="light">Day (Light)</option>
-                    <option value="dark">Night (Dark)</option>
+                    <option value="light" data-i18n="settings.theme_light">Day (Light)</option>
+                    <option value="dark" data-i18n="settings.theme_dark">Night (Dark)</option>
                   </select>
                 </div>
 
                 <div>
-                  <label style="display: block; font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em;">Currency</label>
-                  <select id="settings-currency" style="width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--panel-border); font-family: inherit; font-size: 1rem; outline: none; background: transparent; color: var(--text-primary); cursor: pointer; appearance: auto;" onchange="saveSettings()">
-                    <option value="₹">₹ (INR)</option>
-                    <option value="$">$ (USD)</option>
-                    <option value="€">€ (EUR)</option>
-                    <option value="£">£ (GBP)</option>
-                    <option value="¥">¥ (JPY)</option>
+                  <label style="display: block; font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em;" data-i18n="settings.temp_unit">Temperature Unit</label>
+                  <select id="settings-temp-unit" style="width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--panel-border); font-family: inherit; font-size: 1rem; outline: none; background: transparent; color: var(--text-primary); cursor: pointer; appearance: auto;" onchange="saveSettings()">
+                    <option value="F">Fahrenheit (°F)</option>
+                    <option value="C">Celsius (°C)</option>
                   </select>
+                </div>
+
+                <div>
+                  <label style="display: block; font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em;" data-i18n="settings.currency">Currency</label>
+                  <!-- Options injected by populateCurrencies() — full ISO 4217 list -->
+                  <select id="settings-currency" style="width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--panel-border); font-family: inherit; font-size: 1rem; outline: none; background: transparent; color: var(--text-primary); cursor: pointer; appearance: auto;" onchange="saveSettings()"></select>
                 </div>
 
                 <div style="margin-top: 40px; padding-top: 32px; border-top: 1px solid var(--panel-border);">
-                  <button onclick="resetEverything()" style="width: 100%; padding: 14px; background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 12px; font-weight: 600; font-size: 1rem; cursor: pointer; transition: background 0.2s;">⚠️ Factory Reset</button>
-                  <p style="text-align: center; color: var(--text-secondary); font-size: 0.85rem; margin-top: 12px;">This will permanently delete all data.</p>
+                  <button onclick="resetEverything()" style="width: 100%; padding: 14px; background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 12px; font-weight: 600; font-size: 1rem; cursor: pointer; transition: background 0.2s;" data-i18n="settings.reset">⚠️ Factory Reset</button>
+                  <p style="text-align: center; color: var(--text-secondary); font-size: 0.85rem; margin-top: 12px;" data-i18n="settings.reset_note">This will permanently delete all data.</p>
                 </div>
 
                 <!-- Credits Footer -->
@@ -565,7 +578,7 @@
                     <span style="color: var(--panel-border); font-size: 1.2rem;">|</span>
                     <a href="https://github.com/rajsriv/OpenNotes" target="_blank" style="color: var(--text-secondary); text-decoration: none; font-size: 0.95rem; font-weight: 600; display: flex; align-items: center; gap: 6px; transition: color 0.2s;" onmouseover="this.style.color='var(--accent-color)'" onmouseout="this.style.color='var(--text-secondary)'">
                       <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
-                      OpenNotes
+                      YourNotes
                     </a>
                   </div>
                   <p style="color: var(--text-secondary); font-size: 0.85rem; opacity: 0.7;">Designed & Built with <span style="color: var(--danger-color);">♥</span></p>
@@ -575,10 +588,11 @@
             
             <!-- College Notes Panel -->
             <div class="home-college" id="home-college" style="display: none; height: 100%; flex-direction: column; overflow-y: auto; padding: 40px; background: var(--bg-color);">
+              <button class="panel-back-btn" onclick="goToDashboard()" style="margin-bottom: 20px; align-self: flex-start;"><svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg> <span data-i18n="common.back">Back</span></button>
               <div class="tasks-header" style="margin-bottom: 24px; display: flex; align-items: center; justify-content: space-between;">
                 <div>
-                  <h3 style="font-size: 1.8rem; font-weight: 800; color: var(--text-primary); margin: 0;">College Notes</h3>
-                  <p style="color: var(--text-secondary); margin-top: 4px; font-size: 0.95rem;">Organize your college lectures, curriculum, and study PDF notes.</p>
+                  <h3 style="font-size: 1.8rem; font-weight: 800; color: var(--text-primary); margin: 0;" data-i18n="college.title">College Notes</h3>
+                  <p style="color: var(--text-secondary); margin-top: 4px; font-size: 0.95rem;" data-i18n="college.subtitle">Organize your college lectures, curriculum, and study PDF notes.</p>
                 </div>
                 <div style="display: flex; gap: 12px;">
                   <button id="add-college-folder-btn" class="add-header-btn" style="background: var(--accent-color); color: white; border: none; padding: 10px 18px; border-radius: 10px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px;">
@@ -760,7 +774,7 @@
 
     <div id="resize-overlay">
       <h2 style="font-size: 2rem; margin-bottom: 16px; color: var(--text-primary);">Optimize Your Experience</h2>
-      <p style="font-size: 1.1rem; color: var(--text-secondary); max-width: 400px; line-height: 1.5;">Please maximize the window or use full screen mode to use OpenNotes elegantly.</p>
+      <p style="font-size: 1.1rem; color: var(--text-secondary); max-width: 400px; line-height: 1.5;">Please maximize the window or use full screen mode to use YourNotes elegantly.</p>
     </div>
 
     <script type="module" src="/src/main.js"></script>
