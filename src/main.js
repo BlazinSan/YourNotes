@@ -1818,10 +1818,15 @@ if (floatingToolbar) {
         if (!document.execCommand('hiliteColor', false, value)) {
           document.execCommand('backColor', false, value);
         }
+      } else if (command === 'foreColor' && value === 'reset') {
+        // "Default Text" resolves to the current theme's text color so it stays
+        // readable in both light and dark mode.
+        const themeColor = getComputedStyle(document.body).getPropertyValue('--text-primary').trim() || '#4a3c31';
+        document.execCommand('foreColor', false, themeColor);
       } else {
         document.execCommand(command, false, value);
       }
-      
+
       updateNoteContent();
     });
   });
@@ -2456,41 +2461,76 @@ function renderQuicklinks() {
         <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
         ${q.title}
       </span>
-      <button onclick="deleteQuicklink(event, ${q.id})" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 1.1rem; opacity: 0; transition: opacity 0.2s; display: flex; align-items: center;" class="quicklink-del">&times;</button>
+      <span class="quicklink-actions" style="display: flex; align-items: center; gap: 6px; opacity: 0; transition: opacity 0.2s;">
+        <button onclick="editQuicklink(event, ${q.id})" title="Edit" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center;">
+          <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+        </button>
+        <button onclick="deleteQuicklink(event, ${q.id})" title="Delete" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 1.1rem; display: flex; align-items: center;">&times;</button>
+      </span>
     `;
     a.onmouseenter = () => {
-      const btn = a.querySelector('.quicklink-del');
-      if (btn) btn.style.opacity = '1';
+      const acts = a.querySelector('.quicklink-actions');
+      if (acts) acts.style.opacity = '1';
     };
     a.onmouseleave = () => {
-      const btn = a.querySelector('.quicklink-del');
-      if (btn) btn.style.opacity = '0';
+      const acts = a.querySelector('.quicklink-actions');
+      if (acts) acts.style.opacity = '0';
     };
     container.appendChild(a);
   });
 }
+
+window.editQuicklink = function(e, id) {
+  e.preventDefault();
+  e.stopPropagation();
+  const q = quicklinks.find(x => x.id === id);
+  if (!q) return;
+  const title = prompt('Edit link title:', q.title);
+  if (title === null) return;
+  const url = prompt('Edit link URL:', q.url);
+  if (url === null) return;
+  if (title.trim()) q.title = title.trim();
+  if (url.trim()) q.url = url.trim();
+  localStorage.setItem('opennotes_quicklinks', JSON.stringify(quicklinks));
+  renderQuicklinks();
+};
 
 renderQuicklinks();
 
 // -----------------------------------------
 // Settings Logic
 // -----------------------------------------
-window.saveSettings = function() {
+window.saveSettings = function(notify) {
   const name = document.getElementById('settings-name').value.trim();
   const desig = document.getElementById('settings-designation').value.trim();
   const theme = document.getElementById('settings-theme').value;
-  const currency = document.getElementById('settings-currency').value;
+  const currencyCode = document.getElementById('settings-currency').value;
   const language = document.getElementById('settings-language').value;
   const tempUnit = document.getElementById('settings-temp-unit').value;
 
   if (name) localStorage.setItem('opennotes_profile_name', name);
   if (desig) localStorage.setItem('opennotes_profile_type', desig);
   localStorage.setItem('opennotes_theme', theme);
-  localStorage.setItem('opennotes_currency', currency);
+  localStorage.setItem('opennotes_currency_code', currencyCode);
+  localStorage.setItem('opennotes_currency', symbolForCode(currencyCode));
   localStorage.setItem('opennotes_language', language);
   localStorage.setItem('opennotes_temp_unit', tempUnit);
 
   applySettings();
+
+  if (notify === true) {
+    const btn = document.getElementById('settings-save-btn');
+    if (btn) {
+      const dict = translations[language] || translations.en;
+      btn.textContent = dict['settings.saved'] || 'Saved ✓';
+      btn.style.background = '#16a34a';
+      clearTimeout(btn._t);
+      btn._t = setTimeout(() => {
+        btn.textContent = dict['settings.save'] || 'Save Settings';
+        btn.style.background = 'var(--accent-color)';
+      }, 1600);
+    }
+  }
 };
 
 window.applySettings = function() {
@@ -2498,7 +2538,15 @@ window.applySettings = function() {
   const name = localStorage.getItem('opennotes_profile_name') || localStorage.getItem('userName') || 'Guest';
   const desig = localStorage.getItem('opennotes_profile_type') || localStorage.getItem('userRole') || 'Job';
   const theme = localStorage.getItem('opennotes_theme') || 'light';
-  const currency = localStorage.getItem('opennotes_currency') || '₹';
+  // Currency is keyed by ISO code (unique). Migrate older installs that only stored a symbol.
+  let currencyCode = localStorage.getItem('opennotes_currency_code');
+  if (!currencyCode) {
+    const oldSym = localStorage.getItem('opennotes_currency');
+    const match = oldSym && CURRENCIES.find(c => c[2] === oldSym);
+    currencyCode = match ? match[0] : 'INR';
+  }
+  const currency = symbolForCode(currencyCode);
+  localStorage.setItem('opennotes_currency', currency); // keep symbol in sync for the expense tracker
   const language = localStorage.getItem('opennotes_language') || 'en';
   const tempUnit = localStorage.getItem('opennotes_temp_unit') || 'F';
 
@@ -2519,7 +2567,7 @@ window.applySettings = function() {
     document.body.classList.remove('theme-dark');
   }
 
-  populateCurrencies(currency);
+  populateCurrencies(currencyCode);
 
   const nameInput = document.getElementById('settings-name');
   const desigInput = document.getElementById('settings-designation');
@@ -2531,7 +2579,7 @@ window.applySettings = function() {
   if (nameInput) nameInput.value = name;
   if (desigInput) desigInput.value = desig;
   if (themeInput) themeInput.value = theme;
-  if (currencyInput) currencyInput.value = currency;
+  if (currencyInput) currencyInput.value = currencyCode;
   if (languageInput) languageInput.value = language;
   if (tempInput) tempInput.value = tempUnit;
 
@@ -2542,6 +2590,7 @@ window.applySettings = function() {
   updateAmbientTemp();
   updateExpenseTotal();
   renderExpenses();
+  if (typeof refreshSelects === 'function') refreshSelects();
 };
 
 window.resetEverything = function() {
@@ -2612,21 +2661,27 @@ const CURRENCIES = [
   ['ZAR','South African Rand','R'],['ZMW','Zambian Kwacha','ZK'],['ZWL','Zimbabwean Dollar','Z$']
 ];
 
-function populateCurrencies(selected) {
+// option value = ISO code (unique); the symbol is looked up separately for display.
+function symbolForCode(code) {
+  const e = CURRENCIES.find(c => c[0] === code);
+  return e ? e[2] : '₹';
+}
+
+function populateCurrencies(selectedCode) {
   const sel = document.getElementById('settings-currency');
   if (!sel) return;
   if (!sel.dataset.filled) {
     const frag = document.createDocumentFragment();
     CURRENCIES.forEach(([code, name, symbol]) => {
       const opt = document.createElement('option');
-      opt.value = symbol;
+      opt.value = code;
       opt.textContent = `${name} (${code}) ${symbol}`;
       frag.appendChild(opt);
     });
     sel.appendChild(frag);
     sel.dataset.filled = '1';
   }
-  if (selected) sel.value = selected;
+  if (selectedCode) sel.value = selectedCode;
 }
 
 // -----------------------------------------
@@ -2651,7 +2706,7 @@ const translations = {
     'settings.title':'Settings','settings.subtitle':'Manage your preferences','settings.name':'Your Name','settings.job':'Job',
     'settings.job_ph':'e.g. Software Engineer','settings.language':'Language','settings.theme':'Theme',
     'settings.theme_light':'Day (Light)','settings.theme_dark':'Night (Dark)','settings.temp_unit':'Temperature Unit',
-    'settings.currency':'Currency','settings.reset':'⚠️ Factory Reset','settings.reset_note':'This will permanently delete all data.',
+    'settings.currency':'Currency','settings.save':'Save Settings','settings.saved':'Saved ✓','settings.reset':'⚠️ Factory Reset','settings.reset_note':'This will permanently delete all data.',
     'college.title':'College Notes','college.subtitle':'Organize your college lectures, curriculum, and study PDF notes.',
     'tasks.menu':'Tasks Menu'
   },
@@ -2670,7 +2725,7 @@ const translations = {
     'settings.title':'الإعدادات','settings.subtitle':'إدارة تفضيلاتك','settings.name':'اسمك','settings.job':'الوظيفة',
     'settings.job_ph':'مثال: مهندس برمجيات','settings.language':'اللغة','settings.theme':'المظهر',
     'settings.theme_light':'نهاري (فاتح)','settings.theme_dark':'ليلي (داكن)','settings.temp_unit':'وحدة الحرارة',
-    'settings.currency':'العملة','settings.reset':'⚠️ إعادة ضبط المصنع','settings.reset_note':'سيؤدي هذا إلى حذف جميع البيانات نهائيًا.',
+    'settings.currency':'العملة','settings.save':'حفظ الإعدادات','settings.saved':'تم الحفظ ✓','settings.reset':'⚠️ إعادة ضبط المصنع','settings.reset_note':'سيؤدي هذا إلى حذف جميع البيانات نهائيًا.',
     'college.title':'ملاحظات الكلية','college.subtitle':'نظّم محاضرات كليتك ومناهجك وملاحظات الدراسة بصيغة PDF.',
     'tasks.menu':'قائمة المهام'
   },
@@ -2689,7 +2744,7 @@ const translations = {
     'settings.title':'设置','settings.subtitle':'管理你的偏好','settings.name':'你的名字','settings.job':'职业',
     'settings.job_ph':'例如：软件工程师','settings.language':'语言','settings.theme':'主题',
     'settings.theme_light':'白天（浅色）','settings.theme_dark':'夜间（深色）','settings.temp_unit':'温度单位',
-    'settings.currency':'货币','settings.reset':'⚠️ 恢复出厂设置','settings.reset_note':'这将永久删除所有数据。',
+    'settings.currency':'货币','settings.save':'保存设置','settings.saved':'已保存 ✓','settings.reset':'⚠️ 恢复出厂设置','settings.reset_note':'这将永久删除所有数据。',
     'college.title':'课堂笔记','college.subtitle':'整理你的大学讲座、课程和学习 PDF 笔记。',
     'tasks.menu':'任务菜单'
   },
@@ -2708,7 +2763,7 @@ const translations = {
     'settings.title':'Tetapan','settings.subtitle':'Urus pilihan anda','settings.name':'Nama Anda','settings.job':'Pekerjaan',
     'settings.job_ph':'cth. Jurutera Perisian','settings.language':'Bahasa','settings.theme':'Tema',
     'settings.theme_light':'Siang (Cerah)','settings.theme_dark':'Malam (Gelap)','settings.temp_unit':'Unit Suhu',
-    'settings.currency':'Mata Wang','settings.reset':'⚠️ Set Semula Kilang','settings.reset_note':'Ini akan memadam semua data secara kekal.',
+    'settings.currency':'Mata Wang','settings.save':'Simpan Tetapan','settings.saved':'Disimpan ✓','settings.reset':'⚠️ Set Semula Kilang','settings.reset_note':'Ini akan memadam semua data secara kekal.',
     'college.title':'Nota Kolej','college.subtitle':'Susun kuliah, kurikulum dan nota PDF pembelajaran kolej anda.',
     'tasks.menu':'Menu Tugasan'
   }
@@ -2794,8 +2849,106 @@ window.loadLofiFile = function(e) {
   audio.play().then(() => { lofiPlaying = true; setLofiIcon(true); }).catch(() => {});
 };
 
+// -----------------------------------------
+// AppSelect — themed <select> replacement (ported from the EverythingUTM project).
+// Progressive enhancement: the native <select> stays the source of truth (value,
+// options, change events); we hide it and drive a custom trigger + portalled menu,
+// so the OS's grey/blue dropdown never appears.
+// -----------------------------------------
+const APPSELECT_CARET = '<svg class="app-select-caret" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+const APPSELECT_CHECK = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+
+function enhanceSelects(root = document) {
+  root.querySelectorAll('select:not([data-appselect])').forEach((sel) => {
+    sel.dataset.appselect = '1';
+    sel.style.display = 'none';
+
+    const trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.className = 'app-select';
+    trigger.setAttribute('aria-haspopup', 'listbox');
+    trigger.innerHTML = `<span class="app-select-value"></span>${APPSELECT_CARET}`;
+    sel.after(trigger);
+    const valueSpan = trigger.querySelector('.app-select-value');
+
+    const syncLabel = () => {
+      const opt = sel.options[sel.selectedIndex];
+      valueSpan.textContent = opt ? opt.textContent : '';
+    };
+    sel._syncAppSelect = syncLabel;
+    syncLabel();
+    sel.addEventListener('change', syncLabel);
+
+    let portal = null;
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    function close() {
+      if (portal) { portal.remove(); portal = null; }
+      trigger.classList.remove('is-open');
+      document.removeEventListener('keydown', onKey);
+    }
+    function open() {
+      portal = document.createElement('div');
+      portal.className = 'app-select-portal';
+      const scrim = document.createElement('div');
+      scrim.className = 'app-select-scrim';
+      scrim.onclick = close;
+      const menu = document.createElement('div');
+      menu.className = 'app-select-menu';
+      menu.setAttribute('role', 'listbox');
+
+      Array.from(sel.options).forEach((o, i) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'app-select-option' + (i === sel.selectedIndex ? ' is-selected' : '');
+        b.disabled = o.disabled;
+        const span = document.createElement('span');
+        span.textContent = o.textContent;
+        b.appendChild(span);
+        if (i === sel.selectedIndex) b.insertAdjacentHTML('beforeend', APPSELECT_CHECK);
+        b.onclick = () => {
+          sel.value = o.value;
+          sel.dispatchEvent(new Event('change', { bubbles: true }));
+          close();
+        };
+        menu.appendChild(b);
+      });
+
+      portal.appendChild(scrim);
+      portal.appendChild(menu);
+      document.body.appendChild(portal);
+
+      const r = trigger.getBoundingClientRect();
+      const vh = window.innerHeight, vw = window.innerWidth, margin = 12;
+      const w = Math.min(Math.max(r.width, 220), Math.max(160, vw - margin * 2));
+      const left = Math.min(Math.max(margin, r.left), Math.max(margin, vw - w - margin));
+      const below = vh - r.bottom - margin, above = r.top - margin;
+      const up = below < 220 && above > below;
+      const maxH = Math.min(280, Math.max(140, up ? above : below));
+      menu.style.position = 'fixed';
+      menu.style.left = left + 'px';
+      menu.style.width = w + 'px';
+      menu.style.maxHeight = maxH + 'px';
+      if (up) menu.style.bottom = (vh - r.top + 6) + 'px'; else menu.style.top = (r.bottom + 6) + 'px';
+
+      trigger.classList.add('is-open');
+      document.addEventListener('keydown', onKey);
+      const selected = menu.querySelector('.is-selected');
+      if (selected) selected.scrollIntoView({ block: 'nearest' });
+    }
+    trigger.onclick = () => (portal ? close() : open());
+  });
+}
+
+function refreshSelects() {
+  document.querySelectorAll('select[data-appselect]').forEach((sel) => {
+    if (typeof sel._syncAppSelect === 'function') sel._syncAppSelect();
+  });
+}
+
 // Initial load
 applySettings();
+enhanceSelects();
+refreshSelects();
 
 // -----------------------------------------
 // Native menu: File > New Note
@@ -3301,52 +3454,48 @@ document.addEventListener('DOMContentLoaded', () => {
       fileInput.click();
     };
 
-    fileInput.onchange = (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-
-      if (file.type !== 'application/pdf') {
+    fileInput.onchange = async (e) => {
+      const files = Array.from(e.target.files || []).filter(f => f.type === 'application/pdf');
+      if (files.length === 0) {
         alert("Only PDF files are supported.");
         return;
       }
 
-      // Show a loading text or disable button during load
+      const currentFolder = collegeFolders.find(f => f.id === activeCollegeFolderId);
+      if (!currentFolder) return;
+      if (!currentFolder.pdfs) currentFolder.pdfs = [];
+
+      // Show a loading state while importing (handles one or many files)
       uploadBtn.disabled = true;
       const originalText = uploadBtn.innerHTML;
-      uploadBtn.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" class="spin"><line x1="12" y1="2" x2="12" y2="6"></line><line x1="12" y1="18" x2="12" y2="22"></line><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"></line><line x1="2" y1="12" x2="6" y2="12"></line><line x1="18" y1="12" x2="22" y2="12"></line><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></line></svg> Importing...`;
+      uploadBtn.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" class="spin"><line x1="12" y1="2" x2="12" y2="6"></line><line x1="12" y1="18" x2="12" y2="22"></line><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"></line><line x1="2" y1="12" x2="6" y2="12"></line><line x1="18" y1="12" x2="22" y2="12"></line><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></line></svg> Importing ${files.length}...`;
 
-      const reader = new FileReader();
-      reader.onload = (evt) => {
-        const base64Data = evt.target.result;
-        const sizeFormatted = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
+      const readFile = (file) => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (evt) => resolve(evt.target.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
 
-        const currentFolder = collegeFolders.find(f => f.id === activeCollegeFolderId);
-        if (currentFolder) {
-          if (!currentFolder.pdfs) currentFolder.pdfs = [];
+      try {
+        for (const file of files) {
+          const base64Data = await readFile(file);
           currentFolder.pdfs.push({
             id: 'pdf-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9),
             name: file.name,
             data: base64Data,
-            size: sizeFormatted,
+            size: (file.size / (1024 * 1024)).toFixed(2) + ' MB',
             createdAt: Date.now()
           });
-
-          saveCollegeFolders();
-          renderCollegeSingleFolder(activeCollegeFolderId);
         }
-
-        // Reset button state
+        saveCollegeFolders();
+        renderCollegeSingleFolder(activeCollegeFolderId);
+      } catch (err) {
+        alert("Failed to read one or more files.");
+      } finally {
         uploadBtn.disabled = false;
         uploadBtn.innerHTML = originalText;
-      };
-
-      reader.onerror = () => {
-        alert("Failed to read file.");
-        uploadBtn.disabled = false;
-        uploadBtn.innerHTML = originalText;
-      };
-
-      reader.readAsDataURL(file);
+      }
     };
   }
 

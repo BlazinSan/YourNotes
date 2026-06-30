@@ -2,6 +2,10 @@ const { app, BrowserWindow, ipcMain, Menu, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
+// No application menu bar (File/Edit/View/Window/Help). Set before any window
+// is created so the bar never flashes.
+Menu.setApplicationMenu(null);
+
 // Native Wayland hints (no-op on Windows/macOS, helps Linux builds)
 app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
 app.commandLine.appendSwitch('enable-features', 'WaylandWindowDecorations');
@@ -12,47 +16,12 @@ app.name = 'YourNotes';
 
 let mainWindow;
 
-function buildMenu() {
-  const isMac = process.platform === 'darwin';
-  const template = [
-    {
-      label: 'File',
-      submenu: [
-        { label: 'New Note', accelerator: 'CmdOrCtrl+N', click: () => mainWindow && mainWindow.webContents.send('menu-new-note') },
-        { type: 'separator' },
-        isMac ? { role: 'close' } : { role: 'quit' }
-      ]
-    },
-    { label: 'Edit', role: 'editMenu' },
-    {
-      label: 'View',
-      submenu: [
-        { role: 'reload' },
-        { role: 'togglefullscreen' },
-        { type: 'separator' },
-        { role: 'resetZoom' },
-        { role: 'zoomIn' },
-        { role: 'zoomOut' },
-        { type: 'separator' },
-        { role: 'toggleDevTools' }
-      ]
-    },
-    { label: 'Window', role: 'windowMenu' },
-    {
-      label: 'Help',
-      submenu: [
-        { label: 'YourNotes on GitHub', click: () => shell.openExternal('https://github.com/rajsriv/OpenNotes') }
-      ]
-    }
-  ];
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
-}
-
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     icon: path.join(__dirname, 'icon.png'),
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
@@ -105,7 +74,6 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  buildMenu();
   createWindow();
 
   app.on('activate', function () {

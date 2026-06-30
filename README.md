@@ -1,131 +1,99 @@
 <div align="center">
-  <img src="icon.png" width="128" alt="YourNotes Icon">
+  <img src="icon.png" width="120" alt="YourNotes Icon">
   <h1>YourNotes</h1>
-  <p>A beautiful, modern, cross-platform productivity workspace and note-taking application designed to keep your tasks, projects, college notes, and habits organized.</p>
-  <p><i>YourNotes is a maintained fork of <a href="https://github.com/rajsriv/OpenNotes">OpenNotes</a> (MIT).</i></p>
+  <p><b>My personal productivity workspace</b> — notes, tasks, college PDFs, a focus session with lofi, and an expense tracker, all in one calm desktop app.</p>
   <p>
     <img src="https://img.shields.io/badge/Electron-191970?style=flat&logo=Electron&logoColor=white" alt="Electron" />
     <img src="https://img.shields.io/badge/Vite-B73BFE?style=flat&logo=vite&logoColor=FFD62E" alt="Vite" />
     <img src="https://img.shields.io/badge/JavaScript-F7DF1E?style=flat&logo=javascript&logoColor=black" alt="JavaScript" />
-    <img src="https://img.shields.io/badge/HTML5-E34F26?style=flat&logo=html5&logoColor=white" alt="HTML5" />
-    <img src="https://img.shields.io/badge/CSS3-1572B6?style=flat&logo=css3&logoColor=white" alt="CSS3" />
+    <img src="https://img.shields.io/badge/license-MIT-a87b51?style=flat" alt="MIT" />
   </p>
 </div>
 
-## Features
-- **Project & Task Tracker:** Organize your daily priorities, habits, and tasks.
-- **College Notes Organizer:** Import PDF lecture notes and organize them into subject folders. 
-- **Built-in Document Viewer:** View your PDFs or rich-text notes in a beautiful fullscreen experience.
-- **Cross-Platform:** Available on Linux, Windows, and macOS.
-- **Dark & Light Themes:** Premium design that adapts to your system preferences.
-- **Multi-language UI:** English, Arabic (RTL), Chinese, and Malay.
-- **All world currencies:** Full ISO 4217 list for the expense tracker.
-- **Fahrenheit / Celsius** temperature toggle.
-- **Lofi music player** beside the Focus Session (royalty-free streams or your own files).
-- **Unified back navigation** on every panel.
+## Why this exists
+
+I really liked [OpenNotes](https://github.com/rajsriv/OpenNotes) by [@rajsriv](https://github.com/rajsriv) but it wasn't being maintained, so — since it's MIT — I forked it into **YourNotes** and made it mine. I rebuilt it into a proper Windows app, dropped the stuff I didn't use, and added the features I actually wanted day to day.
+
+Built and maintained by **[@BlazinSan](https://github.com/BlazinSan)**.
+
+## What I changed from the original
+
+- 🪟 **Proper desktop app** — hardened Electron build (CSP, sandbox, no menu-bar chrome), packaged as a Windows installer.
+- 🎛️ **Custom themed dropdowns** everywhere (no more ugly OS pickers), with subtle themed scrollbars.
+- 🌍 **Multi-language UI** — English, العربية (RTL), 中文, and Bahasa Melayu.
+- 💱 **Every world currency** (full ISO 4217 list) in the expense tracker.
+- 🌡️ **Fahrenheit / Celsius** toggle.
+- 🎧 **Lofi music player** sitting right next to the Focus Session — royalty-free streams or load your own track.
+- 🔙 **Back button on every page** and one consistent theme throughout.
+- 🧹 Removed the dynamic-island notch, cleaned up the settings page, and made saving reliable.
+
+## Core features
+
+- **Notes & wiki-links** — markdown shortcuts, `[[linking]]`, and a live graph map of how notes connect.
+- **Tasks, Calendar, Habits, Goals & Books** — plan deadlines and track streaks in one place.
+- **College Notes** — import multiple lecture PDFs into subject folders and read them fullscreen.
+- **Focus Session** — pomodoro timer, daily mood log, expense tracker, and the lofi player.
+- **Dark & Light themes** — warm, paper-inspired palette.
 
 ## Gallery
-
-Experience the premium design and powerful features of YourNotes:
 
 <table align="center">
   <tr>
     <td align="center" width="50%">
       <img src="gallery/YN1_dashboard.png" width="100%">
-      <br>
-      <b>Dashboard & Overview</b><br>
-      <i>Get a bird's-eye view of your notes and projects, with a graph map of links.</i>
+      <br><b>Dashboard & Graph Map</b><br>
+      <i>A bird's-eye view of every note and project.</i>
     </td>
     <td align="center" width="50%">
       <img src="gallery/YN2_session.png" width="100%">
-      <br>
-      <b>Session + Lofi Player</b><br>
-      <i>Focus timer, daily log, expenses, and a royalty-free lofi music player.</i>
+      <br><b>Focus Session + Lofi</b><br>
+      <i>Timer, daily log, expenses, and royalty-free lofi.</i>
     </td>
   </tr>
   <tr>
     <td align="center">
       <img src="gallery/YN3_tasks.png" width="100%">
-      <br>
-      <b>Tasks, Calendar & Habits</b><br>
-      <i>Plan deadlines, track habits and goals, and manage projects in one place.</i>
+      <br><b>Tasks, Calendar & Habits</b><br>
+      <i>Deadlines, habits, goals, and project tracking.</i>
     </td>
     <td align="center">
       <img src="gallery/YN4_settings.png" width="100%">
-      <br>
-      <b>Settings</b><br>
-      <i>Language (EN/AR/ZH/MS), °F/°C toggle, every world currency, and themes.</i>
+      <br><b>Settings</b><br>
+      <i>Language, °F/°C, every currency, and themes.</i>
     </td>
   </tr>
   <tr>
     <td align="center">
       <img src="gallery/YN5_college.png" width="100%">
-      <br>
-      <b>College Notes Organizer</b><br>
-      <i>Sort and manage your academic PDFs and notes using subject folders.</i>
+      <br><b>College Notes</b><br>
+      <i>Subject folders for your lecture PDFs.</i>
     </td>
     <td align="center">
       <img src="gallery/YN6_dark.png" width="100%">
-      <br>
-      <b>Dark Mode</b><br>
-      <i>A sleek, high-contrast dark theme designed to reduce eye strain.</i>
+      <br><b>Dark Mode</b><br>
+      <i>Easy on the eyes for late-night sessions.</i>
     </td>
   </tr>
 </table>
 
----
+## Install (Windows)
 
-## Installation Guide: Which file should I download?
+Grab the latest **`YourNotes Setup x.x.x.exe`** from the [Releases](../../releases) page and run it. The build isn't code-signed yet, so Windows SmartScreen may warn you — click **More info → Run anyway**. There's also a portable `.exe` if you'd rather not install.
 
-Go to the [Releases](../../releases) page to download the latest version. Depending on your operating system, download the corresponding file:
+## Build from source
 
-### 🐧 Linux Users
-* **`.AppImage`**: The easiest option for most Linux distributions. Download it, make it executable (`chmod +x`), and double-click to run. No installation required.
-* **`.deb`**: Download this if you are using **Debian, Ubuntu, Linux Mint**, or Pop!_OS.
-* **`.rpm`**: Download this if you are using **Fedora, CentOS, RHEL**, or openSUSE.
-* **`.pacman`**: Download this if you are using **Arch Linux, Manjaro**, or EndeavourOS.
+```bash
+git clone https://github.com/BlazinSan/YourNotes.git
+cd YourNotes
+npm install
+npm run electron:dev   # run in dev
+npm run package        # build the Windows installer (release/)
+```
 
-### 🪟 Windows Users
-* **`.exe` (Setup / Installer)**: Download this standard installer. Double-click it to install YourNotes on your Windows PC. Build it yourself with `npm run package`.
+## Credits
 
-### 🍎 macOS Users
-* **`.zip` (macOS)**: Download and extract this file to get the macOS application. Drag it to your Applications folder.
-
----
-
-## Development
-
-If you want to build the project from source:
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/rajsriv/OpenNotes.git
-   cd OpenNotes
-   ```
-
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-
-3. Run the development server:
-   ```bash
-   npm run electron:dev
-   ```
-
-4. Package for production (All Platforms):
-   ```bash
-   ./build-all.sh
-   ```
-
-## Reporting Issues
-
-If you encounter a bug, have a feature request, or need help, please [open an issue](../../issues) on GitHub. 
-When creating an issue, try to include:
-- A clear and descriptive title
-- Steps to reproduce the bug (if applicable)
-- Your operating system and application version
-- Screenshots or error logs
+Forked from [OpenNotes](https://github.com/rajsriv/OpenNotes) by [@rajsriv](https://github.com/rajsriv), licensed MIT. Thanks for the great starting point.
 
 ## License
-MIT
+
+MIT © [@BlazinSan](https://github.com/BlazinSan)
