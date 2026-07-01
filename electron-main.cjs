@@ -38,26 +38,27 @@ function createWindow() {
   // Synchronous sleep for read retries (avoids blank-on-transient-lock).
   const sleep = (ms) => { try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch (_) { const t = Date.now() + ms; while (Date.now() < t) {} } };
 
+  const backupPath = storePath + '.backup';
+  const tryRead = (p) => { try { store = JSON.parse(fs.readFileSync(p, 'utf-8')); return true; } catch (_) { return false; } };
+
   let store = {};
-  let loadOk = true; // false only when an existing store failed to load — then we refuse to write
-  {
-    const target = fs.existsSync(storePath) ? storePath : (fs.existsSync(tmpPath) ? tmpPath : null);
-    if (target) {
-      let ok = false, lastErr = null;
-      // Retry reads: another instance / antivirus may briefly lock the file. Do NOT
-      // start blank (which could then overwrite good data) unless every attempt fails.
-      for (let attempt = 0; attempt < 5 && !ok; attempt++) {
-        try { store = JSON.parse(fs.readFileSync(target, 'utf-8')); ok = true; }
-        catch (e) { lastErr = e; sleep(150); }
-      }
-      if (!ok) {
-        console.error('Store unreadable after retries', lastErr);
-        try { if (fs.existsSync(tmpPath)) { store = JSON.parse(fs.readFileSync(tmpPath, 'utf-8')); ok = true; } } catch (_) {}
-        if (!ok) { try { fs.copyFileSync(storePath, storePath + '.unreadable-' + Date.now()); } catch (_) {} }
-      }
-      loadOk = ok; // if we couldn't read an existing store, stay read-only this session
-    }
+  let loadOk = false; // becomes true once the store is loaded (or genuinely first-run)
+
+  if (!fs.existsSync(storePath) && !fs.existsSync(tmpPath)) {
+    loadOk = true; // genuine first run — nothing to load
+  } else {
+    const target = fs.existsSync(storePath) ? storePath : tmpPath;
+    // Patiently retry (~3s): another instance closing, or antivirus scanning the
+    // 2-3 MB file, can briefly lock it. Giving up too early is what made the app
+    // fall back to an incomplete localStorage copy and look "reset".
+    for (let i = 0; i < 30 && !loadOk; i++) { if (tryRead(target)) { loadOk = true; break; } sleep(100); }
+    // Rescues if the primary file won't read: the temp file, then a rolling backup.
+    if (!loadOk && fs.existsSync(tmpPath) && tmpPath !== target) loadOk = tryRead(tmpPath);
+    if (!loadOk && fs.existsSync(backupPath)) loadOk = tryRead(backupPath);
+    if (!loadOk) { try { fs.copyFileSync(storePath, storePath + '.unreadable-' + Date.now()); } catch (_) {} }
   }
+  // Keep a rolling backup of the last known-good store for future rescues.
+  if (loadOk && Object.keys(store).length) { try { if (fs.existsSync(storePath)) fs.copyFileSync(storePath, backupPath); } catch (_) {} }
 
   // Atomic, debounced writes: write to a temp file then rename, so a crash/kill
   // mid-write can never leave a half-written (corrupt) store on disk.
@@ -78,12 +79,17 @@ function createWindow() {
   function scheduleWrite() {
     dirty = true;
     clearTimeout(writeTimer);
-    writeTimer = setTimeout(flushStore, 120);
+    writeTimer = setTimeout(flushStore, 400);
   }
   app.on('before-quit', flushStore);
 
   ipcMain.on('load-data-sync', (event, key) => {
-    event.returnValue = store[key] !== undefined ? store[key] : null;
+    // Last-ditch: if startup couldn't load yet, retry now (the lock has likely cleared).
+    if (!loadOk) {
+      const target = fs.existsSync(storePath) ? storePath : (fs.existsSync(tmpPath) ? tmpPath : (fs.existsSync(backupPath) ? backupPath : null));
+      if (target) { for (let i = 0; i < 15 && !loadOk; i++) { if (tryRead(target)) { loadOk = true; break; } sleep(100); } }
+    }
+    event.returnValue = (loadOk && store[key] !== undefined) ? store[key] : null;
   });
 
   ipcMain.on('save-data-sync', (event, key, value) => {

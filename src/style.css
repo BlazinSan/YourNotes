@@ -14,9 +14,13 @@
   --overlay-medium: rgba(74, 60, 49, 0.1);
   --overlay-heavy: rgba(74, 60, 49, 0.15);
   --sidebar-bg: #ece3d5; /* more visible warm panel than the near-white page bg */
-  --shadow-color: var(--shadow-color);
-  --shadow-color-light: var(--shadow-color-light);
-  --shadow-color-focus: var(--shadow-color-focus);
+  /* Real light-mode borders/shadows. These were previously self-referential
+     (var(--shadow-color): var(--shadow-color)) which is invalid, so light mode
+     had no visible borders/outlines at all. */
+  --panel-border: rgba(74, 60, 49, 0.16);
+  --shadow-color: rgba(74, 60, 49, 0.12);
+  --shadow-color-light: rgba(74, 60, 49, 0.06);
+  --shadow-color-focus: rgba(168, 123, 81, 0.16);
 }
 
 body.theme-dark {
