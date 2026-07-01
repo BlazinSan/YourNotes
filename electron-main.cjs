@@ -41,20 +41,23 @@ function createWindow() {
   const backupPath = storePath + '.backup';
   const tryRead = (p) => { try { const parsed = JSON.parse(fs.readFileSync(p, 'utf-8')); store = parsed; return true; } catch (_) { return false; } };
 
+  // CRITICAL: fs.existsSync() returns false for a LOCKED file (EPERM/EBUSY), not just
+  // a missing one. Relying on it made a locked store look like a "fresh install", so
+  // the app showed a Welcome note. Treat a file as missing ONLY on a real ENOENT.
+  const definitelyMissing = (p) => { try { fs.accessSync(p, fs.constants.F_OK); return false; } catch (e) { return e.code === 'ENOENT'; } };
+
   let store = {};
   let loadOk = false; // becomes true once the store is loaded (or genuinely first-run)
-  // Did data ever exist? If so we must NEVER show empty — only retry until readable.
-  const dataExisted = fs.existsSync(storePath) || fs.existsSync(tmpPath) || fs.existsSync(backupPath);
+  // Data exists if any store file is present OR merely locked (only truly missing files count as absent).
+  const dataExisted = !definitelyMissing(storePath) || !definitelyMissing(tmpPath) || !definitelyMissing(backupPath);
 
   function attemptLoad(rounds) {
     if (loadOk) return true;
-    const target = fs.existsSync(storePath) ? storePath : (fs.existsSync(tmpPath) ? tmpPath : (fs.existsSync(backupPath) ? backupPath : null));
-    if (!target) { if (!dataExisted) loadOk = true; return loadOk; } // genuine first run only
     for (let i = 0; i < rounds && !loadOk; i++) {
-      if (tryRead(target)) { loadOk = true; break; }
-      // between attempts, also try the other candidates in case one is mid-rename
-      if (fs.existsSync(tmpPath) && tryRead(tmpPath)) { loadOk = true; break; }
-      if (fs.existsSync(backupPath) && tryRead(backupPath)) { loadOk = true; break; }
+      // Try every candidate directly (don't gate on existsSync — a locked file reads false there).
+      if (tryRead(storePath)) { loadOk = true; break; }
+      if (tryRead(tmpPath)) { loadOk = true; break; }
+      if (tryRead(backupPath)) { loadOk = true; break; }
       sleep(100);
     }
     return loadOk;
@@ -74,8 +77,11 @@ function createWindow() {
     if (!loadOk) { dirty = false; return; }
     dirty = false;
     try {
-      fs.writeFileSync(tmpPath, JSON.stringify(store));
+      const json = JSON.stringify(store);
+      fs.writeFileSync(tmpPath, json);
       fs.renameSync(tmpPath, storePath);
+      // Refresh the rescue backup so it's never stale (store is small now — cheap).
+      try { fs.writeFileSync(backupPath, json); } catch (_) {}
     } catch (e) {
       console.error('Failed to persist store', e);
     }
