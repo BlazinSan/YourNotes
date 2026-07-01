@@ -2040,16 +2040,21 @@ function initGraph() {
   graphCanvas.width = rect.width;
   graphCanvas.height = rect.height;
   
-  const cx = rect.width / 2, cy = rect.height / 2;
+  // Give the layout a world larger than the viewport when there are many notes so
+  // they spread out instead of packing into a cluttered blob; the view then
+  // auto-fits (zooms out) to frame everything.
+  const spread = Math.min(2.2, Math.max(1, Math.sqrt(notes.length) / 5));
+  const worldW = rect.width * spread, worldH = rect.height * spread;
+  const cx = worldW / 2, cy = worldH / 2;
   const gNodes = notes.map(n => ({
     id: n.id,
     title: n.title || 'Untitled',
-    // start clustered near the centre so the layout settles inward instead of flinging off-screen
-    x: cx + (Math.random() - 0.5) * Math.min(rect.width, 400),
-    y: cy + (Math.random() - 0.5) * Math.min(rect.height, 300),
+    // spread across the world so the layout starts open, not collapsed in a ball
+    x: cx + (Math.random() - 0.5) * worldW * 0.45,
+    y: cy + (Math.random() - 0.5) * worldH * 0.45,
     vx: 0,
     vy: 0,
-    radius: 30
+    radius: 14
   }));
   
   const gEdges = [];
@@ -2066,16 +2071,17 @@ function initGraph() {
 
   gNodes.forEach(node => {
     const connections = gEdges.filter(e => e.source === node.id || e.target === node.id).length;
-    node.radius = 12 + Math.min(connections * 3, 20);
+    node.radius = 8 + Math.min(connections * 2, 10);
   });
-  
-  // Scale forces to node count so many notes spread out but stay on-screen
+
+  // Scale forces to node count. With many notes: smaller nodes, stronger repulsion and
+  // weaker centering so they spread into readable clusters (the view auto-fits to frame them).
   const many = gNodes.length > 25;
-  const repelDist = many ? 150 : 250;
-  const repelForce = many ? 1.1 : 1.2;
-  const linkDist = many ? 70 : 150;
-  const linkForce = many ? 0.05 : 0.08;
-  const centerForce = many ? 0.025 : 0.03;
+  const repelDist = many ? 220 : 250;
+  const repelForce = many ? 1.4 : 1.2;
+  const linkDist = many ? 110 : 150;
+  const linkForce = many ? 0.045 : 0.08;
+  const centerForce = many ? 0.02 : 0.03;
   const friction = 0.85;
   
   let draggedNode = null;
@@ -2085,6 +2091,7 @@ function initGraph() {
   // only affect how the world is drawn. screen = world * scale + pan.
   let scale = 1, panX = 0, panY = 0;
   let panning = false, panStart = null;
+  let userAdjusted = false; // once the user pans/zooms/drags, stop auto-fitting
   const screenXY = (e) => { const r = graphCanvas.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
   const toWorld = (sx, sy) => [(sx - panX) / scale, (sy - panY) / scale];
   const nodeAt = (wx, wy) => {
@@ -2100,8 +2107,8 @@ function initGraph() {
     const [sx, sy] = screenXY(e);
     const [wx, wy] = toWorld(sx, sy);
     const hit = nodeAt(wx, wy);
-    if (hit) { draggedNode = hit; hoveredNode = hit; }
-    else { panning = true; panStart = { sx, sy, panX, panY }; graphCanvas.style.cursor = 'grabbing'; }
+    if (hit) { draggedNode = hit; hoveredNode = hit; userAdjusted = true; }
+    else { panning = true; panStart = { sx, sy, panX, panY }; graphCanvas.style.cursor = 'grabbing'; userAdjusted = true; }
   };
 
   graphCanvas.onmousemove = (e) => {
@@ -2123,6 +2130,7 @@ function initGraph() {
   graphCanvas.onwheel = (e) => {
     e.preventDefault();
     const [sx, sy] = screenXY(e);
+    userAdjusted = true;
     const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
     const newScale = Math.max(0.25, Math.min(4, scale * factor));
     // keep the world point under the cursor fixed
@@ -2176,21 +2184,38 @@ function initGraph() {
 
     gNodes.forEach(n => {
       if (n !== draggedNode) {
-        n.vx += (graphCanvas.width/2 - n.x) * centerForce;
-        n.vy += (graphCanvas.height/2 - n.y) * centerForce;
+        n.vx += (cx - n.x) * centerForce;
+        n.vy += (cy - n.y) * centerForce;
         n.x += n.vx;
         n.y += n.vy;
         n.vx *= friction;
         n.vy *= friction;
       }
-      // Keep every node inside the canvas so nothing flies off-screen
+      // Keep every node inside the world so nothing flies off
       const pad = n.radius + 24;
       if (n.x < pad) { n.x = pad; n.vx *= -0.5; }
-      if (n.x > graphCanvas.width - pad) { n.x = graphCanvas.width - pad; n.vx *= -0.5; }
+      if (n.x > worldW - pad) { n.x = worldW - pad; n.vx *= -0.5; }
       if (n.y < pad) { n.y = pad; n.vy *= -0.5; }
-      if (n.y > graphCanvas.height - pad) { n.y = graphCanvas.height - pad; n.vy *= -0.5; }
+      if (n.y > worldH - pad) { n.y = worldH - pad; n.vy *= -0.5; }
     });
-    
+
+    // Auto-fit: keep the whole graph framed (zoomed out to fit) until the user
+    // pans, zooms or drags — so a dense graph reads as spread-out clusters, not a blob.
+    if (!userAdjusted && gNodes.length) {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const n of gNodes) {
+        minX = Math.min(minX, n.x - n.radius); minY = Math.min(minY, n.y - n.radius);
+        maxX = Math.max(maxX, n.x + n.radius); maxY = Math.max(maxY, n.y + n.radius);
+      }
+      const bw = Math.max(1, maxX - minX), bh = Math.max(1, maxY - minY), fitPad = 50;
+      const targetScale = Math.max(0.25, Math.min(0.95, Math.min((graphCanvas.width - fitPad * 2) / bw, (graphCanvas.height - fitPad * 2) / bh)));
+      const targetPanX = (graphCanvas.width - bw * targetScale) / 2 - minX * targetScale;
+      const targetPanY = (graphCanvas.height - bh * targetScale) / 2 - minY * targetScale;
+      scale += (targetScale - scale) * 0.12;
+      panX += (targetPanX - panX) * 0.12;
+      panY += (targetPanY - panY) * 0.12;
+    }
+
     // Determine active set for hovering and searching
     const searchTerm = (homeSearchInput ? homeSearchInput.value.toLowerCase().trim() : '');
     const isSearching = searchTerm.length > 0;
@@ -2281,17 +2306,19 @@ function initGraph() {
       ctx.textBaseline = 'top';
       let txt = n.title;
       if (txt.length > 24) txt = txt.substring(0, 22) + '...';
-      
-      if (n.currentAlpha > 0.4) {
+
+      // Only label nodes that are readable: when zoomed in enough, or the node is
+      // hovered/searched/well-connected. Prevents 60 overlapping labels when zoomed out.
+      const showLabel = n.currentAlpha > 0.4 && (scale > 0.72 || activeNodes.has(n) || searchMatchNodes.has(n) || n.radius >= 22);
+      if (showLabel) {
         ctx.shadowColor = GC.bg;
         ctx.shadowBlur = 4;
         ctx.lineWidth = 4;
         ctx.strokeStyle = GC.bg;
         ctx.strokeText(txt, n.x, n.y + n.radius + 8);
         ctx.shadowBlur = 0;
+        ctx.fillText(txt, n.x, n.y + n.radius + 8);
       }
-      
-      ctx.fillText(txt, n.x, n.y + n.radius + 8);
       ctx.globalAlpha = 1.0; // Reset
     });
     
@@ -3117,30 +3144,44 @@ window.boardDrop = async function(e) {
   }
 };
 
+const BOARD_PIN_COLORS = ['#e0584f', '#e0a24f', '#4f8fe0', '#5bb15b', '#b06fd0', '#e05f97'];
+function boardPinSvg(color) {
+  // A little cartoon/sketchy pushpin: head, collar and needle, hand-drawn outline.
+  return '<svg viewBox="0 0 44 56" width="27" height="34" fill="none">'
+    + '<path d="M22 55 L22 32" stroke="#2e2620" stroke-width="2.6" stroke-linecap="round"/>'
+    + '<path d="M13 30 Q22 37 31 30 L27.5 21 L16.5 21 Z" fill="' + color + '" stroke="#2e2620" stroke-width="2.4" stroke-linejoin="round"/>'
+    + '<ellipse cx="22" cy="14.5" rx="13" ry="11" fill="' + color + '" stroke="#2e2620" stroke-width="2.6"/>'
+    + '<ellipse cx="17.5" cy="11" rx="4.5" ry="3" fill="rgba(255,255,255,0.5)"/>'
+    + '</svg>';
+}
 function renderBoard() {
   const board = document.getElementById('dashboard-board');
   if (!board) return;
   board.innerHTML = '';
   const hint = document.getElementById('board-drop-hint');
   if (hint) hint.style.display = boardItems.length ? 'none' : '';
+  let assigned = false;
   boardItems.forEach(item => {
+    // Give each pinned item a stable slight tilt + pin colour once (never upside-down/90°).
+    if (item.rot === undefined) { item.rot = Math.round((Math.random() * 20 - 10) * 10) / 10; item.pin = Math.floor(Math.random() * BOARD_PIN_COLORS.length); assigned = true; }
     const card = document.createElement('div');
     card.className = 'board-card board-' + item.type;
     card.style.left = item.x + 'px'; card.style.top = item.y + 'px';
     card.style.width = item.w + 'px'; card.style.height = item.h + 'px';
+    card.style.transform = 'rotate(' + (item.rot || 0) + 'deg)';
     let inner = '';
     if (item.type === 'image') inner = `<div class="board-body board-img" style="background-image:url('${fileUrlOf(item.path)}')"></div>`;
     else if (item.type === 'file') inner = `<div class="board-body board-file"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg><span>${gsEscape(item.name || 'File')}</span></div>`;
     else inner = `<div class="board-body board-text" contenteditable="true">${gsEscape(item.text || '')}</div>`;
-    card.innerHTML = inner + `<button class="board-del" title="Remove">&times;</button><div class="board-resize"></div>`;
+    card.innerHTML = `<div class="board-pin">${boardPinSvg(BOARD_PIN_COLORS[item.pin || 0])}</div>` + inner + `<button class="board-del" title="Remove">&times;</button><div class="board-resize"></div>`;
     card.onclick = (ev) => ev.stopPropagation();
     const bodyEl = card.querySelector('.board-body');
-    if (item.type !== 'text') bodyEl.ondblclick = () => { if (window.electronAPI && window.electronAPI.openPath) window.electronAPI.openPath(item.path); };
     if (item.type === 'text') bodyEl.onblur = () => { item.text = bodyEl.innerText; saveBoard(); };
     card.querySelector('.board-del').onclick = (ev) => { ev.stopPropagation(); boardItems = boardItems.filter(b => b.id !== item.id); saveBoard(); renderBoard(); };
     makeBoardCardInteractive(card, item);
     board.appendChild(card);
   });
+  if (assigned) saveBoard();
 }
 
 function makeBoardCardInteractive(card, item) {
@@ -3149,9 +3190,22 @@ function makeBoardCardInteractive(card, item) {
     if (item.type === 'text' && e.target.closest('.board-text')) return; // let text editing work
     e.stopPropagation();
     const sx = e.clientX, sy = e.clientY, ox = item.x, oy = item.y;
-    card.setPointerCapture(e.pointerId); card.classList.add('dragging');
-    const move = (ev) => { item.x = Math.max(0, ox + (ev.clientX - sx)); item.y = Math.max(0, oy + (ev.clientY - sy)); card.style.left = item.x + 'px'; card.style.top = item.y + 'px'; };
-    const up = () => { card.classList.remove('dragging'); card.removeEventListener('pointermove', move); card.removeEventListener('pointerup', up); saveBoard(); };
+    const rot = item.rot || 0;
+    let moved = false; // a real drag only once the pointer travels past a small threshold
+    card.setPointerCapture(e.pointerId);
+    const move = (ev) => {
+      if (!moved) {
+        if (Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) <= 4) return; // still a click
+        moved = true; card.classList.add('dragging'); card.style.transform = 'rotate(' + rot + 'deg) scale(1.03)';
+      }
+      item.x = Math.max(0, ox + (ev.clientX - sx)); item.y = Math.max(0, oy + (ev.clientY - sy));
+      card.style.left = item.x + 'px'; card.style.top = item.y + 'px';
+    };
+    const up = () => {
+      card.removeEventListener('pointermove', move); card.removeEventListener('pointerup', up);
+      if (moved) { card.classList.remove('dragging'); card.style.transform = 'rotate(' + rot + 'deg)'; saveBoard(); }
+      else if (item.type !== 'text' && item.path && window.electronAPI && window.electronAPI.openPath) { window.electronAPI.openPath(item.path); } // clean click → open
+    };
     card.addEventListener('pointermove', move); card.addEventListener('pointerup', up);
   });
   const handle = card.querySelector('.board-resize');
