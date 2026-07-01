@@ -26,3 +26,9 @@ dist-ssr
 # Electron Builder Output
 release/
 release-builds/
+
+# Local recovery/update artifacts (machine-specific, large)
+.restore/
+RESTORE-YOURNOTES.bat
+UPDATE-YOURNOTES.bat
+startup-diag.log
