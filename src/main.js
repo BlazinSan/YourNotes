@@ -347,59 +347,121 @@ function setActiveNote(id) {
   renderNotesList(searchInput.value);
 }
 
+// --- Notes grouping / sort / filter state ---
+let homeSort = localStorage.getItem('opennotes_home_sort') || 'recent';
+let homeFolderFilter = 'all';
+const collapsedGroups = new Set();
+
+// A note's "folder" is the prefix before " · " in its title (set on import); else "Ungrouped".
+function noteGroup(n) {
+  const t = n.title || '';
+  const i = t.indexOf(' · ');
+  return i > -1 ? t.slice(0, i).trim() : 'Ungrouped';
+}
+function noteDisplayTitle(n) {
+  const t = n.title || 'Untitled Note';
+  const i = t.indexOf(' · ');
+  return i > -1 ? (t.slice(i + 3).trim() || t) : t;
+}
+function sortNotes(arr, mode) {
+  const a = [...arr];
+  if (mode === 'oldest') a.sort((x, y) => (x.updatedAt || 0) - (y.updatedAt || 0));
+  else if (mode === 'az') a.sort((x, y) => (x.title || '').localeCompare(y.title || ''));
+  else if (mode === 'za') a.sort((x, y) => (y.title || '').localeCompare(x.title || ''));
+  else a.sort((x, y) => (y.updatedAt || 0) - (x.updatedAt || 0));
+  return a;
+}
+
+window.setHomeSort = function(v) { homeSort = v; localStorage.setItem('opennotes_home_sort', v); renderHomeGrid(homeSearchInput ? homeSearchInput.value : ''); };
+window.setHomeFolderFilter = function(v) { homeFolderFilter = v; renderHomeGrid(homeSearchInput ? homeSearchInput.value : ''); };
+
+function populateFolderFilter() {
+  const sel = document.getElementById('home-folder-filter');
+  if (!sel) return;
+  const groups = [...new Set(notes.map(noteGroup))].sort((a, b) => {
+    if (a === 'Ungrouped') return 1; if (b === 'Ungrouped') return -1; return a.localeCompare(b);
+  });
+  if (!groups.includes(homeFolderFilter)) homeFolderFilter = 'all';
+  const cur = homeFolderFilter;
+  sel.innerHTML = '<option value="all">All folders</option>' + groups.map(g => `<option value="${g.replace(/"/g, '&quot;')}">${g}</option>`).join('');
+  sel.value = cur;
+  const ss = document.getElementById('home-sort');
+  if (ss) ss.value = homeSort;
+  if (typeof refreshSelects === 'function') refreshSelects();
+}
+
+function makeNoteCard(note) {
+  const date = new Date(note.updatedAt);
+  const dateString = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  const card = document.createElement('div');
+  card.className = 'book-card';
+  card.onclick = () => setActiveNote(note.id);
+  card.oncontextmenu = (e) => { e.preventDefault(); showCollegeContextMenu('note', note.id, e.clientX, e.clientY); };
+  card.innerHTML = `
+    <div class="book-card-title">${noteDisplayTitle(note)}</div>
+    <div class="book-card-date">${dateString}</div>
+  `;
+  return card;
+}
+
 function renderHomeGrid(searchTerm = '') {
   if (!homeGrid) return;
   homeGrid.innerHTML = '';
-  
-  // Add the "Create New Note" Card first
-  const newCard = document.createElement('div');
-  newCard.className = 'book-card new-note-card';
-  newCard.onclick = () => createNote('', '');
-  newCard.innerHTML = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom: 16px;"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-    <div style="font-size: 1.2rem; font-weight: 600;">Create New Note</div>
-  `;
-  
-  if (!searchTerm) {
+  const term = (searchTerm || '').toLowerCase();
+  populateFolderFilter();
+
+  // "Create New Note" card (only in the default, unfiltered view)
+  if (!term && homeFolderFilter === 'all') {
+    const newCard = document.createElement('div');
+    newCard.className = 'book-card new-note-card';
+    newCard.onclick = () => createNote('', '');
+    newCard.innerHTML = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom: 16px;"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+      <div style="font-size: 1.2rem; font-weight: 600;">Create New Note</div>
+    `;
     homeGrid.appendChild(newCard);
   }
-  
+
   if (notes.length === 0) return;
-  
-  const term = searchTerm.toLowerCase();
-  const filteredNotes = notes.filter(n => {
+
+  const filtered = notes.filter(n => {
     const title = (n.title || '').toLowerCase();
     const body = (n.body || '').toLowerCase();
-    return title.includes(term) || body.includes(term);
+    const matchSearch = !term || title.includes(term) || body.includes(term);
+    const matchFolder = homeFolderFilter === 'all' || noteGroup(n) === homeFolderFilter;
+    return matchSearch && matchFolder;
   });
-  
-  if (filteredNotes.length === 0 && searchTerm) {
+
+  if (filtered.length === 0) {
     const noResults = document.createElement('div');
     noResults.style.cssText = 'color: var(--text-secondary); grid-column: 1/-1; text-align: center; padding: 40px; font-size: 1.1rem;';
-    noResults.textContent = 'No notes found matching your search.';
+    noResults.textContent = 'No notes found.';
     homeGrid.appendChild(noResults);
     return;
   }
-  
-  filteredNotes.sort((a, b) => b.updatedAt - a.updatedAt).forEach(note => {
-    const date = new Date(note.updatedAt);
-    const dateString = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-    const plainText = note.body ? note.body.replace(/<[^>]*>?/gm, '') : 'No content...';
-    
-    const card = document.createElement('div');
-    card.className = 'book-card';
-    card.onclick = () => setActiveNote(note.id);
-    card.oncontextmenu = (e) => {
-      e.preventDefault();
-      showCollegeContextMenu('note', note.id, e.clientX, e.clientY);
-    };
-    
-    card.innerHTML = `
-      <div class="book-card-title">${note.title || 'Untitled Note'}</div>
-      <div class="book-card-date">${dateString}</div>
+
+  // Group the filtered notes
+  const groups = new Map();
+  filtered.forEach(n => { const g = noteGroup(n); if (!groups.has(g)) groups.set(g, []); groups.get(g).push(n); });
+  const groupNames = [...groups.keys()].sort((a, b) => {
+    if (a === 'Ungrouped') return 1; if (b === 'Ungrouped') return -1; return a.localeCompare(b);
+  });
+
+  groupNames.forEach(g => {
+    const items = sortNotes(groups.get(g), homeSort);
+    const collapsed = collapsedGroups.has(g);
+    const header = document.createElement('div');
+    header.className = 'note-group-header';
+    header.innerHTML = `
+      <svg class="note-group-chevron ${collapsed ? 'collapsed' : ''}" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+      <span class="note-group-name">${g}</span>
+      <span class="note-group-count">${items.length}</span>
     `;
-    
-    homeGrid.appendChild(card);
+    header.onclick = () => { collapsed ? collapsedGroups.delete(g) : collapsedGroups.add(g); renderHomeGrid(searchTerm); };
+    homeGrid.appendChild(header);
+    if (collapsed) return;
+    items.forEach(note => homeGrid.appendChild(makeNoteCard(note)));
   });
 }
 
@@ -1842,16 +1904,35 @@ let graphAnimationFrame;
 function initGraph() {
   if (!graphCanvas) return;
   const ctx = graphCanvas.getContext('2d');
-  
+
+  // Theme-aware colors (resolved once per open)
+  const _css = getComputedStyle(document.body);
+  const GC = {
+    bg: (_css.getPropertyValue('--bg-color') || '#12100e').trim(),
+    node: (_css.getPropertyValue('--accent-color') || '#a87b51').trim(),
+    stroke: (_css.getPropertyValue('--accent-hover') || '#8e623a').trim(),
+    text: (_css.getPropertyValue('--text-primary') || '#4a3c31').trim(),
+    edge: (_css.getPropertyValue('--accent-color') || '#a87b51').trim()
+  };
+  const hexToRgb = (h) => {
+    const m = h.replace('#', '');
+    const n = m.length === 3 ? m.split('').map(c => c + c).join('') : m;
+    const int = parseInt(n, 16);
+    return `${(int >> 16) & 255}, ${(int >> 8) & 255}, ${int & 255}`;
+  };
+  const edgeRgb = GC.edge.startsWith('#') ? hexToRgb(GC.edge) : '168, 123, 81';
+
   const rect = homeGraph.getBoundingClientRect();
   graphCanvas.width = rect.width;
   graphCanvas.height = rect.height;
   
+  const cx = rect.width / 2, cy = rect.height / 2;
   const gNodes = notes.map(n => ({
     id: n.id,
     title: n.title || 'Untitled',
-    x: Math.random() * rect.width,
-    y: Math.random() * rect.height,
+    // start clustered near the centre so the layout settles inward instead of flinging off-screen
+    x: cx + (Math.random() - 0.5) * Math.min(rect.width, 400),
+    y: cy + (Math.random() - 0.5) * Math.min(rect.height, 300),
     vx: 0,
     vy: 0,
     radius: 30
@@ -1874,11 +1955,13 @@ function initGraph() {
     node.radius = 12 + Math.min(connections * 3, 20);
   });
   
-  const repelDist = 250;
-  const repelForce = 1.2;
-  const linkDist = 150;
-  const linkForce = 0.08;
-  const centerForce = 0.03;
+  // Scale forces to node count so many notes spread out but stay on-screen
+  const many = gNodes.length > 25;
+  const repelDist = many ? 150 : 250;
+  const repelForce = many ? 1.1 : 1.2;
+  const linkDist = many ? 70 : 150;
+  const linkForce = many ? 0.05 : 0.08;
+  const centerForce = many ? 0.025 : 0.03;
   const friction = 0.85;
   
   let draggedNode = null;
@@ -1989,6 +2072,12 @@ function initGraph() {
         n.vx *= friction;
         n.vy *= friction;
       }
+      // Keep every node inside the canvas so nothing flies off-screen
+      const pad = n.radius + 24;
+      if (n.x < pad) { n.x = pad; n.vx *= -0.5; }
+      if (n.x > graphCanvas.width - pad) { n.x = graphCanvas.width - pad; n.vx *= -0.5; }
+      if (n.y < pad) { n.y = pad; n.vy *= -0.5; }
+      if (n.y > graphCanvas.height - pad) { n.y = graphCanvas.height - pad; n.vy *= -0.5; }
     });
     
     // Determine active set for hovering and searching
@@ -2036,7 +2125,7 @@ function initGraph() {
       
       edge.currentAlpha += (targetAlpha - edge.currentAlpha) * 0.15; // Smooth interpolation
       
-      ctx.strokeStyle = `rgba(168, 123, 81, ${edge.currentAlpha})`;
+      ctx.strokeStyle = `rgba(${edgeRgb}, ${edge.currentAlpha})`;
       
       ctx.beginPath();
       ctx.moveTo(s.x, s.y);
@@ -2060,22 +2149,22 @@ function initGraph() {
       // Solid background mask to hide edges passing behind
       ctx.beginPath();
       ctx.arc(n.x, n.y, n.radius + 1, 0, Math.PI * 2);
-      ctx.fillStyle = '#f9f6f3';
+      ctx.fillStyle = GC.bg;
       ctx.fill();
-      
+
       // Draw actual node with interpolated alpha
       ctx.globalAlpha = n.currentAlpha;
-      
+
       ctx.beginPath();
       ctx.arc(n.x, n.y, n.radius, 0, Math.PI * 2);
-      ctx.fillStyle = '#ffffff';
+      ctx.fillStyle = GC.node;
       ctx.fill();
-      
+
       ctx.lineWidth = 3;
-      ctx.strokeStyle = '#a87b51';
+      ctx.strokeStyle = GC.stroke;
       ctx.stroke();
-      
-      ctx.fillStyle = '#4a3c31';
+
+      ctx.fillStyle = GC.text;
       ctx.font = '600 13px Inter, -apple-system, BlinkMacSystemFont, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
@@ -2083,10 +2172,10 @@ function initGraph() {
       if (txt.length > 24) txt = txt.substring(0, 22) + '...';
       
       if (n.currentAlpha > 0.4) {
-        ctx.shadowColor = 'white';
+        ctx.shadowColor = GC.bg;
         ctx.shadowBlur = 4;
         ctx.lineWidth = 4;
-        ctx.strokeStyle = `rgba(255, 255, 255, 0.8)`;
+        ctx.strokeStyle = GC.bg;
         ctx.strokeText(txt, n.x, n.y + n.radius + 8);
         ctx.shadowBlur = 0;
       }
@@ -2945,10 +3034,90 @@ function refreshSelects() {
   });
 }
 
+// -----------------------------------------
+// Global search — searches notes, college folders/PDFs, tasks, events, links
+// -----------------------------------------
+const GS_ICONS = {
+  note: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>',
+  folder: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>',
+  pdf: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="8" y1="13" x2="16" y2="13"></line><line x1="8" y1="17" x2="13" y2="17"></line></svg>',
+  task: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>',
+  event: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>',
+  link: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>'
+};
+function gsEscape(s) { return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
+
+function initGlobalSearch() {
+  const input = document.getElementById('global-search-input');
+  const box = document.getElementById('global-search-results');
+  if (!input || !box) return;
+  let items = [], active = -1;
+
+  function collect(term) {
+    const res = [];
+    notes.forEach(n => {
+      const title = n.title || 'Untitled Note';
+      const body = (n.body || '').replace(/<[^>]*>?/gm, '');
+      if (title.toLowerCase().includes(term) || body.toLowerCase().includes(term))
+        res.push({ type: 'Note', icon: GS_ICONS.note, label: noteDisplayTitle(n), sub: noteGroup(n), action: () => setActiveNote(n.id) });
+    });
+    collegeFolders.forEach(f => {
+      if ((f.name || '').toLowerCase().includes(term) || (f.category || '').toLowerCase().includes(term))
+        res.push({ type: 'College Folder', icon: GS_ICONS.folder, label: f.name, sub: f.category || '', action: () => { window.toggleCollegePanel(); window.openCollegeFolder(f.id); } });
+      (f.pdfs || []).forEach(p => {
+        if ((p.name || '').toLowerCase().includes(term))
+          res.push({ type: 'College File', icon: GS_ICONS.pdf, label: p.name, sub: f.name, action: () => { window.toggleCollegePanel(); window.openCollegeFolder(f.id); setTimeout(() => window.viewCollegePDF(p.id), 80); } });
+      });
+    });
+    tasks.forEach(t => { if ((t.text || '').toLowerCase().includes(term)) res.push({ type: 'Task', icon: GS_ICONS.task, label: t.text, sub: t.completed ? 'done' : '', action: () => window.toggleTasksPanel() }); });
+    calendarTasks.forEach(e => { if ((e.event || '').toLowerCase().includes(term)) res.push({ type: 'Event', icon: GS_ICONS.event, label: e.event, sub: '', action: () => window.toggleTasksPanel() }); });
+    quicklinks.forEach(l => { if ((l.title || '').toLowerCase().includes(term) || (l.url || '').toLowerCase().includes(term)) res.push({ type: 'Link', icon: GS_ICONS.link, label: l.title, sub: l.url, action: () => window.open(l.url.startsWith('http') ? l.url : 'https://' + l.url, '_blank') }); });
+    return res.slice(0, 60);
+  }
+
+  function render() {
+    const q = input.value.trim();
+    active = -1;
+    if (!q) { box.style.display = 'none'; box.innerHTML = ''; return; }
+    items = collect(q.toLowerCase());
+    if (items.length === 0) { box.innerHTML = `<div class="gs-empty">No matches for “${gsEscape(q)}”</div>`; box.style.display = 'block'; return; }
+    const order = ['Note', 'College Folder', 'College File', 'Task', 'Event', 'Link'];
+    let html = '';
+    order.forEach(type => {
+      const group = items.filter(it => it.type === type);
+      if (!group.length) return;
+      html += `<div class="gs-group-label">${type}${group.length > 1 ? 's' : ''} · ${group.length}</div>`;
+      group.forEach(it => {
+        html += `<button class="gs-item" data-i="${items.indexOf(it)}">${it.icon}<span class="gs-label">${gsEscape(it.label)}</span>${it.sub ? `<span class="gs-sub">${gsEscape(it.sub)}</span>` : ''}</button>`;
+      });
+    });
+    box.innerHTML = html;
+    box.style.display = 'block';
+    box.querySelectorAll('.gs-item').forEach(el => {
+      el.onclick = () => { const it = items[+el.dataset.i]; input.value = ''; box.style.display = 'none'; if (it) it.action(); };
+    });
+  }
+
+  input.addEventListener('input', render);
+  input.addEventListener('focus', () => { if (input.value.trim()) render(); });
+  input.addEventListener('keydown', (e) => {
+    const btns = [...box.querySelectorAll('.gs-item')];
+    if (e.key === 'ArrowDown') { e.preventDefault(); active = Math.min(active + 1, btns.length - 1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); active = Math.max(active - 1, 0); }
+    else if (e.key === 'Enter') { e.preventDefault(); (btns[active] || btns[0])?.click(); return; }
+    else if (e.key === 'Escape') { box.style.display = 'none'; input.blur(); return; }
+    else return;
+    btns.forEach((b, i) => b.classList.toggle('gs-active', i === active));
+    if (btns[active]) btns[active].scrollIntoView({ block: 'nearest' });
+  });
+  document.addEventListener('click', (e) => { if (!e.target.closest('.global-search-wrap')) box.style.display = 'none'; });
+}
+
 // Initial load
 applySettings();
 enhanceSelects();
 refreshSelects();
+initGlobalSearch();
 
 // -----------------------------------------
 // Native menu: File > New Note
@@ -3173,7 +3342,8 @@ window.viewCollegePDF = function(pdfId) {
       titleEl.textContent = pdf.name;
       noteContentEl.style.display = 'none';
       iframe.style.display = 'block';
-      iframe.src = pdf.data;
+      // path = file stored on disk (large PDFs); data = inline base64 (legacy small uploads)
+      iframe.src = pdf.path || pdf.data;
     }
     modal.style.display = 'flex';
   }

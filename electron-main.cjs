@@ -26,7 +26,8 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
       contextIsolation: true,
-      sandbox: true
+      sandbox: true,
+      plugins: true // enable the built-in PDF viewer for College Notes
     }
   });
 
