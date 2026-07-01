@@ -232,22 +232,29 @@ function init() {
   }
   
   if (bannerUpload) {
-    bannerUpload.addEventListener('change', (e) => {
+    bannerUpload.addEventListener('change', async (e) => {
       const file = e.target.files[0];
-      if (file) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          const dataUrl = e.target.result;
-          dashboardBanner.style.backgroundImage = `url(${dataUrl})`;
-          updateBannerTextColor(dataUrl);
-          try {
-            localStorage.setItem('dashboardBanner', dataUrl);
-          } catch (err) {
-            console.warn('Banner image too large for localStorage', err);
-          }
-        };
-        reader.readAsDataURL(file);
+      if (!file) return;
+      // Save the cover to disk (path only in the store) so the store stays small/fast.
+      if (window.electronAPI && window.electronAPI.saveBoardFile) {
+        try {
+          const buf = await file.arrayBuffer();
+          const osPath = await window.electronAPI.saveBoardFile(file.name || 'banner.png', buf);
+          const url = 'file:///' + String(osPath).replace(/\\/g, '/');
+          dashboardBanner.style.backgroundImage = `url(${url})`;
+          updateBannerTextColor(url);
+          localStorage.setItem('dashboardBanner', url);
+          return;
+        } catch (err) { /* fall through to inline data URL */ }
       }
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const dataUrl = ev.target.result;
+        dashboardBanner.style.backgroundImage = `url(${dataUrl})`;
+        updateBannerTextColor(dataUrl);
+        try { localStorage.setItem('dashboardBanner', dataUrl); } catch (_) {}
+      };
+      reader.readAsDataURL(file);
     });
   }
   
