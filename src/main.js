@@ -241,7 +241,10 @@ function init() {
     editorHomeBtn.addEventListener('click', () => setActiveNote(null));
   }
   
-  if (notes.length === 0) {
+  // Only seed the welcome note on a genuine first run. The `opennotes_initialized`
+  // flag prevents a transient read failure from overwriting existing notes with a
+  // fresh welcome note (which is how data appeared to "reset" before).
+  if (notes.length === 0 && !localStorage.getItem('opennotes_initialized')) {
     const newNote = {
       id: Date.now().toString(),
       title: 'Welcome to YourNotes',
@@ -250,6 +253,7 @@ function init() {
       updatedAt: Date.now()
     };
     notes.push(newNote);
+    localStorage.setItem('opennotes_initialized', '1');
     saveNotes();
   }
   
@@ -352,6 +356,82 @@ let homeSort = localStorage.getItem('opennotes_home_sort') || 'recent';
 let homeFolderFilter = 'all';
 const collapsedGroups = new Set();
 
+// Pinned project folders (group names) — render first in the Projects grid
+let pinnedGroups = JSON.parse(localStorage.getItem('opennotes_pinned_groups') || '[]');
+window.togglePinGroup = function(name) {
+  if (pinnedGroups.includes(name)) pinnedGroups = pinnedGroups.filter(g => g !== name);
+  else pinnedGroups.push(name);
+  localStorage.setItem('opennotes_pinned_groups', JSON.stringify(pinnedGroups));
+  renderHomeGrid(homeSearchInput ? homeSearchInput.value : '');
+};
+
+// -----------------------------------------
+// Favourites — star anything (notes, project folders, college folders/PDFs);
+// listed together on a Favourites view under College Notes. Stored as {type, id}.
+// -----------------------------------------
+let favourites = JSON.parse(localStorage.getItem('opennotes_favourites') || '[]');
+function isFav(type, id) { return favourites.some(f => f.type === type && f.id === id); }
+window.toggleFav = function(e, type, id) {
+  if (e) { e.preventDefault(); e.stopPropagation(); }
+  if (isFav(type, id)) favourites = favourites.filter(f => !(f.type === type && f.id === id));
+  else favourites.push({ type, id });
+  localStorage.setItem('opennotes_favourites', JSON.stringify(favourites));
+  // re-render whatever is visible
+  if (document.getElementById('home-grid') && document.getElementById('home-grid').offsetParent) renderHomeGrid(homeSearchInput ? homeSearchInput.value : '');
+  if (typeof renderCollegeFolders === 'function') { const c = document.getElementById('home-college'); if (c && c.style.display !== 'none') { if (activeCollegeFolderId) renderCollegeSingleFolder(activeCollegeFolderId); else renderCollegeFolders(); } }
+  if (typeof renderFavourites === 'function' && document.getElementById('college-favourites-view') && document.getElementById('college-favourites-view').style.display !== 'none') renderFavourites();
+};
+const STAR_SVG = (filled) => `<svg viewBox="0 0 24 24" width="16" height="16" fill="${filled ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>`;
+
+window.showFavourites = function() {
+  document.getElementById('college-folders-container').style.display = 'none';
+  document.getElementById('college-single-folder-view').style.display = 'none';
+  document.getElementById('college-header-actions').style.display = 'none';
+  document.getElementById('college-favourites-view').style.display = 'flex';
+  renderFavourites();
+};
+window.hideFavourites = function() {
+  document.getElementById('college-favourites-view').style.display = 'none';
+  document.getElementById('college-header-actions').style.display = 'flex';
+  document.getElementById('college-folders-container').style.display = 'flex';
+  if (typeof renderCollegeFolders === 'function') renderCollegeFolders();
+};
+function renderFavourites() {
+  const list = document.getElementById('favourites-list');
+  if (!list) return;
+  const items = [];
+  favourites.forEach(f => {
+    if (f.type === 'note') {
+      const n = notes.find(x => x.id === f.id);
+      if (n) items.push({ icon: GS_ICONS.note, label: noteDisplayTitle(n), sub: noteGroup(n), type: 'Note', open: () => { window.hideFavourites(); setActiveNote(n.id); } });
+    } else if (f.type === 'group') {
+      if (notes.some(n => noteGroup(n) === f.id)) items.push({ icon: GS_ICONS.folder, label: f.id, sub: 'Project folder', type: 'Folder', open: () => { window.goToDashboard(); window.setHomeFolderFilter(f.id); } });
+    } else if (f.type === 'folder') {
+      const fol = collegeFolders.find(x => x.id === f.id);
+      if (fol) items.push({ icon: GS_ICONS.folder, label: fol.name, sub: fol.category || 'College', type: 'College Folder', open: () => { window.hideFavourites(); window.openCollegeFolder(fol.id); } });
+    } else if (f.type === 'pdf') {
+      let found = null, fol = null;
+      collegeFolders.forEach(x => (x.pdfs || []).forEach(p => { if (p.id === f.id) { found = p; fol = x; } }));
+      if (found) items.push({ icon: GS_ICONS.pdf, label: found.name, sub: fol.name, type: 'College File', open: () => { window.hideFavourites(); window.openCollegeFolder(fol.id); setTimeout(() => window.viewCollegePDF(found.id), 80); } });
+    }
+  });
+  if (items.length === 0) {
+    list.innerHTML = `<div style="text-align:center; padding:60px 20px; color:var(--text-secondary);">
+      <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:0.5; margin-bottom:16px;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+      <h4 style="font-size:1.1rem; font-weight:600; color:var(--text-primary); margin:0 0 4px;">No favourites yet</h4>
+      <p style="font-size:0.9rem; margin:0;">Tap the ★ on any note, folder, or file to add it here.</p></div>`;
+    return;
+  }
+  list.innerHTML = '';
+  items.forEach(it => {
+    const b = document.createElement('button');
+    b.className = 'fav-row';
+    b.innerHTML = `${it.icon}<span class="fav-row-label">${gsEscape(it.label)}</span><span class="fav-row-type">${it.type}</span>${it.sub ? `<span class="fav-row-sub">${gsEscape(it.sub)}</span>` : ''}`;
+    b.onclick = it.open;
+    list.appendChild(b);
+  });
+}
+
 // A note's "folder" is the prefix before " · " in its title (set on import); else "Ungrouped".
 function noteGroup(n) {
   const t = n.title || '';
@@ -398,6 +478,7 @@ function makeNoteCard(note) {
   card.onclick = () => setActiveNote(note.id);
   card.oncontextmenu = (e) => { e.preventDefault(); showCollegeContextMenu('note', note.id, e.clientX, e.clientY); };
   card.innerHTML = `
+    <button class="card-fav-btn fav-btn ${isFav('note', note.id) ? 'active' : ''}" title="Favourite" onclick="toggleFav(event,'note','${note.id}')">${STAR_SVG(isFav('note', note.id))}</button>
     <div class="book-card-title">${noteDisplayTitle(note)}</div>
     <div class="book-card-date">${dateString}</div>
   `;
@@ -443,13 +524,22 @@ function renderHomeGrid(searchTerm = '') {
   // Group the filtered notes
   const groups = new Map();
   filtered.forEach(n => { const g = noteGroup(n); if (!groups.has(g)) groups.set(g, []); groups.get(g).push(n); });
-  const groupNames = [...groups.keys()].sort((a, b) => {
-    if (a === 'Ungrouped') return 1; if (b === 'Ungrouped') return -1; return a.localeCompare(b);
+
+  // Order folders: pinned first, then by the chosen sort (which now sorts the folders too)
+  const repTime = (items, oldest) => items.reduce((acc, n) => oldest ? Math.min(acc, n.updatedAt || 0) : Math.max(acc, n.updatedAt || 0), oldest ? Infinity : 0);
+  const rest = [...groups.keys()].filter(g => !pinnedGroups.includes(g)).sort((a, b) => {
+    if (a === 'Ungrouped') return 1; if (b === 'Ungrouped') return -1;
+    if (homeSort === 'az') return a.localeCompare(b);
+    if (homeSort === 'za') return b.localeCompare(a);
+    const ta = repTime(groups.get(a), homeSort === 'oldest'), tb = repTime(groups.get(b), homeSort === 'oldest');
+    return homeSort === 'oldest' ? ta - tb : tb - ta;
   });
+  const groupNames = [...pinnedGroups.filter(g => groups.has(g)), ...rest];
 
   groupNames.forEach(g => {
     const items = sortNotes(groups.get(g), homeSort);
     const collapsed = collapsedGroups.has(g);
+    const pinned = pinnedGroups.includes(g);
     const header = document.createElement('div');
     header.className = 'note-group-header';
     header.innerHTML = `
@@ -457,6 +547,10 @@ function renderHomeGrid(searchTerm = '') {
       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
       <span class="note-group-name">${g}</span>
       <span class="note-group-count">${items.length}</span>
+      <button class="note-group-btn fav-btn ${isFav('group', g) ? 'active' : ''}" title="Favourite folder" onclick="toggleFav(event,'group','${g.replace(/'/g, "\\'")}')">${STAR_SVG(isFav('group', g))}</button>
+      <button class="note-group-btn pin-btn ${pinned ? 'active' : ''}" title="${pinned ? 'Unpin' : 'Pin'} folder" onclick="event.stopPropagation(); togglePinGroup('${g.replace(/'/g, "\\'")}')">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="${pinned ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"></line><path d="M5 17h14l-1.5-4.5V5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7.5L5 17z"></path></svg>
+      </button>
     `;
     header.onclick = () => { collapsed ? collapsedGroups.delete(g) : collapsedGroups.add(g); renderHomeGrid(searchTerm); };
     homeGrid.appendChild(header);
@@ -830,7 +924,7 @@ window.showPanel = function(panelId, btnId) {
     }
   }
 
-  const panels = ['home-grid', 'home-graph', 'home-tasks', 'home-session', 'home-scratchpad', 'home-settings', 'home-college'];
+  const panels = ['home-grid', 'home-graph', 'home-tasks', 'home-session', 'home-settings', 'home-college'];
   panels.forEach(p => {
     const el = document.getElementById(p);
     if (el) el.style.display = 'none';
@@ -853,7 +947,7 @@ window.showPanel = function(panelId, btnId) {
     if (controls) controls.style.display = 'none';
   }
 
-  const navBtns = ['nav-dashboard-btn', 'nav-projects-btn', 'nav-tasks-btn', 'nav-session-btn', 'nav-scratchpad-btn', 'nav-settings-btn', 'nav-college-btn'];
+  const navBtns = ['nav-dashboard-btn', 'nav-projects-btn', 'nav-tasks-btn', 'nav-session-btn', 'nav-settings-btn', 'nav-college-btn'];
   navBtns.forEach(b => {
     const el = document.getElementById(b);
     if (el) el.classList.remove('active');
@@ -1966,74 +2060,71 @@ function initGraph() {
   
   let draggedNode = null;
   let hoveredNode = null;
-  
-  graphCanvas.onmousedown = (e) => {
-    const r = graphCanvas.getBoundingClientRect();
-    const mx = e.clientX - r.left;
-    const my = e.clientY - r.top;
-    
+
+  // View transform: nodes live in "world" space (canvas size at scale 1); pan/zoom
+  // only affect how the world is drawn. screen = world * scale + pan.
+  let scale = 1, panX = 0, panY = 0;
+  let panning = false, panStart = null;
+  const screenXY = (e) => { const r = graphCanvas.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+  const toWorld = (sx, sy) => [(sx - panX) / scale, (sy - panY) / scale];
+  const nodeAt = (wx, wy) => {
     for (let i = gNodes.length - 1; i >= 0; i--) {
       const n = gNodes[i];
-      const dx = mx - n.x;
-      const dy = my - n.y;
-      if (Math.sqrt(dx*dx + dy*dy) <= n.radius) {
-        draggedNode = n;
-        hoveredNode = n;
-        break;
-      }
+      const dx = wx - n.x, dy = wy - n.y;
+      if (Math.sqrt(dx * dx + dy * dy) <= n.radius) return n;
     }
+    return null;
   };
-  
+
+  graphCanvas.onmousedown = (e) => {
+    const [sx, sy] = screenXY(e);
+    const [wx, wy] = toWorld(sx, sy);
+    const hit = nodeAt(wx, wy);
+    if (hit) { draggedNode = hit; hoveredNode = hit; }
+    else { panning = true; panStart = { sx, sy, panX, panY }; graphCanvas.style.cursor = 'grabbing'; }
+  };
+
   graphCanvas.onmousemove = (e) => {
-    const r = graphCanvas.getBoundingClientRect();
-    const mx = e.clientX - r.left;
-    const my = e.clientY - r.top;
-    
+    const [sx, sy] = screenXY(e);
     if (draggedNode) {
-      draggedNode.x = mx;
-      draggedNode.y = my;
-      draggedNode.vx = 0;
-      draggedNode.vy = 0;
+      const [wx, wy] = toWorld(sx, sy);
+      draggedNode.x = wx; draggedNode.y = wy; draggedNode.vx = 0; draggedNode.vy = 0;
       return;
     }
-    
-    hoveredNode = null;
-    for (let i = gNodes.length - 1; i >= 0; i--) {
-      const n = gNodes[i];
-      const dx = mx - n.x;
-      const dy = my - n.y;
-      if (Math.sqrt(dx*dx + dy*dy) <= n.radius) {
-        hoveredNode = n;
-        break;
-      }
-    }
-    
-    graphCanvas.style.cursor = hoveredNode ? 'grab' : 'default';
+    if (panning) { panX = panStart.panX + (sx - panStart.sx); panY = panStart.panY + (sy - panStart.sy); return; }
+    const [wx, wy] = toWorld(sx, sy);
+    hoveredNode = nodeAt(wx, wy);
+    graphCanvas.style.cursor = hoveredNode ? 'grab' : 'move';
   };
-  
-  window.addEventListener('mouseup', () => {
-    draggedNode = null;
-  });
-  
+
+  window.addEventListener('mouseup', () => { draggedNode = null; panning = false; });
+
+  // Wheel to zoom toward the cursor
+  graphCanvas.onwheel = (e) => {
+    e.preventDefault();
+    const [sx, sy] = screenXY(e);
+    const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+    const newScale = Math.max(0.25, Math.min(4, scale * factor));
+    // keep the world point under the cursor fixed
+    panX = sx - ((sx - panX) * (newScale / scale));
+    panY = sy - ((sy - panY) * (newScale / scale));
+    scale = newScale;
+  };
+
   graphCanvas.ondblclick = (e) => {
-    const r = graphCanvas.getBoundingClientRect();
-    const mx = e.clientX - r.left;
-    const my = e.clientY - r.top;
-    for (let n of gNodes) {
-      const dx = mx - n.x;
-      const dy = my - n.y;
-      if (Math.sqrt(dx*dx + dy*dy) <= n.radius) {
-        setActiveNote(n.id);
-        break;
-      }
-    }
+    const [sx, sy] = screenXY(e);
+    const hit = nodeAt(...toWorld(sx, sy));
+    if (hit) setActiveNote(hit.id);
   };
 
   if (graphAnimationFrame) cancelAnimationFrame(graphAnimationFrame);
 
   function draw() {
+    // clear in device space, then draw the world under the pan/zoom transform
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, graphCanvas.width, graphCanvas.height);
-    
+    ctx.setTransform(scale, 0, 0, scale, panX, panY);
+
     for (let i = 0; i < gNodes.length; i++) {
       for (let j = i + 1; j < gNodes.length; j++) {
         let dx = gNodes[i].x - gNodes[j].x;
@@ -2288,20 +2379,6 @@ window.exitFullscreenPomodoro = function() {
 };
 
 // -----------------------------------------
-// Scratchpad Logic
-// -----------------------------------------
-const scratchpadEl = document.getElementById('scratchpad-content');
-if (scratchpadEl) {
-  const savedData = localStorage.getItem('opennotes_scratchpad');
-  if (savedData) {
-    scratchpadEl.innerHTML = savedData;
-  }
-  scratchpadEl.addEventListener('input', () => {
-    localStorage.setItem('opennotes_scratchpad', scratchpadEl.innerHTML);
-  });
-}
-
-// -----------------------------------------
 // Daily Journal Logic
 // -----------------------------------------
 let currentMood = null;
@@ -2534,12 +2611,32 @@ window.deleteQuicklink = function(e, id) {
   renderQuicklinks();
 };
 
+let editingQuicklinkId = null;
+const qlEsc = (s) => String(s).replace(/"/g, '&quot;');
+const qlSave = () => localStorage.setItem('opennotes_quicklinks', JSON.stringify(quicklinks));
+const qlInputStyle = "padding: 6px 10px; border-radius: 6px; border: 1px solid var(--panel-border); font-family: inherit; font-size: 0.85rem; outline: none; background: var(--bg-color); color: var(--text-primary);";
+
 function renderQuicklinks() {
   const container = document.getElementById('quicklinks-container');
   if (!container) return;
   container.innerHTML = '';
-  quicklinks.forEach(q => {
-    let targetUrl = q.url.startsWith('http') ? q.url : 'https://' + q.url;
+  const sorted = [...quicklinks].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+  sorted.forEach(q => {
+    // Inline edit form (window.prompt is disabled in Electron, so we edit in place)
+    if (editingQuicklinkId === q.id) {
+      const box = document.createElement('div');
+      box.style = 'display: flex; flex-direction: column; gap: 6px; padding: 8px 12px;';
+      box.innerHTML = `
+        <input id="ql-edit-title-${q.id}" value="${qlEsc(q.title)}" placeholder="Title" style="${qlInputStyle}" />
+        <input id="ql-edit-url-${q.id}" value="${qlEsc(q.url)}" placeholder="URL" style="${qlInputStyle}" />
+        <div style="display: flex; gap: 6px;">
+          <button onclick="saveQuicklinkEdit(${q.id})" style="flex:1; background: var(--accent-color); color: #fff; border: none; padding: 6px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.8rem;">Save</button>
+          <button onclick="cancelQuicklinkEdit()" style="flex:1; background: var(--overlay-medium); color: var(--text-primary); border: none; padding: 6px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.8rem;">Cancel</button>
+        </div>`;
+      container.appendChild(box);
+      return;
+    }
+    const targetUrl = q.url.startsWith('http') ? q.url : 'https://' + q.url;
     const a = document.createElement('a');
     a.href = targetUrl;
     a.target = "_blank";
@@ -2550,38 +2647,46 @@ function renderQuicklinks() {
         <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
         ${q.title}
       </span>
-      <span class="quicklink-actions" style="display: flex; align-items: center; gap: 6px; opacity: 0; transition: opacity 0.2s;">
+      <span class="quicklink-actions" style="display: flex; align-items: center; gap: 6px; opacity: ${q.pinned ? '1' : '0'}; transition: opacity 0.2s;">
+        <button onclick="togglePinQuicklink(event, ${q.id})" title="${q.pinned ? 'Unpin' : 'Pin'}" style="background: none; border: none; color: ${q.pinned ? 'var(--accent-color)' : 'var(--text-secondary)'}; cursor: pointer; display: flex; align-items: center;">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="${q.pinned ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"></line><path d="M5 17h14l-1.5-4.5V5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7.5L5 17z"></path></svg>
+        </button>
         <button onclick="editQuicklink(event, ${q.id})" title="Edit" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center;">
           <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
         </button>
         <button onclick="deleteQuicklink(event, ${q.id})" title="Delete" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 1.1rem; display: flex; align-items: center;">&times;</button>
       </span>
     `;
-    a.onmouseenter = () => {
-      const acts = a.querySelector('.quicklink-actions');
-      if (acts) acts.style.opacity = '1';
-    };
-    a.onmouseleave = () => {
-      const acts = a.querySelector('.quicklink-actions');
-      if (acts) acts.style.opacity = '0';
-    };
+    a.onmouseenter = () => { const acts = a.querySelector('.quicklink-actions'); if (acts) acts.style.opacity = '1'; };
+    a.onmouseleave = () => { const acts = a.querySelector('.quicklink-actions'); if (acts && !q.pinned) acts.style.opacity = '0'; };
     container.appendChild(a);
   });
 }
 
 window.editQuicklink = function(e, id) {
-  e.preventDefault();
-  e.stopPropagation();
-  const q = quicklinks.find(x => x.id === id);
-  if (!q) return;
-  const title = prompt('Edit link title:', q.title);
-  if (title === null) return;
-  const url = prompt('Edit link URL:', q.url);
-  if (url === null) return;
-  if (title.trim()) q.title = title.trim();
-  if (url.trim()) q.url = url.trim();
-  localStorage.setItem('opennotes_quicklinks', JSON.stringify(quicklinks));
+  e.preventDefault(); e.stopPropagation();
+  editingQuicklinkId = id;
   renderQuicklinks();
+  const t = document.getElementById('ql-edit-title-' + id);
+  if (t) t.focus();
+};
+window.saveQuicklinkEdit = function(id) {
+  const q = quicklinks.find(x => x.id === id);
+  if (q) {
+    const t = document.getElementById('ql-edit-title-' + id);
+    const u = document.getElementById('ql-edit-url-' + id);
+    if (t && t.value.trim()) q.title = t.value.trim();
+    if (u && u.value.trim()) q.url = u.value.trim();
+    qlSave();
+  }
+  editingQuicklinkId = null;
+  renderQuicklinks();
+};
+window.cancelQuicklinkEdit = function() { editingQuicklinkId = null; renderQuicklinks(); };
+window.togglePinQuicklink = function(e, id) {
+  e.preventDefault(); e.stopPropagation();
+  const q = quicklinks.find(x => x.id === id);
+  if (q) { q.pinned = !q.pinned; qlSave(); renderQuicklinks(); }
 };
 
 renderQuicklinks();
@@ -3113,11 +3218,47 @@ function initGlobalSearch() {
   document.addEventListener('click', (e) => { if (!e.target.closest('.global-search-wrap')) box.style.display = 'none'; });
 }
 
+// -----------------------------------------
+// Sidebar reorder — drag the workspace nav items to reorder; order is persisted.
+// -----------------------------------------
+function initSidebarReorder() {
+  const nav = document.querySelector('.sidebar-nav .nav-section');
+  if (!nav) return;
+
+  // apply saved order
+  const saved = JSON.parse(localStorage.getItem('opennotes_nav_order') || 'null');
+  if (Array.isArray(saved)) saved.forEach(id => { const el = document.getElementById(id); if (el && el.parentNode === nav) nav.appendChild(el); });
+
+  let dragEl = null;
+  nav.querySelectorAll('.nav-link').forEach(link => {
+    link.setAttribute('draggable', 'true');
+    link.addEventListener('dragstart', (e) => { dragEl = link; link.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; });
+    link.addEventListener('dragend', () => {
+      link.classList.remove('dragging');
+      const order = [...nav.querySelectorAll('.nav-link')].map(l => l.id);
+      localStorage.setItem('opennotes_nav_order', JSON.stringify(order));
+    });
+  });
+
+  nav.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    if (!dragEl) return;
+    const others = [...nav.querySelectorAll('.nav-link:not(.dragging)')];
+    const after = others.reduce((closest, child) => {
+      const box = child.getBoundingClientRect();
+      const offset = e.clientY - box.top - box.height / 2;
+      return (offset < 0 && offset > closest.offset) ? { offset, element: child } : closest;
+    }, { offset: -Infinity }).element;
+    if (after == null) nav.appendChild(dragEl); else nav.insertBefore(dragEl, after);
+  });
+}
+
 // Initial load
 applySettings();
 enhanceSelects();
 refreshSelects();
 initGlobalSearch();
+initSidebarReorder();
 
 // -----------------------------------------
 // Native menu: File > New Note
@@ -3189,6 +3330,7 @@ window.renderCollegeFolders = function() {
 
     card.innerHTML = `
       <div class="college-card-actions">
+        <button class="college-action-btn fav-btn ${isFav('folder', folder.id) ? 'active' : ''}" onclick="toggleFav(event,'folder','${folder.id}')" title="Favourite">${STAR_SVG(isFav('folder', folder.id))}</button>
         <button class="college-action-btn" onclick="event.stopPropagation(); window.deleteCollegeFolder('${folder.id}')" title="Delete Folder">
           <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
         </button>
@@ -3268,6 +3410,7 @@ function renderCollegeSingleFolder(folderId) {
 
     card.innerHTML = `
       <div class="college-card-actions">
+        <button class="college-action-btn fav-btn ${isFav('pdf', pdf.id) ? 'active' : ''}" onclick="toggleFav(event,'pdf','${pdf.id}')" title="Favourite">${STAR_SVG(isFav('pdf', pdf.id))}</button>
         <button class="college-action-btn" onclick="event.stopPropagation(); window.deleteCollegePDF('${pdf.id}')" title="Delete PDF">
           <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
         </button>

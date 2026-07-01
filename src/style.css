@@ -13,6 +13,7 @@
   --overlay-light: rgba(74, 60, 49, 0.05);
   --overlay-medium: rgba(74, 60, 49, 0.1);
   --overlay-heavy: rgba(74, 60, 49, 0.15);
+  --sidebar-bg: #ece3d5; /* more visible warm panel than the near-white page bg */
   --shadow-color: var(--shadow-color);
   --shadow-color-light: var(--shadow-color-light);
   --shadow-color-focus: var(--shadow-color-focus);
@@ -32,6 +33,7 @@ body.theme-dark {
   --overlay-light: rgba(255, 255, 255, 0.03);
   --overlay-medium: rgba(255, 255, 255, 0.06);
   --overlay-heavy: rgba(255, 255, 255, 0.1);
+  --sidebar-bg: var(--panel-bg); /* dark mode: keep the existing panel look */
   --shadow-color: transparent;
   --shadow-color-light: transparent;
   --shadow-color-focus: transparent;
@@ -241,7 +243,7 @@ body {
 .sidebar {
   width: 320px;
   min-width: 320px;
-  background: var(--panel-bg);
+  background: var(--sidebar-bg);
   border-right: 1px solid var(--panel-border);
   display: flex;
   flex-direction: column;
@@ -952,6 +954,47 @@ body {
 
 .note-group-chevron { transition: transform 0.2s ease; flex-shrink: 0; }
 .note-group-chevron.collapsed { transform: rotate(-90deg); }
+
+/* pin / favourite buttons on group headers */
+.note-group-btn {
+  background: none; border: none; cursor: pointer; padding: 4px;
+  color: var(--text-secondary); display: inline-flex; align-items: center;
+  border-radius: 6px; opacity: 0; transition: opacity 0.15s, color 0.15s;
+}
+.note-group-header:hover .note-group-btn { opacity: 1; }
+.note-group-btn.active { opacity: 1; color: var(--accent-color); }
+.note-group-btn.pin-btn { margin-left: 0; }
+.note-group-btn.fav-btn { margin-left: 4px; }
+.note-group-header .note-group-count { margin-left: auto; }
+
+/* favourite star on cards */
+.fav-btn { background: none; border: none; cursor: pointer; color: var(--text-secondary); display: inline-flex; align-items: center; }
+.fav-btn.active { color: var(--accent-color); }
+.card-fav-btn {
+  position: absolute; top: 12px; right: 12px; z-index: 2; padding: 4px;
+  border-radius: 6px; opacity: 0; transition: opacity 0.15s;
+}
+.book-card { position: relative; }
+.book-card:hover .card-fav-btn, .card-fav-btn.active { opacity: 1; }
+
+/* Favourites view rows */
+.fav-row {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 14px 16px; margin-bottom: 8px;
+  background: var(--panel-bg); border: 1px solid var(--panel-border);
+  border-radius: 12px; cursor: pointer; text-align: left;
+  color: var(--text-primary); font-family: inherit; font-size: 0.95rem;
+  transition: border-color 0.15s, background 0.15s;
+}
+.fav-row:hover { border-color: var(--accent-color); }
+.fav-row svg { flex: 0 0 auto; color: var(--text-secondary); }
+.fav-row .fav-row-label { font-weight: 600; }
+.fav-row .fav-row-type { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #fff; background: var(--accent-color); border-radius: 20px; padding: 2px 8px; }
+.fav-row .fav-row-sub { margin-left: auto; color: var(--text-secondary); font-size: 0.82rem; white-space: nowrap; }
+
+/* Sidebar reorder (drag) */
+.sidebar-nav .nav-section:first-child .nav-link { cursor: grab; }
+.nav-link.dragging { opacity: 0.4; }
 
 .dashboard-tabs {
   display: flex;

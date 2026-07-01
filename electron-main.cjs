@@ -33,15 +33,43 @@ function createWindow() {
 
   // Data persistence (JSON file in userData)
   const storePath = path.join(app.getPath('userData'), 'local_storage_backup.json');
+  const tmpPath = storePath + '.tmp';
 
   let store = {};
   try {
     if (fs.existsSync(storePath)) {
       store = JSON.parse(fs.readFileSync(storePath, 'utf-8'));
+    } else if (fs.existsSync(tmpPath)) {
+      // A write was interrupted before the rename — recover from the temp file
+      store = JSON.parse(fs.readFileSync(tmpPath, 'utf-8'));
     }
   } catch (e) {
-    console.error('Failed to load store', e);
+    // The store is unreadable/corrupt. NEVER start blank on top of it: preserve it
+    // so nothing is lost, and try to recover from the temp file.
+    console.error('Store parse failed; preserving corrupt file', e);
+    try { fs.renameSync(storePath, storePath + '.corrupt-' + Date.now()); } catch (_) {}
+    try { if (fs.existsSync(tmpPath)) store = JSON.parse(fs.readFileSync(tmpPath, 'utf-8')); } catch (_) {}
   }
+
+  // Atomic, debounced writes: write to a temp file then rename, so a crash/kill
+  // mid-write can never leave a half-written (corrupt) store on disk.
+  let writeTimer = null, dirty = false;
+  function flushStore() {
+    if (!dirty) return;
+    dirty = false;
+    try {
+      fs.writeFileSync(tmpPath, JSON.stringify(store));
+      fs.renameSync(tmpPath, storePath);
+    } catch (e) {
+      console.error('Failed to persist store', e);
+    }
+  }
+  function scheduleWrite() {
+    dirty = true;
+    clearTimeout(writeTimer);
+    writeTimer = setTimeout(flushStore, 120);
+  }
+  app.on('before-quit', flushStore);
 
   ipcMain.on('load-data-sync', (event, key) => {
     event.returnValue = store[key] !== undefined ? store[key] : null;
@@ -49,11 +77,7 @@ function createWindow() {
 
   ipcMain.on('save-data-sync', (event, key, value) => {
     store[key] = value;
-    try {
-      fs.writeFileSync(storePath, JSON.stringify(store));
-    } catch (e) {
-      console.error('Failed to save store', e);
-    }
+    scheduleWrite();
     event.returnValue = true;
   });
 
