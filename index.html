@@ -5,7 +5,7 @@
     <!-- CSP: blocks remote/injected scripts & framing. 'unsafe-inline' is required because the
          app uses inline event handlers/styles throughout (ponytail: rewriting all of them is out of
          scope; the meta CSP + Electron contextIsolation are the defense-in-depth ceiling here). -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; connect-src 'self' https:; object-src 'none'; base-uri 'none'; frame-src 'self' data: blob: file:" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https: file:; media-src 'self' data: blob: https:; connect-src 'self' https:; object-src 'none'; base-uri 'none'; frame-src 'self' data: blob: file:" />
     <link rel="icon" type="image/png" href="/icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>YourNotes</title>
@@ -159,8 +159,15 @@
           
           <div class="home-page" id="home-page" style="display: none;">
             
-            <div class="dashboard-banner" id="dashboard-banner" onclick="toggleDashboardBanner(event)">
-              
+            <div class="dashboard-banner" id="dashboard-banner" onclick="toggleDashboardBanner(event)" ondragover="boardDragOver(event)" ondragleave="boardDragLeave(event)" ondrop="boardDrop(event)">
+
+              <!-- Board layer: dropped files/images/notes live here as movable, resizable cards -->
+              <div id="dashboard-board"></div>
+              <div class="board-drop-hint" id="board-drop-hint">
+                <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                <span>Drop files, images or notes here — they pin to your board</span>
+              </div>
+
               <div class="banner-text-overlay">
                 <div class="banner-text-top">
                   <div class="banner-line-1">YourNotes</div>
@@ -425,7 +432,7 @@
                     <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><circle cx="5.5" cy="17.5" r="2.5"></circle><circle cx="17.5" cy="15.5" r="2.5"></circle><path d="M8 17V5l12-2v12"></path></svg>
                     <span data-i18n="session.lofi">Lofi Music</span>
                   </h4>
-                  <p style="color: var(--text-secondary); font-size: 0.85rem; margin-top: -8px;" id="lofi-now-playing" data-i18n="session.lofi_sub">Royalty-free focus beats</p>
+                  <p style="color: var(--text-secondary); font-size: 0.85rem; margin-top: -8px;" id="lofi-now-playing" class="lofi-now-playing" data-i18n="session.lofi_sub">Royalty-free focus beats</p>
                   <select id="lofi-track" onchange="changeLofiTrack()" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--panel-border); background: transparent; color: var(--text-primary); font-family: inherit; cursor: pointer; appearance: auto;">
                     <!-- ponytail: these are royalty-free (Pixabay Content License — free for commercial use, no
                          attribution). If a CDN URL ever 404s, swap it here or use "Load your own track". -->
@@ -434,7 +441,7 @@
                     <option value="https://cdn.pixabay.com/download/audio/2023/07/30/audio_e0908e8569.mp3?filename=good-night-160166.mp3">Good Night</option>
                   </select>
                   <div style="display: flex; align-items: center; gap: 12px;">
-                    <button id="lofi-toggle" onclick="toggleLofi()" style="background: var(--accent-color); color: #fff; border: none; width: 44px; height: 44px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                    <button id="lofi-toggle" class="lofi-toggle" onclick="toggleLofi()" style="background: var(--accent-color); color: #fff; border: none; width: 44px; height: 44px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
                       <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
                     </button>
                     <input type="range" id="lofi-volume" min="0" max="1" step="0.05" value="0.6" oninput="setLofiVolume(this.value)" style="flex: 1; accent-color: var(--accent-color); cursor: pointer;" />
@@ -769,6 +776,23 @@
         <div style="display: flex; gap: 16px; margin-top: 40px;">
           <button onclick="restPomodoro()" style="background: var(--overlay-medium); color: var(--accent-color); border: 1px solid var(--panel-border); padding: 12px 32px; border-radius: 12px; font-weight: 600; font-size: 1.1rem; cursor: pointer; transition: all 0.2s;">Rest (5m)</button>
           <button onclick="exitFullscreenPomodoro()" style="background: var(--accent-color); color: #fff; border: none; padding: 12px 32px; border-radius: 12px; font-weight: 600; font-size: 1.1rem; cursor: pointer; transition: all 0.2s; box-shadow: 0 8px 24px rgba(168, 123, 81, 0.25);">Exit Focus Mode</button>
+        </div>
+
+        <!-- Lofi player (shares the same audio as the Session panel) -->
+        <div style="margin-top: 34px; padding-top: 28px; border-top: 1px solid var(--panel-border); width: 100%; display: flex; flex-direction: column; align-items: center; gap: 16px;">
+          <div style="display: flex; align-items: center; gap: 9px; color: var(--text-secondary); font-size: 0.95rem; font-weight: 600;">
+            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><circle cx="5.5" cy="17.5" r="2.5"></circle><circle cx="17.5" cy="15.5" r="2.5"></circle><path d="M8 17V5l12-2v12"></path></svg>
+            <span class="lofi-now-playing">Lofi Study</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 16px;">
+            <button class="lofi-toggle" onclick="toggleLofi()" style="background: var(--accent-color); color: #fff; border: none; width: 48px; height: 48px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 8px 20px rgba(168,123,81,0.25);">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+            </button>
+            <button onclick="nextLofiTrack()" title="Next track" style="background: var(--overlay-medium); color: var(--text-primary); border: none; width: 42px; height: 42px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center;">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><polygon points="5 4 15 12 5 20 5 4"></polygon><rect x="17" y="4" width="2.5" height="16"></rect></svg>
+            </button>
+            <input type="range" min="0" max="1" step="0.05" value="0.6" oninput="setLofiVolume(this.value)" style="width: 170px; accent-color: var(--accent-color); cursor: pointer;" />
+          </div>
         </div>
       </div>
     </div>

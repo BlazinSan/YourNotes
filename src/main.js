@@ -24,6 +24,26 @@ Storage.prototype.getItem = function(key) {
 };
 // ---------------------------------
 
+// --- Store-ready guard ---------------------------------------------------
+// If the data file exists but couldn't be read yet (e.g. antivirus briefly locking
+// it right after a close→reopen), NEVER render an empty app (which used to look like
+// a "reset"). Show a loading state and reload until the read succeeds. Data is safe
+// on disk the whole time.
+(function guardStoreReady() {
+  const api = window.electronAPI;
+  if (!(api && api.storeLoadFailed)) { return; }
+  let failed = false;
+  try { failed = api.storeLoadFailed(); } catch (_) { failed = false; }
+  if (!failed) { try { sessionStorage.removeItem('__yn_retries'); } catch (_) {} return; }
+  const tries = parseInt((() => { try { return sessionStorage.getItem('__yn_retries'); } catch (_) { return '0'; } })() || '0', 10);
+  if (tries >= 8) { return; } // give up gracefully after ~7s; data remains safe on disk
+  try { sessionStorage.setItem('__yn_retries', String(tries + 1)); } catch (_) {}
+  const paint = () => { if (document.body) document.body.innerHTML = '<div style="position:fixed;inset:0;display:flex;flex-direction:column;gap:14px;align-items:center;justify-content:center;font-family:Inter,-apple-system,sans-serif;color:#8c7a6b;background:#12100e;"><div style="width:34px;height:34px;border:3px solid rgba(201,155,102,0.25);border-top-color:#c99b66;border-radius:50%;animation:ynspin 0.8s linear infinite;"></div><div>Loading your workspace…</div><style>@keyframes ynspin{to{transform:rotate(360deg)}}</style></div>'; };
+  if (document.body) paint(); else document.addEventListener('DOMContentLoaded', paint);
+  setTimeout(() => location.reload(), 650);
+  throw new Error('yn:store-not-ready-retrying'); // halt the rest of main.js this pass
+})();
+
 // State
 let notes = JSON.parse(localStorage.getItem('opennotes_data')) || [];
 let activeNoteId = null;
@@ -2993,12 +3013,15 @@ let lofiPlaying = false;
 function lofiEl() { return document.getElementById('lofi-audio'); }
 function lofiVol() { const v = document.getElementById('lofi-volume'); return v ? parseFloat(v.value) : 0.6; }
 
+// Update every lofi play/pause button (Session panel + Focus fullscreen share one audio)
 function setLofiIcon(playing) {
-  const btn = document.getElementById('lofi-toggle');
-  if (!btn) return;
-  btn.innerHTML = playing
+  const html = playing
     ? '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>'
     : '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>';
+  document.querySelectorAll('.lofi-toggle').forEach(b => { b.innerHTML = html; });
+}
+function setLofiNowPlaying(text) {
+  document.querySelectorAll('.lofi-now-playing').forEach(el => { el.textContent = text; });
 }
 
 window.toggleLofi = function() {
@@ -3022,23 +3045,118 @@ window.changeLofiTrack = function() {
   const audio = lofiEl();
   if (!sel || !audio) return;
   audio.src = sel.value;
-  const np = document.getElementById('lofi-now-playing');
-  if (np) np.textContent = sel.options[sel.selectedIndex].text;
+  setLofiNowPlaying(sel.options[sel.selectedIndex].text);
   if (lofiPlaying) { audio.volume = lofiVol(); audio.play().catch(() => {}); }
 };
 
-window.setLofiVolume = function(v) { const a = lofiEl(); if (a) a.volume = parseFloat(v); };
+// Advance to the next built-in track (used by the Focus fullscreen control)
+window.nextLofiTrack = function() {
+  const sel = document.getElementById('lofi-track');
+  if (!sel || !sel.options.length) return;
+  sel.selectedIndex = (sel.selectedIndex + 1) % sel.options.length;
+  changeLofiTrack();
+  if (!lofiPlaying) toggleLofi();
+};
+
+window.setLofiVolume = function(v) {
+  const a = lofiEl();
+  if (a) a.volume = parseFloat(v);
+  document.querySelectorAll('#lofi-volume, .lofi-vol, input[oninput*="setLofiVolume"]').forEach(s => { if (s.value !== v) s.value = v; });
+};
 
 window.loadLofiFile = function(e) {
   const file = e.target.files[0];
   const audio = lofiEl();
   if (!file || !audio) return;
   audio.src = URL.createObjectURL(file);
-  const np = document.getElementById('lofi-now-playing');
-  if (np) np.textContent = file.name;
+  setLofiNowPlaying(file.name);
   audio.volume = lofiVol();
   audio.play().then(() => { lofiPlaying = true; setLofiIcon(true); }).catch(() => {});
 };
+
+// -----------------------------------------
+// Dashboard Board — drop files/images/notes; move + resize; persistent.
+// Files are saved to disk (path only in the store) so the store stays small.
+// -----------------------------------------
+let boardItems = JSON.parse(localStorage.getItem('opennotes_board') || '[]');
+function saveBoard() { localStorage.setItem('opennotes_board', JSON.stringify(boardItems)); }
+// board_files names are safe (timestamp+random+ext) and userData has no spaces
+const fileUrlOf = (p) => 'file:///' + String(p).replace(/\\/g, '/');
+
+window.boardDragOver = function(e) { e.preventDefault(); const b = document.getElementById('dashboard-banner'); if (b) b.classList.add('board-dragover'); };
+window.boardDragLeave = function(e) { const b = document.getElementById('dashboard-banner'); if (b && !b.contains(e.relatedTarget)) b.classList.remove('board-dragover'); };
+window.boardDrop = async function(e) {
+  e.preventDefault(); e.stopPropagation();
+  const banner = document.getElementById('dashboard-banner');
+  if (banner) banner.classList.remove('board-dragover');
+  const rect = banner.getBoundingClientRect();
+  let x = Math.max(6, e.clientX - rect.left - 90);
+  let y = Math.max(6, e.clientY - rect.top - 60);
+  const files = Array.from(e.dataTransfer.files || []);
+  if (files.length && window.electronAPI && window.electronAPI.saveBoardFile) {
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      try {
+        const buf = await f.arrayBuffer();
+        const osPath = await window.electronAPI.saveBoardFile(f.name, buf);
+        const isImg = /^image\//.test(f.type) || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(f.name);
+        boardItems.push({ id: 'b' + Date.now() + '-' + i, type: isImg ? 'image' : 'file', path: osPath, name: f.name, x: x + i * 26, y: y + i * 26, w: isImg ? 220 : 190, h: isImg ? 160 : 90 });
+      } catch (_) {}
+    }
+    saveBoard(); renderBoard();
+  } else {
+    const text = (e.dataTransfer.getData('text/plain') || '').trim();
+    if (text) { boardItems.push({ id: 'b' + Date.now(), type: 'text', text, x, y, w: 210, h: 130 }); saveBoard(); renderBoard(); }
+  }
+};
+
+function renderBoard() {
+  const board = document.getElementById('dashboard-board');
+  if (!board) return;
+  board.innerHTML = '';
+  const hint = document.getElementById('board-drop-hint');
+  if (hint) hint.style.display = boardItems.length ? 'none' : '';
+  boardItems.forEach(item => {
+    const card = document.createElement('div');
+    card.className = 'board-card board-' + item.type;
+    card.style.left = item.x + 'px'; card.style.top = item.y + 'px';
+    card.style.width = item.w + 'px'; card.style.height = item.h + 'px';
+    let inner = '';
+    if (item.type === 'image') inner = `<div class="board-body board-img" style="background-image:url('${fileUrlOf(item.path)}')"></div>`;
+    else if (item.type === 'file') inner = `<div class="board-body board-file"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg><span>${gsEscape(item.name || 'File')}</span></div>`;
+    else inner = `<div class="board-body board-text" contenteditable="true">${gsEscape(item.text || '')}</div>`;
+    card.innerHTML = inner + `<button class="board-del" title="Remove">&times;</button><div class="board-resize"></div>`;
+    card.onclick = (ev) => ev.stopPropagation();
+    const bodyEl = card.querySelector('.board-body');
+    if (item.type !== 'text') bodyEl.ondblclick = () => { if (window.electronAPI && window.electronAPI.openPath) window.electronAPI.openPath(item.path); };
+    if (item.type === 'text') bodyEl.onblur = () => { item.text = bodyEl.innerText; saveBoard(); };
+    card.querySelector('.board-del').onclick = (ev) => { ev.stopPropagation(); boardItems = boardItems.filter(b => b.id !== item.id); saveBoard(); renderBoard(); };
+    makeBoardCardInteractive(card, item);
+    board.appendChild(card);
+  });
+}
+
+function makeBoardCardInteractive(card, item) {
+  card.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('.board-resize') || e.target.closest('.board-del')) return;
+    if (item.type === 'text' && e.target.closest('.board-text')) return; // let text editing work
+    e.stopPropagation();
+    const sx = e.clientX, sy = e.clientY, ox = item.x, oy = item.y;
+    card.setPointerCapture(e.pointerId); card.classList.add('dragging');
+    const move = (ev) => { item.x = Math.max(0, ox + (ev.clientX - sx)); item.y = Math.max(0, oy + (ev.clientY - sy)); card.style.left = item.x + 'px'; card.style.top = item.y + 'px'; };
+    const up = () => { card.classList.remove('dragging'); card.removeEventListener('pointermove', move); card.removeEventListener('pointerup', up); saveBoard(); };
+    card.addEventListener('pointermove', move); card.addEventListener('pointerup', up);
+  });
+  const handle = card.querySelector('.board-resize');
+  handle.addEventListener('pointerdown', (e) => {
+    e.stopPropagation(); e.preventDefault();
+    const sx = e.clientX, sy = e.clientY, ow = item.w, oh = item.h;
+    handle.setPointerCapture(e.pointerId); card.classList.add('dragging');
+    const move = (ev) => { item.w = Math.max(90, ow + (ev.clientX - sx)); item.h = Math.max(60, oh + (ev.clientY - sy)); card.style.width = item.w + 'px'; card.style.height = item.h + 'px'; };
+    const up = () => { card.classList.remove('dragging'); handle.removeEventListener('pointermove', move); handle.removeEventListener('pointerup', up); saveBoard(); };
+    handle.addEventListener('pointermove', move); handle.addEventListener('pointerup', up);
+  });
+}
 
 // -----------------------------------------
 // AppSelect — themed <select> replacement (ported from the EverythingUTM project).
@@ -3256,6 +3374,7 @@ enhanceSelects();
 refreshSelects();
 initGlobalSearch();
 initSidebarReorder();
+renderBoard();
 
 // -----------------------------------------
 // Native menu: File > New Note

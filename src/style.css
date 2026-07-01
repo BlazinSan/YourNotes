@@ -1000,6 +1000,66 @@ body {
 .sidebar-nav .nav-section:first-child .nav-link { cursor: grab; }
 .nav-link.dragging { opacity: 0.4; }
 
+/* ---------------------------------------------------------------------------
+   Dashboard board — drop files/images/notes as movable, resizable cards.
+   --------------------------------------------------------------------------- */
+.dashboard-banner { position: relative; }
+.dashboard-banner .banner-controls { z-index: 6; }
+.dashboard-banner.board-dragover { outline: 3px dashed var(--accent-color); outline-offset: -10px; }
+
+#dashboard-board {
+  position: absolute; inset: 0; z-index: 4;
+  pointer-events: none; overflow: hidden; border-radius: inherit;
+}
+
+.board-drop-hint {
+  position: absolute; inset: 0; z-index: 3;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; color: var(--text-secondary); font-size: 0.95rem; font-weight: 600;
+  text-align: center; padding: 20px; pointer-events: none; opacity: 0.5;
+}
+
+.board-card {
+  position: absolute; pointer-events: auto; overflow: hidden;
+  background: var(--panel-bg); border: 1px solid var(--panel-border);
+  border-radius: 14px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(6px); cursor: grab; will-change: transform;
+  transition: box-shadow 0.22s cubic-bezier(0.16, 1, 0.3, 1), transform 0.14s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.board-card:hover { box-shadow: 0 14px 34px rgba(0, 0, 0, 0.26); }
+.board-card.dragging {
+  transition: box-shadow 0.15s; cursor: grabbing;
+  transform: scale(1.035) rotate(-0.4deg); box-shadow: 0 22px 48px rgba(0, 0, 0, 0.34); z-index: 20;
+}
+.board-body { width: 100%; height: 100%; }
+.board-img { background-size: cover; background-position: center; }
+.board-file {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; padding: 10px; color: var(--text-primary); text-align: center;
+}
+.board-file svg { color: var(--accent-color); }
+.board-file span {
+  font-size: 0.78rem; font-weight: 600; word-break: break-word;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.board-text {
+  padding: 12px 14px; font-size: 0.92rem; line-height: 1.4; color: #3a2f26;
+  background: #fdf2c4; outline: none; overflow: auto; cursor: text;
+}
+.board-del {
+  position: absolute; top: 5px; right: 5px; width: 20px; height: 20px; z-index: 3;
+  border: none; border-radius: 50%; background: rgba(0, 0, 0, 0.5); color: #fff;
+  cursor: pointer; font-size: 14px; line-height: 1; display: none;
+  align-items: center; justify-content: center;
+}
+.board-card:hover .board-del { display: flex; }
+.board-resize {
+  position: absolute; right: 0; bottom: 0; width: 18px; height: 18px; z-index: 3;
+  cursor: nwse-resize; opacity: 0.45; border-bottom-right-radius: 14px;
+  background: linear-gradient(135deg, transparent 45%, var(--accent-color) 45%);
+}
+.board-card:hover .board-resize { opacity: 1; }
+
 .dashboard-tabs {
   display: flex;
   background: var(--overlay-medium);

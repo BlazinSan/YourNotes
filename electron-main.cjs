@@ -39,24 +39,28 @@ function createWindow() {
   const sleep = (ms) => { try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch (_) { const t = Date.now() + ms; while (Date.now() < t) {} } };
 
   const backupPath = storePath + '.backup';
-  const tryRead = (p) => { try { store = JSON.parse(fs.readFileSync(p, 'utf-8')); return true; } catch (_) { return false; } };
+  const tryRead = (p) => { try { const parsed = JSON.parse(fs.readFileSync(p, 'utf-8')); store = parsed; return true; } catch (_) { return false; } };
 
   let store = {};
   let loadOk = false; // becomes true once the store is loaded (or genuinely first-run)
+  // Did data ever exist? If so we must NEVER show empty — only retry until readable.
+  const dataExisted = fs.existsSync(storePath) || fs.existsSync(tmpPath) || fs.existsSync(backupPath);
 
-  if (!fs.existsSync(storePath) && !fs.existsSync(tmpPath)) {
-    loadOk = true; // genuine first run — nothing to load
-  } else {
-    const target = fs.existsSync(storePath) ? storePath : tmpPath;
-    // Patiently retry (~3s): another instance closing, or antivirus scanning the
-    // 2-3 MB file, can briefly lock it. Giving up too early is what made the app
-    // fall back to an incomplete localStorage copy and look "reset".
-    for (let i = 0; i < 30 && !loadOk; i++) { if (tryRead(target)) { loadOk = true; break; } sleep(100); }
-    // Rescues if the primary file won't read: the temp file, then a rolling backup.
-    if (!loadOk && fs.existsSync(tmpPath) && tmpPath !== target) loadOk = tryRead(tmpPath);
-    if (!loadOk && fs.existsSync(backupPath)) loadOk = tryRead(backupPath);
-    if (!loadOk) { try { fs.copyFileSync(storePath, storePath + '.unreadable-' + Date.now()); } catch (_) {} }
+  function attemptLoad(rounds) {
+    if (loadOk) return true;
+    const target = fs.existsSync(storePath) ? storePath : (fs.existsSync(tmpPath) ? tmpPath : (fs.existsSync(backupPath) ? backupPath : null));
+    if (!target) { if (!dataExisted) loadOk = true; return loadOk; } // genuine first run only
+    for (let i = 0; i < rounds && !loadOk; i++) {
+      if (tryRead(target)) { loadOk = true; break; }
+      // between attempts, also try the other candidates in case one is mid-rename
+      if (fs.existsSync(tmpPath) && tryRead(tmpPath)) { loadOk = true; break; }
+      if (fs.existsSync(backupPath) && tryRead(backupPath)) { loadOk = true; break; }
+      sleep(100);
+    }
+    return loadOk;
   }
+
+  if (!dataExisted) { loadOk = true; } else { attemptLoad(30); } // ~3s patient retry at startup
   // Keep a rolling backup of the last known-good store for future rescues.
   if (loadOk && Object.keys(store).length) { try { if (fs.existsSync(storePath)) fs.copyFileSync(storePath, backupPath); } catch (_) {} }
 
@@ -84,12 +88,15 @@ function createWindow() {
   app.on('before-quit', flushStore);
 
   ipcMain.on('load-data-sync', (event, key) => {
-    // Last-ditch: if startup couldn't load yet, retry now (the lock has likely cleared).
-    if (!loadOk) {
-      const target = fs.existsSync(storePath) ? storePath : (fs.existsSync(tmpPath) ? tmpPath : (fs.existsSync(backupPath) ? backupPath : null));
-      if (target) { for (let i = 0; i < 15 && !loadOk; i++) { if (tryRead(target)) { loadOk = true; break; } sleep(100); } }
-    }
+    if (!loadOk) attemptLoad(15); // the lock may have cleared since startup
     event.returnValue = (loadOk && store[key] !== undefined) ? store[key] : null;
+  });
+
+  // Renderer asks this before rendering: "did the store fail to load even though data exists?"
+  // If so the renderer shows a loading state and reloads, rather than showing an empty app.
+  ipcMain.on('store-load-failed', (event) => {
+    if (!loadOk) attemptLoad(20); // give the read another patient try each time we're asked
+    event.returnValue = dataExisted && !loadOk;
   });
 
   ipcMain.on('save-data-sync', (event, key, value) => {
@@ -97,6 +104,18 @@ function createWindow() {
     scheduleWrite();
     event.returnValue = true;
   });
+
+  // Dashboard board: save dropped files to disk (referenced by path, NOT stored as
+  // base64 in the JSON) and open them in the OS default app.
+  ipcMain.handle('save-board-file', async (event, name, buffer) => {
+    const dir = path.join(app.getPath('userData'), 'board_files');
+    try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
+    const ext = path.extname(name || '') || '';
+    const dest = path.join(dir, Date.now().toString(36) + Math.random().toString(36).slice(2, 8) + ext);
+    fs.writeFileSync(dest, Buffer.from(buffer));
+    return dest;
+  });
+  ipcMain.on('open-path', (event, p) => { try { if (p) shell.openPath(p); } catch (_) {} });
 
   // Security: open external links in the OS browser, block in-app navigation away from the app
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
