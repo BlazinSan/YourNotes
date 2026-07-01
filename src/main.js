@@ -379,22 +379,15 @@ window.toggleFav = function(e, type, id) {
   // re-render whatever is visible
   if (document.getElementById('home-grid') && document.getElementById('home-grid').offsetParent) renderHomeGrid(homeSearchInput ? homeSearchInput.value : '');
   if (typeof renderCollegeFolders === 'function') { const c = document.getElementById('home-college'); if (c && c.style.display !== 'none') { if (activeCollegeFolderId) renderCollegeSingleFolder(activeCollegeFolderId); else renderCollegeFolders(); } }
-  if (typeof renderFavourites === 'function' && document.getElementById('college-favourites-view') && document.getElementById('college-favourites-view').style.display !== 'none') renderFavourites();
+  const favPanel = document.getElementById('home-favourites');
+  if (typeof renderFavourites === 'function' && favPanel && favPanel.style.display !== 'none') renderFavourites();
 };
 const STAR_SVG = (filled) => `<svg viewBox="0 0 24 24" width="16" height="16" fill="${filled ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>`;
 
 window.showFavourites = function() {
-  document.getElementById('college-folders-container').style.display = 'none';
-  document.getElementById('college-single-folder-view').style.display = 'none';
-  document.getElementById('college-header-actions').style.display = 'none';
-  document.getElementById('college-favourites-view').style.display = 'flex';
+  setActiveNote(null);
+  showPanel('home-favourites', 'nav-favourites-btn');
   renderFavourites();
-};
-window.hideFavourites = function() {
-  document.getElementById('college-favourites-view').style.display = 'none';
-  document.getElementById('college-header-actions').style.display = 'flex';
-  document.getElementById('college-folders-container').style.display = 'flex';
-  if (typeof renderCollegeFolders === 'function') renderCollegeFolders();
 };
 function renderFavourites() {
   const list = document.getElementById('favourites-list');
@@ -403,16 +396,16 @@ function renderFavourites() {
   favourites.forEach(f => {
     if (f.type === 'note') {
       const n = notes.find(x => x.id === f.id);
-      if (n) items.push({ icon: GS_ICONS.note, label: noteDisplayTitle(n), sub: noteGroup(n), type: 'Note', open: () => { window.hideFavourites(); setActiveNote(n.id); } });
+      if (n) items.push({ icon: GS_ICONS.note, label: noteDisplayTitle(n), sub: noteGroup(n), type: 'Note', open: () => setActiveNote(n.id) });
     } else if (f.type === 'group') {
       if (notes.some(n => noteGroup(n) === f.id)) items.push({ icon: GS_ICONS.folder, label: f.id, sub: 'Project folder', type: 'Folder', open: () => { window.goToDashboard(); window.setHomeFolderFilter(f.id); } });
     } else if (f.type === 'folder') {
       const fol = collegeFolders.find(x => x.id === f.id);
-      if (fol) items.push({ icon: GS_ICONS.folder, label: fol.name, sub: fol.category || 'College', type: 'College Folder', open: () => { window.hideFavourites(); window.openCollegeFolder(fol.id); } });
+      if (fol) items.push({ icon: GS_ICONS.folder, label: fol.name, sub: fol.category || 'College', type: 'College Folder', open: () => { window.toggleCollegePanel(); window.openCollegeFolder(fol.id); } });
     } else if (f.type === 'pdf') {
       let found = null, fol = null;
       collegeFolders.forEach(x => (x.pdfs || []).forEach(p => { if (p.id === f.id) { found = p; fol = x; } }));
-      if (found) items.push({ icon: GS_ICONS.pdf, label: found.name, sub: fol.name, type: 'College File', open: () => { window.hideFavourites(); window.openCollegeFolder(fol.id); setTimeout(() => window.viewCollegePDF(found.id), 80); } });
+      if (found) items.push({ icon: GS_ICONS.pdf, label: found.name, sub: fol.name, type: 'College File', open: () => { window.toggleCollegePanel(); window.openCollegeFolder(fol.id); setTimeout(() => window.viewCollegePDF(found.id), 80); } });
     }
   });
   if (items.length === 0) {
@@ -924,7 +917,7 @@ window.showPanel = function(panelId, btnId) {
     }
   }
 
-  const panels = ['home-grid', 'home-graph', 'home-tasks', 'home-session', 'home-settings', 'home-college'];
+  const panels = ['home-grid', 'home-graph', 'home-tasks', 'home-session', 'home-settings', 'home-college', 'home-favourites'];
   panels.forEach(p => {
     const el = document.getElementById(p);
     if (el) el.style.display = 'none';
@@ -947,7 +940,7 @@ window.showPanel = function(panelId, btnId) {
     if (controls) controls.style.display = 'none';
   }
 
-  const navBtns = ['nav-dashboard-btn', 'nav-projects-btn', 'nav-tasks-btn', 'nav-session-btn', 'nav-settings-btn', 'nav-college-btn'];
+  const navBtns = ['nav-dashboard-btn', 'nav-projects-btn', 'nav-tasks-btn', 'nav-session-btn', 'nav-settings-btn', 'nav-college-btn', 'nav-favourites-btn'];
   navBtns.forEach(b => {
     const el = document.getElementById(b);
     if (el) el.classList.remove('active');
@@ -2902,6 +2895,7 @@ const translations = {
     'settings.theme_light':'Day (Light)','settings.theme_dark':'Night (Dark)','settings.temp_unit':'Temperature Unit',
     'settings.currency':'Currency','settings.save':'Save Settings','settings.saved':'Saved ✓','settings.reset':'⚠️ Factory Reset','settings.reset_note':'This will permanently delete all data.',
     'college.title':'College Notes','college.subtitle':'Organize your college lectures, curriculum, and study PDF notes.',
+    'nav.favourites':'Favourites','favourites.subtitle':'Your starred notes, project folders, and college files — all in one place.',
     'tasks.menu':'Tasks Menu'
   },
   ar: {
@@ -2921,6 +2915,7 @@ const translations = {
     'settings.theme_light':'نهاري (فاتح)','settings.theme_dark':'ليلي (داكن)','settings.temp_unit':'وحدة الحرارة',
     'settings.currency':'العملة','settings.save':'حفظ الإعدادات','settings.saved':'تم الحفظ ✓','settings.reset':'⚠️ إعادة ضبط المصنع','settings.reset_note':'سيؤدي هذا إلى حذف جميع البيانات نهائيًا.',
     'college.title':'ملاحظات الكلية','college.subtitle':'نظّم محاضرات كليتك ومناهجك وملاحظات الدراسة بصيغة PDF.',
+    'nav.favourites':'المفضلة','favourites.subtitle':'ملاحظاتك ومجلداتك وملفاتك المميّزة بنجمة في مكان واحد.',
     'tasks.menu':'قائمة المهام'
   },
   zh: {
@@ -2940,6 +2935,7 @@ const translations = {
     'settings.theme_light':'白天（浅色）','settings.theme_dark':'夜间（深色）','settings.temp_unit':'温度单位',
     'settings.currency':'货币','settings.save':'保存设置','settings.saved':'已保存 ✓','settings.reset':'⚠️ 恢复出厂设置','settings.reset_note':'这将永久删除所有数据。',
     'college.title':'课堂笔记','college.subtitle':'整理你的大学讲座、课程和学习 PDF 笔记。',
+    'nav.favourites':'收藏','favourites.subtitle':'你收藏的笔记、项目文件夹和大学文件，尽在一处。',
     'tasks.menu':'任务菜单'
   },
   ms: {
@@ -2959,6 +2955,7 @@ const translations = {
     'settings.theme_light':'Siang (Cerah)','settings.theme_dark':'Malam (Gelap)','settings.temp_unit':'Unit Suhu',
     'settings.currency':'Mata Wang','settings.save':'Simpan Tetapan','settings.saved':'Disimpan ✓','settings.reset':'⚠️ Set Semula Kilang','settings.reset_note':'Ini akan memadam semua data secara kekal.',
     'college.title':'Nota Kolej','college.subtitle':'Susun kuliah, kurikulum dan nota PDF pembelajaran kolej anda.',
+    'nav.favourites':'Kegemaran','favourites.subtitle':'Nota, folder projek dan fail kolej kegemaran anda di satu tempat.',
     'tasks.menu':'Menu Tugasan'
   }
 };
