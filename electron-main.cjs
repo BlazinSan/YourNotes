@@ -39,7 +39,8 @@ function createWindow() {
   const sleep = (ms) => { try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch (_) { const t = Date.now() + ms; while (Date.now() < t) {} } };
 
   const backupPath = storePath + '.backup';
-  const tryRead = (p) => { try { const parsed = JSON.parse(fs.readFileSync(p, 'utf-8')); store = parsed; return true; } catch (_) { return false; } };
+  let loadedFrom = null, readErrors = {};
+  const tryRead = (p) => { try { const parsed = JSON.parse(fs.readFileSync(p, 'utf-8')); store = parsed; loadedFrom = p; return true; } catch (e) { readErrors[p] = e.code || e.message; return false; } };
 
   // CRITICAL: fs.existsSync() returns false for a LOCKED file (EPERM/EBUSY), not just
   // a missing one. Relying on it made a locked store look like a "fresh install", so
@@ -54,16 +55,24 @@ function createWindow() {
   function attemptLoad(rounds) {
     if (loadOk) return true;
     for (let i = 0; i < rounds && !loadOk; i++) {
-      // Try every candidate directly (don't gate on existsSync — a locked file reads false there).
+      // Only trust the authoritative store and the confirmed-good backup. The .tmp file
+      // is write scratch — a failed rename can leave STALE data in it (this is what
+      // destroyed notes: a locked store fell back to a leftover Welcome .tmp and wrote
+      // it back). Never read .tmp as a normal source.
       if (tryRead(storePath)) { loadOk = true; break; }
-      if (tryRead(tmpPath)) { loadOk = true; break; }
       if (tryRead(backupPath)) { loadOk = true; break; }
       sleep(100);
     }
+    // Genuine first-write crash ONLY: store and backup are truly absent (ENOENT) and the
+    // .tmp holds the only copy of the very first write.
+    if (!loadOk && definitelyMissing(storePath) && definitelyMissing(backupPath)) { if (tryRead(tmpPath)) loadOk = true; }
     return loadOk;
   }
 
   if (!dataExisted) { loadOk = true; } else { attemptLoad(30); } // ~3s patient retry at startup
+  // A leftover .tmp is stale/garbage once we have a real store — delete it so it can
+  // never be mistaken for data on a future locked-startup.
+  if (loadOk && loadedFrom !== tmpPath) { try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (_) {} }
   // Keep a rolling backup of the last known-good store for future rescues.
   if (loadOk && Object.keys(store).length) { try { if (fs.existsSync(storePath)) fs.copyFileSync(storePath, backupPath); } catch (_) {} }
 
@@ -76,14 +85,15 @@ function createWindow() {
     // that would overwrite the user's good data with our empty memory.
     if (!loadOk) { dirty = false; return; }
     dirty = false;
+    const json = JSON.stringify(store);
+    // Write the backup FIRST and independently, so it always holds the latest good data
+    // even if the primary store is locked and the atomic rename below fails.
+    try { fs.writeFileSync(backupPath, json); } catch (_) {}
     try {
-      const json = JSON.stringify(store);
       fs.writeFileSync(tmpPath, json);
       fs.renameSync(tmpPath, storePath);
-      // Refresh the rescue backup so it's never stale (store is small now — cheap).
-      try { fs.writeFileSync(backupPath, json); } catch (_) {}
     } catch (e) {
-      console.error('Failed to persist store', e);
+      console.error('Failed to persist store (locked?) — backup holds the latest', e && e.code);
     }
   }
   function scheduleWrite() {
