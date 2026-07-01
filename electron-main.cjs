@@ -35,20 +35,28 @@ function createWindow() {
   const storePath = path.join(app.getPath('userData'), 'local_storage_backup.json');
   const tmpPath = storePath + '.tmp';
 
+  // Synchronous sleep for read retries (avoids blank-on-transient-lock).
+  const sleep = (ms) => { try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch (_) { const t = Date.now() + ms; while (Date.now() < t) {} } };
+
   let store = {};
-  try {
-    if (fs.existsSync(storePath)) {
-      store = JSON.parse(fs.readFileSync(storePath, 'utf-8'));
-    } else if (fs.existsSync(tmpPath)) {
-      // A write was interrupted before the rename — recover from the temp file
-      store = JSON.parse(fs.readFileSync(tmpPath, 'utf-8'));
+  let loadOk = true; // false only when an existing store failed to load — then we refuse to write
+  {
+    const target = fs.existsSync(storePath) ? storePath : (fs.existsSync(tmpPath) ? tmpPath : null);
+    if (target) {
+      let ok = false, lastErr = null;
+      // Retry reads: another instance / antivirus may briefly lock the file. Do NOT
+      // start blank (which could then overwrite good data) unless every attempt fails.
+      for (let attempt = 0; attempt < 5 && !ok; attempt++) {
+        try { store = JSON.parse(fs.readFileSync(target, 'utf-8')); ok = true; }
+        catch (e) { lastErr = e; sleep(150); }
+      }
+      if (!ok) {
+        console.error('Store unreadable after retries', lastErr);
+        try { if (fs.existsSync(tmpPath)) { store = JSON.parse(fs.readFileSync(tmpPath, 'utf-8')); ok = true; } } catch (_) {}
+        if (!ok) { try { fs.copyFileSync(storePath, storePath + '.unreadable-' + Date.now()); } catch (_) {} }
+      }
+      loadOk = ok; // if we couldn't read an existing store, stay read-only this session
     }
-  } catch (e) {
-    // The store is unreadable/corrupt. NEVER start blank on top of it: preserve it
-    // so nothing is lost, and try to recover from the temp file.
-    console.error('Store parse failed; preserving corrupt file', e);
-    try { fs.renameSync(storePath, storePath + '.corrupt-' + Date.now()); } catch (_) {}
-    try { if (fs.existsSync(tmpPath)) store = JSON.parse(fs.readFileSync(tmpPath, 'utf-8')); } catch (_) {}
   }
 
   // Atomic, debounced writes: write to a temp file then rename, so a crash/kill
@@ -56,6 +64,9 @@ function createWindow() {
   let writeTimer = null, dirty = false;
   function flushStore() {
     if (!dirty) return;
+    // Safety: if we failed to read an existing store this session, never write —
+    // that would overwrite the user's good data with our empty memory.
+    if (!loadOk) { dirty = false; return; }
     dirty = false;
     try {
       fs.writeFileSync(tmpPath, JSON.stringify(store));
@@ -98,14 +109,27 @@ function createWindow() {
   mainWindow.loadURL(url);
 }
 
-app.whenReady().then(() => {
-  createWindow();
-
-  app.on('activate', function () {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+// Single-instance lock: a second launch focuses the existing window instead of
+// starting another copy that would race on the data file.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
   });
-});
 
-app.on('window-all-closed', function () {
-  if (process.platform !== 'darwin') app.quit();
-});
+  app.whenReady().then(() => {
+    createWindow();
+
+    app.on('activate', function () {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
+  });
+
+  app.on('window-all-closed', function () {
+    if (process.platform !== 'darwin') app.quit();
+  });
+}
