@@ -7,7 +7,7 @@
          scope; the meta CSP + Electron contextIsolation are the defense-in-depth ceiling here). -->
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https: file:; media-src 'self' data: blob: https:; connect-src 'self' https: wss:; object-src 'none'; base-uri 'none'; frame-src 'self' data: blob: file: https:" />
     <link rel="icon" type="image/png" href="/icon.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>YourNotes</title>
     <!-- Google Fonts: Inter -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -416,7 +416,7 @@
                 </div>
 
                 <!-- Pomodoro Timer (1) -->
-                <div class="tool-section" style="flex: 1.5; min-height: 200px; display: flex; flex-direction: row; align-items: center; justify-content: space-between;">
+                <div class="tool-section pomodoro-card" style="flex: 1.5; min-height: 200px; display: flex; flex-direction: row; align-items: center; justify-content: space-between;">
                   <div style="display: flex; flex-direction: column;">
                     <h4 style="font-size: 1.1rem; color: var(--text-primary); margin-bottom: 4px;" data-i18n="session.focus">Focus Session</h4>
                     <p style="color: var(--text-secondary); font-size: 0.9rem;" data-i18n="session.focus_sub">Deep work in progress</p>
@@ -509,14 +509,14 @@
                   </div>
                   
                   <!-- Tabular Add Form -->
-                  <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+                  <div class="expense-add-form" style="display: flex; gap: 8px; margin-bottom: 16px;">
                     <input type="text" id="new-expense-title" placeholder="Expense title..." style="flex: 2; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--panel-border); font-family: inherit; font-size: 0.9rem; outline: none; background: transparent; color: var(--text-primary);" />
                     <input type="number" id="new-expense-amount" placeholder="Amount (₹)" style="flex: 1; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--panel-border); font-family: inherit; font-size: 0.9rem; outline: none; background: transparent; color: var(--text-primary);" />
                     <button onclick="addExpense()" style="background: var(--accent-color); color: #fff; border: none; padding: 8px 16px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.9rem;">Add</button>
                   </div>
 
                   <!-- Headers -->
-                  <div style="display: flex; gap: 8px; margin-bottom: 8px; padding: 0 4px; font-size: 0.8rem; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em;">
+                  <div class="expense-table-header" style="display: flex; gap: 8px; margin-bottom: 8px; padding: 0 4px; font-size: 0.8rem; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em;">
                     <div style="flex: 2;">Item</div>
                     <div style="flex: 1;">Cost</div>
                     <div style="width: 28px;"></div>

@@ -1,5 +1,6 @@
 import './style.css'
 import './sync.js'
+import { Capacitor, SystemBars, SystemBarsStyle } from '@capacitor/core'
 
 // --- Data Persistence Override ---
 const _originalSetItem = Storage.prototype.setItem;
@@ -3153,6 +3154,8 @@ window.applySettings = function() {
   } else {
     document.body.classList.remove('theme-dark');
   }
+  document.documentElement.style.colorScheme = theme === 'dark' ? 'dark' : 'light';
+  syncNativeSystemBars(theme);
 
   populateCurrencies(currencyCode);
 
@@ -3179,6 +3182,15 @@ window.applySettings = function() {
   renderExpenses();
   if (typeof refreshSelects === 'function') refreshSelects();
 };
+
+function syncNativeSystemBars(theme) {
+  if (!Capacitor.isNativePlatform()) return;
+
+  const style = theme === 'dark' ? SystemBarsStyle.Dark : SystemBarsStyle.Light;
+  SystemBars.setStyle({ style }).catch(err => {
+    console.warn('Unable to sync Android system bars with theme.', err);
+  });
+}
 
 window.resetEverything = function() {
   const overlay = document.createElement('div');
@@ -4483,6 +4495,17 @@ window.uploadProfilePic = function (e) {
 };
 window.removeProfilePic = function () { localStorage.removeItem('opennotes_profile_pic'); window.applyProfilePic(); };
 window.applyProfilePic();
+
+function syncGlobalSearchPlaceholder() {
+  const input = document.getElementById('global-search-input');
+  if (!input) return;
+  const compact = window.matchMedia('(max-width: 520px)').matches;
+  input.placeholder = compact
+    ? 'Search everything...'
+    : 'Search everything — notes, folders, PDFs, tasks, links...';
+}
+syncGlobalSearchPlaceholder();
+window.addEventListener('resize', syncGlobalSearchPlaceholder);
 
 // ============================================================
 // Mobile drawer sidebar (Android app + narrow windows)

@@ -5,6 +5,13 @@
   "android": {
     "allowMixedContent": false
   },
+  "plugins": {
+    "SystemBars": {
+      "insetsHandling": "css",
+      "style": "LIGHT",
+      "hidden": false
+    }
+  },
   "server": {
     "androidScheme": "https"
   }
