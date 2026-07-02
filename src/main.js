@@ -65,6 +65,44 @@ Storage.prototype.clear = function() {
   throw new Error('yn:store-not-ready-retrying'); // halt the rest of main.js this pass
 })();
 
+// Android WebView can render native alert text with poor contrast on some
+// themes. Keep alerts inside the app's own surface instead.
+let activeAppAlert = null;
+function closeAppAlert() {
+  if (!activeAppAlert) return false;
+  activeAppAlert.remove();
+  activeAppAlert = null;
+  return true;
+}
+
+function showAppAlert(message = '') {
+  if (!document.body) {
+    setTimeout(() => showAppAlert(message), 0);
+    return;
+  }
+  closeAppAlert();
+  const overlay = document.createElement('div');
+  overlay.className = 'app-alert-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.innerHTML = `
+    <div class="app-alert-card">
+      <p>${gsEscape(String(message))}</p>
+      <button type="button" class="app-alert-ok">OK</button>
+    </div>
+  `;
+  activeAppAlert = overlay;
+  document.body.appendChild(overlay);
+  const ok = overlay.querySelector('.app-alert-ok');
+  try { ok.focus({ preventScroll: true }); } catch (_) {}
+  ok.addEventListener('click', closeAppAlert);
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) closeAppAlert();
+  });
+}
+
+window.alert = showAppAlert;
+
 // State
 let notes = JSON.parse(localStorage.getItem('opennotes_data')) || [];
 let activeNoteId = null;
@@ -1289,6 +1327,90 @@ window.goToDashboard = function() {
   renderHomeGrid(homeSearchInput ? homeSearchInput.value : '');
 };
 
+function closeVisibleModal() {
+  const modal = Array.from(document.querySelectorAll('.modal, #pomodoro-fullscreen-modal, .pic-crop-overlay'))
+    .reverse()
+    .find(el => {
+      const style = getComputedStyle(el);
+      return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+    });
+  if (!modal) return false;
+  modal.style.display = 'none';
+  return true;
+}
+
+function handleAppBackNavigation() {
+  if (closeAppAlert()) return true;
+  closeBoardAddSheet();
+
+  const haven = document.getElementById('haven-fs');
+  if (haven && getComputedStyle(haven).display !== 'none' && window.closeHaven) {
+    window.closeHaven();
+    return true;
+  }
+
+  if (document.body.classList.contains('sidebar-open')) {
+    window.toggleMobileSidebar(false);
+    return true;
+  }
+
+  const contextMenu = document.getElementById('college-context-menu');
+  if (contextMenu && getComputedStyle(contextMenu).display !== 'none') {
+    contextMenu.style.display = 'none';
+    return true;
+  }
+
+  if (closeVisibleModal()) return true;
+
+  const singleFolder = document.getElementById('college-single-folder-view');
+  if (singleFolder && getComputedStyle(singleFolder).display !== 'none') {
+    const folders = document.getElementById('college-folders-container');
+    singleFolder.style.display = 'none';
+    if (folders) folders.style.display = 'flex';
+    const addBtn = document.getElementById('add-college-folder-btn');
+    if (addBtn) addBtn.style.display = 'flex';
+    return true;
+  }
+
+  const dashboardBannerEl = document.getElementById('dashboard-banner');
+  if (dashboardBannerEl && dashboardBannerEl.classList.contains('expanded')) {
+    window.goToDashboard();
+    return true;
+  }
+
+  if (homePage && homePage.style.display === 'none') {
+    setActiveNote(null);
+    return true;
+  }
+
+  const activePanel = ['home-graph', 'home-tasks', 'home-session', 'home-settings', 'home-college', 'home-favourites']
+    .find(id => {
+      const el = document.getElementById(id);
+      return el && getComputedStyle(el).display !== 'none';
+    });
+  if (activePanel || currentHomeView !== 'grid' || homeArchiveMode) {
+    window.goToDashboard();
+    return true;
+  }
+
+  return true;
+}
+
+window.__ynNativeBack = handleAppBackNavigation;
+
+function installNativeBackTrap() {
+  if (!Capacitor.isNativePlatform()) return;
+  try {
+    history.replaceState({ ynRoot: true }, '');
+    history.pushState({ ynBackGuard: true }, '');
+    window.addEventListener('popstate', () => {
+      handleAppBackNavigation();
+      history.pushState({ ynBackGuard: true }, '');
+    });
+  } catch (_) {}
+}
+installNativeBackTrap();
+
 window.toggleDashboardBanner = function(e) {
   if (e && e.target.closest('.edit-banner-btn')) return; // Ignore if clicking edit button
   
@@ -2342,8 +2464,9 @@ function initGraph() {
     return;
   }
   initGraph._retries = 0;
-  // Render at devicePixelRatio so nodes/labels are crisp, not blurry
-  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  // Render crisply, but cap phone DPR so graph gestures stay smooth on high-density screens.
+  const coarsePointer = window.matchMedia('(pointer: coarse)').matches;
+  const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, coarsePointer ? 1.5 : 2));
   let cssW = rect.width, cssH = rect.height;
   graphCanvas.width = Math.round(cssW * dpr);
   graphCanvas.height = Math.round(cssH * dpr);
@@ -2430,15 +2553,24 @@ function initGraph() {
     return null;
   };
 
-  graphCanvas.onmousedown = (e) => {
+  graphCanvas.style.touchAction = 'none';
+  let activePointerId = null;
+  let lastTap = { time: 0, x: 0, y: 0, node: null };
+
+  function beginGraphInteraction(e) {
+    e.preventDefault();
+    activePointerId = e.pointerId;
+    try { graphCanvas.setPointerCapture(e.pointerId); } catch (_) {}
     const [sx, sy] = screenXY(e);
     const [wx, wy] = toWorld(sx, sy);
     const hit = nodeAt(wx, wy);
     if (hit) { draggedNode = hit; hoveredNode = hit; userAdjusted = true; }
     else { panning = true; panStart = { sx, sy, panX, panY }; graphCanvas.style.cursor = 'grabbing'; userAdjusted = true; }
-  };
+  }
 
-  graphCanvas.onmousemove = (e) => {
+  function moveGraphInteraction(e) {
+    if (activePointerId !== null && e.pointerId !== activePointerId) return;
+    e.preventDefault();
     const [sx, sy] = screenXY(e);
     if (draggedNode) {
       const [wx, wy] = toWorld(sx, sy);
@@ -2449,9 +2581,33 @@ function initGraph() {
     const [wx, wy] = toWorld(sx, sy);
     hoveredNode = nodeAt(wx, wy);
     graphCanvas.style.cursor = hoveredNode ? 'grab' : 'move';
-  };
+  }
 
-  window.addEventListener('mouseup', () => { draggedNode = null; panning = false; });
+  function endGraphInteraction(e) {
+    if (activePointerId !== null && e.pointerId !== activePointerId) return;
+    const [sx, sy] = screenXY(e);
+    const hit = nodeAt(...toWorld(sx, sy));
+    const now = Date.now();
+    const closeTap = Math.hypot(sx - lastTap.x, sy - lastTap.y) < 24;
+    if (hit && lastTap.node === hit && closeTap && now - lastTap.time < 320) {
+      setActiveNote(hit.id);
+    }
+    lastTap = { time: now, x: sx, y: sy, node: hit || null };
+    draggedNode = null;
+    panning = false;
+    activePointerId = null;
+    try {
+      if (graphCanvas.hasPointerCapture?.(e.pointerId)) graphCanvas.releasePointerCapture(e.pointerId);
+    } catch (_) {}
+    graphCanvas.style.cursor = hit ? 'grab' : 'move';
+  }
+
+  graphCanvas.onpointerdown = beginGraphInteraction;
+  graphCanvas.onpointermove = moveGraphInteraction;
+  graphCanvas.onpointerup = endGraphInteraction;
+  graphCanvas.onpointercancel = endGraphInteraction;
+  graphCanvas.onmousedown = null;
+  graphCanvas.onmousemove = null;
 
   // Wheel to zoom toward the cursor
   graphCanvas.onwheel = (e) => {
@@ -2475,6 +2631,10 @@ function initGraph() {
   if (graphAnimationFrame) cancelAnimationFrame(graphAnimationFrame);
 
   function draw() {
+    if (!homePage || homePage.style.display === 'none' || homeGraph.style.display === 'none') {
+      graphAnimationFrame = null;
+      return;
+    }
     // clear in device space, then draw the world under the pan/zoom transform (dpr-aware)
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, graphCanvas.width, graphCanvas.height);
@@ -3468,12 +3628,159 @@ window.loadLofiFile = function(e) {
 
 // -----------------------------------------
 // Dashboard Board — drop files/images/notes; move + resize; persistent.
-// Files are saved to disk (path only in the store) so the store stays small.
+// Desktop saves dropped files to disk. Mobile stores compressed image pins and
+// lightweight named file cards so the board still works without drag/drop.
 // -----------------------------------------
 let boardItems = JSON.parse(localStorage.getItem('opennotes_board') || '[]');
 function saveBoard() { localStorage.setItem('opennotes_board', JSON.stringify(boardItems)); }
 // board_files names are safe (timestamp+random+ext) and userData has no spaces
 const fileUrlOf = (p) => 'file:///' + String(p).replace(/\\/g, '/');
+const isTouchLayout = () => window.matchMedia('(pointer: coarse), (max-width: 820px)').matches;
+
+function boardDefaultPoint(offset = 0) {
+  const banner = document.getElementById('dashboard-banner');
+  const w = banner ? banner.clientWidth : 320;
+  const h = banner ? banner.clientHeight : 220;
+  return {
+    x: Math.max(12, Math.min(w - 190, Math.round(w * 0.5 - 95 + offset))),
+    y: Math.max(22, Math.min(h - 120, Math.round(h * 0.45 - 65 + offset)))
+  };
+}
+
+function boardPointFromEvent(e, offset = 0) {
+  const banner = document.getElementById('dashboard-banner');
+  if (!banner || !e) return boardDefaultPoint(offset);
+  const rect = banner.getBoundingClientRect();
+  return {
+    x: Math.max(8, e.clientX - rect.left - 90 + offset),
+    y: Math.max(12, e.clientY - rect.top - 60 + offset)
+  };
+}
+
+function ensureBoardExpanded() {
+  const banner = document.getElementById('dashboard-banner');
+  if (!banner || banner.classList.contains('expanded')) return;
+  showPanel('dashboard-expanded', 'nav-dashboard-btn');
+}
+
+function boardFileInput() {
+  let input = document.getElementById('board-file-input');
+  if (input) return input;
+  input = document.createElement('input');
+  input.id = 'board-file-input';
+  input.type = 'file';
+  input.multiple = true;
+  input.accept = 'image/*,.pdf,.txt,.md,.doc,.docx,.ppt,.pptx,.xls,.xlsx';
+  input.style.display = 'none';
+  input.addEventListener('change', async () => {
+    const files = Array.from(input.files || []);
+    input.value = '';
+    if (files.length) await addBoardFiles(files);
+  });
+  document.body.appendChild(input);
+  return input;
+}
+
+function closeBoardAddSheet() {
+  const sheet = document.querySelector('.board-add-sheet');
+  if (sheet) sheet.remove();
+}
+
+window.openBoardAddSheet = function(e) {
+  if (e) { e.preventDefault(); e.stopPropagation(); }
+  closeBoardAddSheet();
+  const sheet = document.createElement('div');
+  sheet.className = 'board-add-sheet';
+  sheet.innerHTML = `
+    <div class="board-add-card">
+      <button type="button" data-action="file">Pin photo or file</button>
+      <button type="button" data-action="text">Pin quick note</button>
+      <button type="button" data-action="close">Cancel</button>
+    </div>
+  `;
+  document.body.appendChild(sheet);
+  sheet.addEventListener('click', (ev) => {
+    const action = ev.target.closest('button')?.dataset.action;
+    if (!action || action === 'close' || ev.target === sheet) {
+      closeBoardAddSheet();
+      return;
+    }
+    closeBoardAddSheet();
+    if (action === 'file') boardFileInput().click();
+    if (action === 'text') addBoardTextPin('New note');
+  });
+};
+
+function imageFileToDataUrl(file) {
+  return new Promise((resolve) => {
+    if (!/^image\//.test(file.type) || /svg/i.test(file.type)) {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(file);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const maxSide = 1440;
+        const ratio = Math.min(1, maxSide / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.width * ratio));
+        canvas.height = Math.max(1, Math.round(img.height * ratio));
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.82));
+      };
+      img.onerror = () => resolve(reader.result);
+      img.src = reader.result;
+    };
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(file);
+  });
+}
+
+async function addBoardFiles(files, origin = null) {
+  ensureBoardExpanded();
+  origin = origin || boardDefaultPoint();
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i];
+    const isImg = /^image\//.test(f.type) || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(f.name);
+    const pos = { x: origin.x + i * 26, y: origin.y + i * 26 };
+    if (window.electronAPI && window.electronAPI.saveBoardFile) {
+      try {
+        const buf = await f.arrayBuffer();
+        const osPath = await window.electronAPI.saveBoardFile(f.name, buf);
+        boardItems.push({ id: 'b' + Date.now() + '-' + i, type: isImg ? 'image' : 'file', path: osPath, name: f.name, x: pos.x, y: pos.y, w: isImg ? 220 : 190, h: isImg ? 160 : 90 });
+        continue;
+      } catch (_) {}
+    }
+    if (isImg) {
+      const dataUrl = await imageFileToDataUrl(f);
+      if (dataUrl) {
+        boardItems.push({ id: 'b' + Date.now() + '-' + i, type: 'image', dataUrl, name: f.name, x: pos.x, y: pos.y, w: 220, h: 160 });
+      }
+    } else {
+      boardItems.push({ id: 'b' + Date.now() + '-' + i, type: 'file', name: f.name, x: pos.x, y: pos.y, w: 190, h: 90 });
+    }
+  }
+  saveBoard();
+  renderBoard();
+}
+
+function addBoardTextPin(text, origin = null) {
+  ensureBoardExpanded();
+  origin = origin || boardDefaultPoint();
+  const id = 'b' + Date.now();
+  boardItems.push({ id, type: 'text', text, x: origin.x, y: origin.y, w: 210, h: 130 });
+  saveBoard();
+  renderBoard();
+  setTimeout(() => {
+    const el = document.querySelector(`[data-board-id="${id}"] .board-text`);
+    if (el) { el.focus(); document.execCommand('selectAll', false, null); }
+  }, 80);
+}
 
 window.boardDragOver = function(e) { e.preventDefault(); const b = document.getElementById('dashboard-banner'); if (b) b.classList.add('board-dragover'); };
 window.boardDragLeave = function(e) { const b = document.getElementById('dashboard-banner'); if (b && !b.contains(e.relatedTarget)) b.classList.remove('board-dragover'); };
@@ -3481,24 +3788,13 @@ window.boardDrop = async function(e) {
   e.preventDefault(); e.stopPropagation();
   const banner = document.getElementById('dashboard-banner');
   if (banner) banner.classList.remove('board-dragover');
-  const rect = banner.getBoundingClientRect();
-  let x = Math.max(6, e.clientX - rect.left - 90);
-  let y = Math.max(6, e.clientY - rect.top - 60);
   const files = Array.from(e.dataTransfer.files || []);
-  if (files.length && window.electronAPI && window.electronAPI.saveBoardFile) {
-    for (let i = 0; i < files.length; i++) {
-      const f = files[i];
-      try {
-        const buf = await f.arrayBuffer();
-        const osPath = await window.electronAPI.saveBoardFile(f.name, buf);
-        const isImg = /^image\//.test(f.type) || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(f.name);
-        boardItems.push({ id: 'b' + Date.now() + '-' + i, type: isImg ? 'image' : 'file', path: osPath, name: f.name, x: x + i * 26, y: y + i * 26, w: isImg ? 220 : 190, h: isImg ? 160 : 90 });
-      } catch (_) {}
-    }
-    saveBoard(); renderBoard();
+  const origin = boardPointFromEvent(e);
+  if (files.length) {
+    await addBoardFiles(files, origin);
   } else {
     const text = (e.dataTransfer.getData('text/plain') || '').trim();
-    if (text) { boardItems.push({ id: 'b' + Date.now(), type: 'text', text, x, y, w: 210, h: 130 }); saveBoard(); renderBoard(); }
+    if (text) addBoardTextPin(text, origin);
   }
 };
 
@@ -3517,18 +3813,38 @@ function renderBoard() {
   if (!board) return;
   board.innerHTML = '';
   const hint = document.getElementById('board-drop-hint');
-  if (hint) hint.style.display = boardItems.length ? 'none' : '';
+  if (hint) {
+    hint.style.display = boardItems.length ? 'none' : '';
+    const label = hint.querySelector('span');
+    if (label) label.textContent = isTouchLayout()
+      ? 'Tap + to pin files, images or notes'
+      : 'Drop files, images or notes here — they pin to your board';
+  }
+  const banner = document.getElementById('dashboard-banner');
+  if (banner && !document.getElementById('board-mobile-add')) {
+    const add = document.createElement('button');
+    add.id = 'board-mobile-add';
+    add.type = 'button';
+    add.title = 'Add pin';
+    add.innerHTML = '<span>+</span>';
+    add.addEventListener('click', window.openBoardAddSheet);
+    banner.appendChild(add);
+  }
   let assigned = false;
   boardItems.forEach(item => {
     // Give each pinned item a stable slight tilt + pin colour once (never upside-down/90°).
     if (item.rot === undefined) { item.rot = Math.round((Math.random() * 20 - 10) * 10) / 10; item.pin = Math.floor(Math.random() * BOARD_PIN_COLORS.length); assigned = true; }
     const card = document.createElement('div');
     card.className = 'board-card board-' + item.type;
+    card.dataset.boardId = item.id;
     card.style.left = item.x + 'px'; card.style.top = item.y + 'px';
     card.style.width = item.w + 'px'; card.style.height = item.h + 'px';
     card.style.transform = 'rotate(' + (item.rot || 0) + 'deg)';
     let inner = '';
-    if (item.type === 'image') inner = `<div class="board-body board-img" style="background-image:url('${window.resolveFileUrl ? window.resolveFileUrl(fileUrlOf(item.path)) : fileUrlOf(item.path)}')"></div>`;
+    if (item.type === 'image') {
+      const imgUrl = item.dataUrl || (window.resolveFileUrl ? window.resolveFileUrl(fileUrlOf(item.path)) : fileUrlOf(item.path));
+      inner = `<div class="board-body board-img" style="background-image:url('${imgUrl}')"></div>`;
+    }
     else if (item.type === 'file') inner = `<div class="board-body board-file"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg><span>${gsEscape(item.name || 'File')}</span></div>`;
     else inner = `<div class="board-body board-text" contenteditable="true">${gsEscape(item.text || '')}</div>`;
     card.innerHTML = `<div class="board-pin">${boardPinSvg(BOARD_PIN_COLORS[item.pin || 0])}</div>` + inner + `<button class="board-del" title="Remove">&times;</button><div class="board-resize"></div>`;
@@ -3550,7 +3866,7 @@ function makeBoardCardInteractive(card, item) {
     const sx = e.clientX, sy = e.clientY, ox = item.x, oy = item.y;
     const rot = item.rot || 0;
     let moved = false; // a real drag only once the pointer travels past a small threshold
-    card.setPointerCapture(e.pointerId);
+    try { card.setPointerCapture(e.pointerId); } catch (_) {}
     const move = (ev) => {
       if (!moved) {
         if (Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) <= 4) return; // still a click
@@ -3570,7 +3886,8 @@ function makeBoardCardInteractive(card, item) {
   handle.addEventListener('pointerdown', (e) => {
     e.stopPropagation(); e.preventDefault();
     const sx = e.clientX, sy = e.clientY, ow = item.w, oh = item.h;
-    handle.setPointerCapture(e.pointerId); card.classList.add('dragging');
+    try { handle.setPointerCapture(e.pointerId); } catch (_) {}
+    card.classList.add('dragging');
     const move = (ev) => { item.w = Math.max(90, ow + (ev.clientX - sx)); item.h = Math.max(60, oh + (ev.clientY - sy)); card.style.width = item.w + 'px'; card.style.height = item.h + 'px'; };
     const up = () => { card.classList.remove('dragging'); handle.removeEventListener('pointermove', move); handle.removeEventListener('pointerup', up); saveBoard(); };
     handle.addEventListener('pointermove', move); handle.addEventListener('pointerup', up);
@@ -4537,6 +4854,8 @@ document.addEventListener('click', (e) => {
   let volume = parseFloat(localStorage.getItem('opennotes_haven_vol'));
   if (isNaN(volume)) volume = 0.5;
   let isOpen = false;
+  const isPhoneHaven = () => window.matchMedia('(max-width: 820px), (pointer: coarse)').matches;
+  const canUseNativeSystemBars = () => Capacitor.isNativePlatform() && SystemBars;
 
   const SUBS = {
     cabin: 'Fireplace crackling in a snowed-in log cabin.',
@@ -4838,12 +5157,14 @@ document.addEventListener('click', (e) => {
     hideTimer = setTimeout(() => fsEl.classList.add('hide-ui'), 3000);
   }
   function onMove(e) {
+    if (isPhoneHaven()) return;
     pokeUi();
     const w = window.innerWidth, h = window.innerHeight;
     targetRy = ((e.clientX / w) - 0.5) * 4;   // subtle look-around
     targetRx = ((e.clientY / h) - 0.5) * -2.5;
   }
   function parallaxLoop() {
+    if (!isOpen || isPhoneHaven()) return;
     curRx += (targetRx - curRx) * 0.045;
     curRy += (targetRy - curRy) * 0.045;
     const sway = world.querySelector('.hv-sway');
@@ -4852,10 +5173,37 @@ document.addEventListener('click', (e) => {
   }
   function onKey(e) { if (e.key === 'Escape') window.closeHaven(); else pokeUi(); }
 
+  async function enterHavenDisplayMode() {
+    const phone = isPhoneHaven();
+    fsEl.classList.toggle('haven-phone-landscape', phone);
+    fsEl.classList.toggle('haven-mobile-lite', phone);
+    document.body.classList.add('haven-open');
+    if (canUseNativeSystemBars()) {
+      SystemBars.hide().catch(() => {});
+    }
+    if (phone) {
+      try { await document.documentElement.requestFullscreen?.(); } catch (_) {}
+      try { await screen.orientation?.lock?.('landscape'); } catch (_) {}
+    }
+  }
+
+  function exitHavenDisplayMode() {
+    fsEl.classList.remove('haven-phone-landscape', 'haven-mobile-lite');
+    document.body.classList.remove('haven-open');
+    try { screen.orientation?.unlock?.(); } catch (_) {}
+    try {
+      if (document.fullscreenElement) document.exitFullscreen();
+    } catch (_) {}
+    if (canUseNativeSystemBars()) {
+      SystemBars.show().then(() => syncNativeSystemBars(localStorage.getItem('opennotes_theme') || 'light')).catch(() => {});
+    }
+  }
+
   // ---------- Public API ----------
   window.openHaven = function () {
     if (isOpen) return;
     isOpen = true;
+    enterHavenDisplayMode();
     buildScene();
     applyCam(true);
     syncUi();
@@ -4867,12 +5215,13 @@ document.addEventListener('click', (e) => {
     document.addEventListener('pointerdown', pokeUi);
     document.addEventListener('keydown', onKey);
     targetRx = targetRy = curRx = curRy = 0;
-    parallaxLoop();
+    if (!isPhoneHaven()) parallaxLoop();
   };
   window.closeHaven = function () {
     if (!isOpen) return;
     isOpen = false;
     stopAudio();
+    exitHavenDisplayMode();
     fsEl.style.display = 'none';
     world.innerHTML = '';
     clearTimeout(hideTimer);
