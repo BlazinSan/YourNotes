@@ -1014,13 +1014,15 @@ body {
 #dashboard-board {
   position: absolute; inset: 0; z-index: 4;
   pointer-events: none; overflow: hidden; border-radius: inherit;
-  transition: opacity 0.28s ease;
+  transition: opacity 0.28s ease; opacity: 0;
 }
-/* The pinned board belongs to the dashboard/projects banner. On the thin banner
-   (Tasks, Session, etc.) fade it out cleanly instead of letting cards flash-clip
-   during the height transition. */
-.dashboard-banner.thin #dashboard-board { opacity: 0; pointer-events: none; }
-.dashboard-banner.thin #dashboard-board .board-card { pointer-events: none; }
+/* The pinned board belongs to the Dashboard (the tall, expanded banner). Card
+   positions are absolute within the board, so on the short Projects banner or the
+   thin page banners the same coordinates would land in the wrong place (cards
+   sliding to the bottom / hanging out). Only show — and only allow interaction —
+   when the banner is expanded. */
+.dashboard-banner.expanded #dashboard-board { opacity: 1; }
+.dashboard-banner:not(.expanded) #dashboard-board .board-card { pointer-events: none; }
 
 .board-drop-hint {
   position: absolute; inset: 0; z-index: 3;
