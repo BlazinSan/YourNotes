@@ -102,6 +102,10 @@ function createWindow() {
     writeTimer = setTimeout(flushStore, 400);
   }
   app.on('before-quit', flushStore);
+  // Extra safety: flush whenever the window loses focus, so even a hard kill
+  // (crash, force-close, power loss) can lose at most the last 400ms of edits
+  // made while the window was continuously focused.
+  mainWindow.on('blur', flushStore);
 
   ipcMain.on('load-data-sync', (event, key) => {
     if (!loadOk) attemptLoad(15); // the lock may have cleared since startup
@@ -116,8 +120,18 @@ function createWindow() {
   });
 
   ipcMain.on('save-data-sync', (event, key, value) => {
-    store[key] = value;
+    if (value === null || value === undefined) delete store[key]; // removeItem
+    else store[key] = value;
     scheduleWrite();
+    event.returnValue = true;
+  });
+
+  // Factory reset: wipe the persistent store (localStorage.clear() alone would
+  // leave the file intact and every "deleted" key would come back on restart).
+  ipcMain.on('clear-data-sync', (event) => {
+    store = {};
+    dirty = true;
+    flushStore();
     event.returnValue = true;
   });
 
@@ -132,6 +146,17 @@ function createWindow() {
     return dest;
   });
   ipcMain.on('open-path', (event, p) => { try { if (p) shell.openPath(p); } catch (_) {} });
+
+  // Cloud sync reads app-managed files (college PDFs, banner, board, profile pic)
+  // to upload them. Restricted to the app's own data directory.
+  ipcMain.handle('read-file-bytes', async (event, p) => {
+    try {
+      const norm = path.normalize(decodeURIComponent(String(p).replace(/^file:\/\/\//, '')).replace(/\//g, path.sep));
+      const base = path.normalize(app.getPath('userData') + path.sep);
+      if (!norm.startsWith(base)) return null;
+      return fs.readFileSync(norm);
+    } catch (_) { return null; }
+  });
 
   // Security: open external links in the OS browser, block in-app navigation away from the app
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {

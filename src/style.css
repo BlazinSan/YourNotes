@@ -3070,12 +3070,13 @@ body {
 .haven-enter-arrow { color: var(--accent-color); flex-shrink: 0; }
 
 /* ---- Fullscreen overlay ---- */
-.haven-fs { position: fixed; inset: 0; z-index: 12000; background: #05060a; overflow: hidden; cursor: default; animation: havenFade 0.45s ease; }
+.haven-fs { position: fixed; inset: 0; z-index: 12000; background: #05060a; overflow: hidden; cursor: default; }
 .haven-fs.hide-ui { cursor: none; }
-@keyframes havenFade { from { opacity: 0; } to { opacity: 1; } }
 .haven-viewport { position: absolute; inset: 0; perspective: 1150px; perspective-origin: 50% 45%; overflow: hidden; }
 .haven-world { position: absolute; left: 50%; top: 50%; width: 0; height: 0; transform-style: preserve-3d; transition: transform 1.7s cubic-bezier(0.62, 0, 0.25, 1); }
 .haven-vignette { position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 240px 70px rgba(0, 0, 0, 0.72); z-index: 3; }
+/* Parallax wrapper: cursor-driven micro look-around inside the seat pose */
+.hv-sway { position: absolute; width: 0; height: 0; transform-style: preserve-3d; }
 
 /* ---- 3D room shell ---- */
 .hv-room { position: absolute; transform-style: preserve-3d; --rw: 1600px; --rh: 920px; --rd: 1250px; }
@@ -3106,7 +3107,7 @@ body {
 .hv-fire .mantel { position: absolute; left: -46px; top: -34px; width: 472px; height: 42px; background: linear-gradient(#7a5230, #4a2f1c); border-radius: 8px; box-shadow: 0 12px 22px rgba(0,0,0,0.45); }
 .hv-fire .opening { position: absolute; left: 50%; bottom: 70px; width: 236px; height: 250px; margin-left: -118px; border-radius: 12px; background: radial-gradient(circle at 50% 95%, #b0470f, #200c04 72%); box-shadow: inset 0 0 60px #000; overflow: hidden; }
 .hv-fire .logs { position: absolute; left: 50%; bottom: 14px; width: 150px; height: 16px; margin-left: -75px; border-radius: 8px; background: #3a2416; box-shadow: 0 -12px 0 -2px #4a2f1c; }
-.hv-fire .glow { position: absolute; left: 50%; bottom: 0; width: 620px; height: 520px; margin-left: -310px; background: radial-gradient(closest-side, rgba(255,150,60,0.9), rgba(255,120,40,0.25) 45%, rgba(255,120,40,0) 72%); mix-blend-mode: screen; }
+.hv-fire .glow { position: absolute; left: 50%; bottom: -60px; width: 900px; height: 760px; margin-left: -450px; background: radial-gradient(closest-side, rgba(255,150,60,0.95), rgba(255,120,40,0.3) 45%, rgba(255,120,40,0) 72%); mix-blend-mode: screen; animation: havenGlow 2.4s ease-in-out infinite; }
 .hv-cabin-window { position: absolute; top: 50%; left: 30%; width: 260px; height: 300px; margin-top: -150px; }
 .hv-cabin-window .glass { position: absolute; inset: 0; border-radius: 8px; background: linear-gradient(#0c1730, #17233f); box-shadow: inset 0 0 40px rgba(0,0,0,0.6); overflow: hidden; }
 .hv-cabin-window .frame { position: absolute; inset: -14px; border: 16px solid #5a3a22; border-radius: 12px; box-shadow: 0 10px 20px rgba(0,0,0,0.4), inset 0 0 0 2px rgba(0,0,0,0.3); }
@@ -3114,22 +3115,26 @@ body {
 .hv-cabin-window .bar-h { position: absolute; top: 50%; left: 0; right: 0; height: 12px; margin-top: -6px; background: #5a3a22; }
 
 /* ---------- BEACH ---------- */
-.hv-beach .hv-back, .hv-beach .hv-left, .hv-beach .hv-right, .hv-beach .hv-ceil {
+.hv-beach .hv-back, .hv-beach .hv-left, .hv-beach .hv-right {
   background: linear-gradient(180deg, #34246a 0%, #7a3f7a 34%, #c65b6f 55%, #f0965a 75%, #ffd08a 100%);
 }
+.hv-beach .hv-ceil { background: radial-gradient(ellipse at 50% 80%, #453076, #2c1e58 70%); }
 .hv-beach .hv-floor { background: linear-gradient(0deg, #b98f58, #e7c99a 60%, #efd7ab); }
 .hv-beach .hv-left::after, .hv-beach .hv-right::after, .hv-beach .hv-ceil::after { background: none; }
 .hv-sun { position: absolute; left: 50%; bottom: 150px; width: 150px; height: 150px; margin-left: -75px; border-radius: 50%; background: radial-gradient(circle, #fff6d6 40%, #ffcf6b 60%, rgba(255,180,90,0) 72%); box-shadow: 0 0 120px 50px rgba(255,190,110,0.55); }
 .hv-sea { position: absolute; left: 0; right: 0; bottom: 0; height: 150px; background: linear-gradient(0deg, #2e5a8a, #5b86ad 60%, #e9a06a); overflow: hidden; }
 .hv-sea .shimmer { position: absolute; left: 50%; top: 10px; width: 160px; height: 120px; margin-left: -80px; background: radial-gradient(ellipse, rgba(255,225,160,0.5), rgba(255,225,160,0) 70%); }
-.hv-wave { position: absolute; left: -10%; width: 120%; height: 8px; border-radius: 8px; background: repeating-linear-gradient(90deg, rgba(255,255,255,0.55) 0 40px, rgba(255,255,255,0) 40px 90px); }
+.hv-wave { position: absolute; left: -10%; width: 120%; height: 6px; border-radius: 8px; filter: blur(2.5px); opacity: 0.65; background: repeating-linear-gradient(90deg, rgba(255,255,255,0.6) 0 70px, rgba(255,255,255,0.08) 70px 150px); }
 .hv-palm { position: absolute; bottom: 0; width: 260px; height: 420px; }
 .hv-mat { position: absolute; border-radius: 12px; background: repeating-linear-gradient(0deg, #c94f4f 0 26px, #b34444 26px 28px), repeating-linear-gradient(90deg, rgba(255,255,255,0.3) 0 26px, rgba(255,255,255,0) 26px 28px); box-shadow: 0 20px 30px rgba(0,0,0,0.25); }
 
 /* ---------- HIGHRISE ---------- */
 .hv-city .hv-back { background: linear-gradient(180deg, #060a1c, #101838 55%, #241a3e); }
-.hv-city .hv-left, .hv-city .hv-right, .hv-city .hv-ceil { background: linear-gradient(180deg, #17142a, #241d33); }
+.hv-city .hv-left, .hv-city .hv-right, .hv-city .hv-ceil { background: linear-gradient(180deg, #201b38, #2e2544); }
 .hv-city .hv-floor { background: linear-gradient(0deg, #14101f, #241d33); }
+/* moonlight wash so the bedroom walls read, not just black */
+.hv-city .hv-left::after { background: linear-gradient(90deg, rgba(0,0,0,0.4), rgba(120,130,200,0.05) 70%); }
+.hv-city .hv-right::after { background: linear-gradient(270deg, rgba(0,0,0,0.4), rgba(255,196,120,0.06) 70%); }
 .hv-city .hv-back { overflow: visible; }
 .hv-cityview { position: absolute; inset: 60px 70px 0 70px; overflow: hidden; border-radius: 6px 6px 0 0; }
 .hv-cityframe { position: absolute; inset: 40px 50px 0 50px; border: 22px solid #0b0f1e; border-bottom: none; border-radius: 10px 10px 0 0; box-shadow: inset 0 0 0 2px rgba(255,255,255,0.04); }
@@ -3183,3 +3188,18 @@ body {
   font-weight: 800; font-size: 1.6rem; border: 2px solid var(--panel-border);
 }
 .profile-avatar.has-pic, .settings-avatar.has-pic { color: transparent; background-size: cover; background-position: center; }
+
+/* Profile picture crop editor */
+.pic-crop-overlay { position: fixed; inset: 0; z-index: 15000; background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center; }
+.pic-crop-card { background: var(--bg-color); border: 1px solid var(--panel-border); border-radius: 20px; padding: 24px; width: 400px; max-width: 92vw; box-shadow: 0 30px 70px rgba(0, 0, 0, 0.4); }
+.pic-crop-card h4 { color: var(--text-primary); font-size: 1.15rem; font-weight: 800; }
+.pic-crop-card p { color: var(--text-secondary); font-size: 0.85rem; margin: 4px 0 14px; }
+.pic-crop-stage { position: relative; width: 340px; height: 340px; margin: 0 auto; border-radius: 14px; overflow: hidden; cursor: grab; touch-action: none; }
+.pic-crop-stage:active { cursor: grabbing; }
+.pic-crop-mask { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(circle at center, transparent 48%, rgba(0, 0, 0, 0.55) 48.5%); }
+.pic-crop-mask::after { content: ""; position: absolute; left: 50%; top: 50%; width: 326px; height: 326px; margin: -163px 0 0 -163px; border: 2px dashed rgba(255, 255, 255, 0.55); border-radius: 50%; }
+.pic-crop-zoom { width: 100%; margin-top: 14px; accent-color: var(--accent-color); cursor: pointer; }
+.pic-crop-actions { display: flex; gap: 10px; margin-top: 14px; }
+.pic-crop-actions button { flex: 1; padding: 11px; border: none; border-radius: 10px; font-weight: 700; cursor: pointer; font-family: inherit; font-size: 0.92rem; }
+.pic-crop-cancel { background: var(--overlay-medium); color: var(--text-primary); }
+.pic-crop-save { background: var(--accent-color); color: #fff; }
