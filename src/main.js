@@ -4471,6 +4471,21 @@ window.removeProfilePic = function () { localStorage.removeItem('opennotes_profi
 window.applyProfilePic();
 
 // ============================================================
+// Mobile drawer sidebar (Android app + narrow windows)
+// ============================================================
+window.toggleMobileSidebar = function (force) {
+  const open = force !== undefined ? !!force : !document.body.classList.contains('sidebar-open');
+  document.body.classList.toggle('sidebar-open', open);
+};
+// Navigating from the drawer should close it (matches native app expectations)
+document.addEventListener('click', (e) => {
+  if (window.innerWidth > 820) return;
+  if (!document.body.classList.contains('sidebar-open')) return;
+  const nav = e.target.closest('.sidebar .nav-link, .sidebar button, .sidebar a');
+  if (nav) setTimeout(() => window.toggleMobileSidebar(false), 120);
+});
+
+// ============================================================
 // 🧘 Safe Haven — fullscreen 3D retreat with procedural ambience
 // Real CSS-3D rooms: each seat is a camera pose (position + yaw),
 // so switching seats genuinely turns you inside the space.

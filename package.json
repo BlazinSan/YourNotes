@@ -17,6 +17,7 @@
     "package:linux": "npm run build && electron-builder -l"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.4.1",
     "concurrently": "^10.0.3",
     "electron": "^42.4.0",
     "electron-builder": "^26.15.2",
@@ -24,6 +25,9 @@
     "wait-on": "^9.0.10"
   },
   "dependencies": {
+    "@capacitor/android": "^8.4.1",
+    "@capacitor/core": "^8.4.1",
+    "@capacitor/preferences": "^8.0.1",
     "marked": "^18.0.5"
   },
   "build": {

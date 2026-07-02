@@ -5,7 +5,7 @@
     <!-- CSP: blocks remote/injected scripts & framing. 'unsafe-inline' is required because the
          app uses inline event handlers/styles throughout (ponytail: rewriting all of them is out of
          scope; the meta CSP + Electron contextIsolation are the defense-in-depth ceiling here). -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https: file:; media-src 'self' data: blob: https:; connect-src 'self' https:; object-src 'none'; base-uri 'none'; frame-src 'self' data: blob: file:" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https: file:; media-src 'self' data: blob: https:; connect-src 'self' https: wss:; object-src 'none'; base-uri 'none'; frame-src 'self' data: blob: file:" />
     <link rel="icon" type="image/png" href="/icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>YourNotes</title>
@@ -37,6 +37,11 @@
     </div>
 
     <div id="app">
+      <!-- Mobile: hamburger + drawer scrim (hidden on desktop via CSS) -->
+      <button id="mobile-menu-btn" onclick="toggleMobileSidebar()" aria-label="Menu">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="4" y1="7" x2="20" y2="7"></line><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="17" x2="20" y2="17"></line></svg>
+      </button>
+      <div id="mobile-scrim" onclick="toggleMobileSidebar(false)"></div>
       <!-- Global search bar (searches notes, folders, PDFs, tasks, links) -->
       <div id="global-search-bar">
         <div class="global-search-wrap">
