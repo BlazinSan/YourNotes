@@ -77,6 +77,7 @@ const appTitle = document.querySelector('.sidebar-brand h1');
 const appContainer = document.querySelector('.app-container');
 const viewGridBtn = document.getElementById('view-grid-btn');
 const viewGraphBtn = document.getElementById('view-graph-btn');
+const viewArchivedBtn = document.getElementById('view-archived-btn');
 const dashboardTitle = document.getElementById('dashboard-title');
 const dashboardBanner = document.getElementById('dashboard-banner');
 const bannerUpload = document.getElementById('banner-upload');
@@ -301,39 +302,119 @@ function saveNotes() {
   localStorage.setItem('opennotes_data', JSON.stringify(notes));
 }
 
+function loadStringSet(key) {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(key) || '[]'));
+  } catch (_) {
+    return new Set();
+  }
+}
+
+function saveStringSet(key, set) {
+  localStorage.setItem(key, JSON.stringify([...set]));
+}
+
+let archivedNoteIds = loadStringSet('opennotes_archived_notes');
+let expandedSidebarGroups = loadStringSet('opennotes_sidebar_expanded_groups');
+
+function saveArchivedNoteIds() {
+  saveStringSet('opennotes_archived_notes', archivedNoteIds);
+}
+
+function isNoteArchived(noteOrId) {
+  const id = typeof noteOrId === 'string' ? noteOrId : noteOrId && noteOrId.id;
+  return !!id && archivedNoteIds.has(id);
+}
+
+function visibleSidebarNotes() {
+  return notes.filter(note => !isNoteArchived(note));
+}
+
+function groupTitle(folderName, title) {
+  const cleanTitle = (title || '').trim() || 'Untitled Note';
+  return folderName && folderName !== 'Ungrouped' ? `${folderName} · ${cleanTitle}` : cleanTitle;
+}
+
 // Render Notes List
 function renderNotesList(filterText = '') {
   notesListEl.innerHTML = '';
-  
-  const filteredNotes = notes.filter(note => {
+  const term = (filterText || '').toLowerCase();
+
+  const filteredNotes = visibleSidebarNotes().filter(note => {
     const plainText = note.body ? note.body.replace(/<[^>]*>?/gm, '') : '';
-    return (note.title || '').toLowerCase().includes(filterText.toLowerCase()) || 
-           (plainText || '').toLowerCase().includes(filterText.toLowerCase());
+    return (note.title || '').toLowerCase().includes(term) ||
+           (plainText || '').toLowerCase().includes(term) ||
+           noteGroup(note).toLowerCase().includes(term);
   });
-  
+
   filteredNotes.sort((a, b) => b.updatedAt - a.updatedAt);
-  
+
   if (filteredNotes.length === 0) {
     notesListEl.innerHTML = `<div style="text-align:center; padding:20px; color:var(--text-secondary); font-size:0.9rem;">No notes found</div>`;
     return;
   }
-  
+
+  const groups = new Map();
   filteredNotes.forEach(note => {
-    const date = new Date(note.updatedAt);
-    const dateString = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-    const plainText = note.body ? note.body.replace(/<[^>]*>?/gm, '') : 'No content...';
-    
-    const div = document.createElement('div');
-    div.className = `note-item ${note.id === activeNoteId ? 'active' : ''}`;
-    div.onclick = () => setActiveNote(note.id);
-    
-    div.innerHTML = `
-      <div class="note-item-title">${note.title || 'Untitled Note'}</div>
-      <div class="note-item-preview">${plainText}</div>
-      <div class="note-item-date">${dateString}</div>
+    const group = noteGroup(note);
+    if (!groups.has(group)) groups.set(group, []);
+    groups.get(group).push(note);
+  });
+
+  const groupNames = [...groups.keys()].sort((a, b) => {
+    if (a === 'Ungrouped') return 1;
+    if (b === 'Ungrouped') return -1;
+    return a.localeCompare(b);
+  });
+
+  groupNames.forEach(group => {
+    const items = groups.get(group);
+    const expanded = !!term || expandedSidebarGroups.has(group) || items.some(note => note.id === activeNoteId);
+    const header = document.createElement('div');
+    header.className = 'sidebar-note-group';
+    header.innerHTML = `
+      <svg class="sidebar-note-group-chevron ${expanded ? '' : 'collapsed'}" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+      <span class="sidebar-note-group-name">${gsEscape(group)}</span>
+      <span class="sidebar-note-group-count">${items.length}</span>
     `;
-    
-    notesListEl.appendChild(div);
+    header.onclick = () => {
+      if (expandedSidebarGroups.has(group)) expandedSidebarGroups.delete(group);
+      else expandedSidebarGroups.add(group);
+      saveStringSet('opennotes_sidebar_expanded_groups', expandedSidebarGroups);
+      renderNotesList(filterText);
+    };
+    header.oncontextmenu = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showCollegeContextMenu('project-folder', group, e.clientX, e.clientY);
+    };
+    notesListEl.appendChild(header);
+
+    if (!expanded) return;
+
+    items.forEach(note => {
+      const date = new Date(note.updatedAt);
+      const dateString = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      const plainText = note.body ? note.body.replace(/<[^>]*>?/gm, '') : 'No content...';
+
+      const div = document.createElement('div');
+      div.className = `note-item ${note.id === activeNoteId ? 'active' : ''}`;
+      div.onclick = () => setActiveNote(note.id);
+      div.oncontextmenu = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showCollegeContextMenu('note', note.id, e.clientX, e.clientY);
+      };
+
+      div.innerHTML = `
+        <div class="note-item-title">${gsEscape(noteDisplayTitle(note))}</div>
+        <div class="note-item-preview">${gsEscape(plainText)}</div>
+        <div class="note-item-date">${dateString}</div>
+      `;
+
+      notesListEl.appendChild(div);
+    });
   });
 }
 
@@ -381,7 +462,8 @@ function setActiveNote(id) {
 // --- Notes grouping / sort / filter state ---
 let homeSort = localStorage.getItem('opennotes_home_sort') || 'recent';
 let homeFolderFilter = 'all';
-const collapsedGroups = new Set();
+let expandedProjectGroups = loadStringSet('opennotes_expanded_project_groups');
+let homeArchiveMode = false;
 
 // Pinned project folders (group names) — render first in the Projects grid
 let pinnedGroups = JSON.parse(localStorage.getItem('opennotes_pinned_groups') || '[]');
@@ -463,6 +545,149 @@ function noteDisplayTitle(n) {
   const i = t.indexOf(' · ');
   return i > -1 ? (t.slice(i + 3).trim() || t) : t;
 }
+
+function projectNotesForMode() {
+  return notes.filter(note => homeArchiveMode ? isNoteArchived(note) : !isNoteArchived(note));
+}
+
+function projectFolderNames(sourceNotes = notes) {
+  return [...new Set(sourceNotes.map(noteGroup))].sort((a, b) => {
+    if (a === 'Ungrouped') return 1;
+    if (b === 'Ungrouped') return -1;
+    return a.localeCompare(b);
+  });
+}
+
+function notesInProjectFolder(folderName) {
+  return notes.filter(note => noteGroup(note) === folderName);
+}
+
+function refreshNoteSurfaces(searchTerm = undefined) {
+  renderHomeGrid(searchTerm !== undefined ? searchTerm : (homeSearchInput ? homeSearchInput.value : ''));
+  renderNotesList(searchInput ? searchInput.value : '');
+  const favPanel = document.getElementById('home-favourites');
+  if (typeof renderFavourites === 'function' && favPanel && favPanel.style.display !== 'none') renderFavourites();
+  if (currentHomeView === 'graph' && !homeArchiveMode) initGraph();
+}
+
+function setNoteArchived(noteId, archived) {
+  const note = notes.find(n => n.id === noteId);
+  if (!note) return;
+  if (archived) archivedNoteIds.add(noteId);
+  else archivedNoteIds.delete(noteId);
+  saveArchivedNoteIds();
+  if (activeNoteId === noteId && archived) setActiveNote(null);
+  else refreshNoteSurfaces();
+}
+
+function setProjectFolderArchived(folderName, archived) {
+  const folderNotes = notesInProjectFolder(folderName);
+  if (folderNotes.length === 0) return;
+  folderNotes.forEach(note => archived ? archivedNoteIds.add(note.id) : archivedNoteIds.delete(note.id));
+  saveArchivedNoteIds();
+  if (folderNotes.some(note => note.id === activeNoteId) && archived) setActiveNote(null);
+  else refreshNoteSurfaces();
+}
+
+function renameProjectFolder(folderName) {
+  const nextName = prompt('Rename folder:', folderName);
+  if (nextName === null) return;
+  const trimmed = nextName.trim();
+  if (!trimmed) return;
+  notesInProjectFolder(folderName).forEach(note => {
+    note.title = groupTitle(trimmed, noteDisplayTitle(note));
+    note.updatedAt = Date.now();
+  });
+  pinnedGroups = pinnedGroups.map(g => g === folderName ? trimmed : g);
+  favourites = favourites.map(f => (f.type === 'group' && f.id === folderName) ? { ...f, id: trimmed } : f);
+  if (homeFolderFilter === folderName) homeFolderFilter = trimmed;
+  if (expandedProjectGroups.delete(folderName)) expandedProjectGroups.add(trimmed);
+  if (expandedSidebarGroups.delete(folderName)) expandedSidebarGroups.add(trimmed);
+  localStorage.setItem('opennotes_pinned_groups', JSON.stringify(pinnedGroups));
+  localStorage.setItem('opennotes_favourites', JSON.stringify(favourites));
+  saveStringSet('opennotes_expanded_project_groups', expandedProjectGroups);
+  saveStringSet('opennotes_sidebar_expanded_groups', expandedSidebarGroups);
+  saveNotes();
+  refreshNoteSurfaces();
+}
+
+function renameProjectNote(noteId) {
+  const note = notes.find(n => n.id === noteId);
+  if (!note) return;
+  const folder = noteGroup(note);
+  const nextName = prompt('Rename note:', noteDisplayTitle(note));
+  if (nextName === null) return;
+  const trimmed = nextName.trim();
+  if (!trimmed) return;
+  note.title = groupTitle(folder, trimmed);
+  note.updatedAt = Date.now();
+  if (activeNoteId === noteId) noteTitleInput.value = note.title;
+  saveNotes();
+  refreshNoteSurfaces();
+}
+
+function deleteProjectNote(noteId) {
+  const note = notes.find(n => n.id === noteId);
+  if (!note) return;
+  if (!confirm(`Are you sure you want to delete the note "${noteDisplayTitle(note)}"?`)) return;
+  notes = notes.filter(n => n.id !== noteId);
+  archivedNoteIds.delete(noteId);
+  saveArchivedNoteIds();
+  saveNotes();
+  if (activeNoteId === noteId) setActiveNote(null);
+  else refreshNoteSurfaces();
+}
+
+function deleteProjectFolder(folderName) {
+  const folderNotes = notesInProjectFolder(folderName);
+  if (folderNotes.length === 0) return;
+  if (!confirm(`Delete "${folderName}" and all ${folderNotes.length} note${folderNotes.length === 1 ? '' : 's'} inside it?`)) return;
+  const ids = new Set(folderNotes.map(note => note.id));
+  notes = notes.filter(note => !ids.has(note.id));
+  ids.forEach(id => archivedNoteIds.delete(id));
+  pinnedGroups = pinnedGroups.filter(g => g !== folderName);
+  favourites = favourites.filter(f => !(f.type === 'group' && f.id === folderName) && !(f.type === 'note' && ids.has(f.id)));
+  expandedProjectGroups.delete(folderName);
+  expandedSidebarGroups.delete(folderName);
+  if (homeFolderFilter === folderName) homeFolderFilter = 'all';
+  localStorage.setItem('opennotes_pinned_groups', JSON.stringify(pinnedGroups));
+  localStorage.setItem('opennotes_favourites', JSON.stringify(favourites));
+  saveStringSet('opennotes_expanded_project_groups', expandedProjectGroups);
+  saveStringSet('opennotes_sidebar_expanded_groups', expandedSidebarGroups);
+  saveArchivedNoteIds();
+  saveNotes();
+  if (ids.has(activeNoteId)) setActiveNote(null);
+  else refreshNoteSurfaces();
+}
+
+function moveProjectNoteToFolder(noteId, folderName) {
+  const note = notes.find(n => n.id === noteId);
+  if (!note) return;
+  note.title = groupTitle(folderName, noteDisplayTitle(note));
+  note.updatedAt = Date.now();
+  expandedProjectGroups.add(folderName);
+  expandedSidebarGroups.add(folderName);
+  saveStringSet('opennotes_expanded_project_groups', expandedProjectGroups);
+  saveStringSet('opennotes_sidebar_expanded_groups', expandedSidebarGroups);
+  if (activeNoteId === noteId) noteTitleInput.value = note.title;
+  saveNotes();
+  refreshNoteSurfaces();
+}
+
+function createProjectFolderWithFirstNote() {
+  const folderName = prompt('New folder name:');
+  if (folderName === null) return;
+  const trimmed = folderName.trim();
+  if (!trimmed) return;
+  homeArchiveMode = false;
+  currentHomeView = 'grid';
+  expandedProjectGroups.add(trimmed);
+  expandedSidebarGroups.add(trimmed);
+  saveStringSet('opennotes_expanded_project_groups', expandedProjectGroups);
+  saveStringSet('opennotes_sidebar_expanded_groups', expandedSidebarGroups);
+  createNote(groupTitle(trimmed, 'Untitled Note'), '');
+}
+
 function sortNotes(arr, mode) {
   const a = [...arr];
   if (mode === 'oldest') a.sort((x, y) => (x.updatedAt || 0) - (y.updatedAt || 0));
@@ -478,9 +703,7 @@ window.setHomeFolderFilter = function(v) { homeFolderFilter = v; renderHomeGrid(
 function populateFolderFilter() {
   const sel = document.getElementById('home-folder-filter');
   if (!sel) return;
-  const groups = [...new Set(notes.map(noteGroup))].sort((a, b) => {
-    if (a === 'Ungrouped') return 1; if (b === 'Ungrouped') return -1; return a.localeCompare(b);
-  });
+  const groups = projectFolderNames(projectNotesForMode());
   if (!groups.includes(homeFolderFilter)) homeFolderFilter = 'all';
   const cur = homeFolderFilter;
   sel.innerHTML = '<option value="all">All folders</option>' + groups.map(g => `<option value="${g.replace(/"/g, '&quot;')}">${g}</option>`).join('');
@@ -499,7 +722,7 @@ function makeNoteCard(note) {
   card.oncontextmenu = (e) => { e.preventDefault(); showCollegeContextMenu('note', note.id, e.clientX, e.clientY); };
   card.innerHTML = `
     <button class="card-fav-btn fav-btn ${isFav('note', note.id) ? 'active' : ''}" title="Favourite" onclick="toggleFav(event,'note','${note.id}')">${STAR_SVG(isFav('note', note.id))}</button>
-    <div class="book-card-title">${noteDisplayTitle(note)}</div>
+    <div class="book-card-title">${gsEscape(noteDisplayTitle(note))}</div>
     <div class="book-card-date">${dateString}</div>
   `;
   return card;
@@ -512,10 +735,15 @@ function renderHomeGrid(searchTerm = '') {
   populateFolderFilter();
 
   // "Create New Note" card (only in the default, unfiltered view)
-  if (!term && homeFolderFilter === 'all') {
+  if (!homeArchiveMode && !term && homeFolderFilter === 'all') {
     const newCard = document.createElement('div');
     newCard.className = 'book-card new-note-card';
     newCard.onclick = () => createNote('', '');
+    newCard.oncontextmenu = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      createProjectFolderWithFirstNote();
+    };
     newCard.innerHTML = `
       <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom: 16px;"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
       <div style="font-size: 1.2rem; font-weight: 600;">Create New Note</div>
@@ -523,12 +751,20 @@ function renderHomeGrid(searchTerm = '') {
     homeGrid.appendChild(newCard);
   }
 
-  if (notes.length === 0) return;
+  const modeNotes = projectNotesForMode();
+  if (modeNotes.length === 0) {
+    const empty = document.createElement('div');
+    empty.style.cssText = 'color: var(--text-secondary); grid-column: 1/-1; text-align: center; padding: 40px; font-size: 1.1rem;';
+    empty.textContent = homeArchiveMode ? 'No archived notes yet.' : 'No notes found.';
+    homeGrid.appendChild(empty);
+    return;
+  }
 
-  const filtered = notes.filter(n => {
+  const filtered = modeNotes.filter(n => {
     const title = (n.title || '').toLowerCase();
-    const body = (n.body || '').toLowerCase();
-    const matchSearch = !term || title.includes(term) || body.includes(term);
+    const plainBody = (n.body || '').replace(/<[^>]*>?/gm, '').toLowerCase();
+    const group = noteGroup(n).toLowerCase();
+    const matchSearch = !term || title.includes(term) || plainBody.includes(term) || group.includes(term);
     const matchFolder = homeFolderFilter === 'all' || noteGroup(n) === homeFolderFilter;
     return matchSearch && matchFolder;
   });
@@ -558,21 +794,32 @@ function renderHomeGrid(searchTerm = '') {
 
   groupNames.forEach(g => {
     const items = sortNotes(groups.get(g), homeSort);
-    const collapsed = collapsedGroups.has(g);
     const pinned = pinnedGroups.includes(g);
     const header = document.createElement('div');
     header.className = 'note-group-header';
+    const expanded = !!term || homeFolderFilter !== 'all' || expandedProjectGroups.has(g);
+    const collapsed = !expanded;
     header.innerHTML = `
       <svg class="note-group-chevron ${collapsed ? 'collapsed' : ''}" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
-      <span class="note-group-name">${g}</span>
+      <span class="note-group-name">${gsEscape(g)}</span>
       <span class="note-group-count">${items.length}</span>
       <button class="note-group-btn fav-btn ${isFav('group', g) ? 'active' : ''}" title="Favourite folder" onclick="toggleFav(event,'group','${g.replace(/'/g, "\\'")}')">${STAR_SVG(isFav('group', g))}</button>
       <button class="note-group-btn pin-btn ${pinned ? 'active' : ''}" title="${pinned ? 'Unpin' : 'Pin'} folder" onclick="event.stopPropagation(); togglePinGroup('${g.replace(/'/g, "\\'")}')">
         <svg viewBox="0 0 24 24" width="15" height="15" fill="${pinned ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"></line><path d="M5 17h14l-1.5-4.5V5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7.5L5 17z"></path></svg>
       </button>
     `;
-    header.onclick = () => { collapsed ? collapsedGroups.delete(g) : collapsedGroups.add(g); renderHomeGrid(searchTerm); };
+    header.onclick = () => {
+      if (expandedProjectGroups.has(g)) expandedProjectGroups.delete(g);
+      else expandedProjectGroups.add(g);
+      saveStringSet('opennotes_expanded_project_groups', expandedProjectGroups);
+      renderHomeGrid(searchTerm);
+    };
+    header.oncontextmenu = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showCollegeContextMenu('project-folder', g, e.clientX, e.clientY);
+    };
     homeGrid.appendChild(header);
     if (collapsed) return;
     items.forEach(note => homeGrid.appendChild(makeNoteCard(note)));
@@ -600,9 +847,12 @@ function createNote(title = '', body = '') {
 function deleteNote() {
   if (!activeNoteId) return;
   notes = notes.filter(n => n.id !== activeNoteId);
+  archivedNoteIds.delete(activeNoteId);
+  saveArchivedNoteIds();
   saveNotes();
-  if (notes.length > 0) {
-    setActiveNote(notes[0].id);
+  const nextNote = notes.find(n => !isNoteArchived(n));
+  if (nextNote) {
+    setActiveNote(nextNote.id);
   } else {
     setActiveNote(null);
   }
@@ -892,6 +1142,10 @@ function reattachNoteBodyListeners() {
 
 // Event Listeners
 newNoteBtn.addEventListener('click', () => createNote());
+newNoteBtn.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  createProjectFolderWithFirstNote();
+});
 deleteNoteBtn.addEventListener('click', deleteNote);
 if (exportNoteBtn) exportNoteBtn.addEventListener('click', exportNote);
 noteTitleInput.addEventListener('input', updateNoteContent);
@@ -914,8 +1168,10 @@ if (searchInput) {
   if (viewGridBtn) {
     viewGridBtn.addEventListener('click', () => {
       currentHomeView = 'grid';
+      homeArchiveMode = false;
       showPanel('home-grid', 'nav-projects-btn');
       viewGridBtn.classList.add('active');
+      renderHomeGrid(homeSearchInput ? homeSearchInput.value : '');
       if (graphAnimationFrame) cancelAnimationFrame(graphAnimationFrame);
     });
   }
@@ -923,13 +1179,27 @@ if (searchInput) {
   if (viewGraphBtn) {
     viewGraphBtn.addEventListener('click', () => {
       currentHomeView = 'graph';
+      homeArchiveMode = false;
       showPanel('home-graph', 'nav-projects-btn');
       viewGraphBtn.classList.add('active');
       initGraph();
     });
   }
 
+  if (viewArchivedBtn) {
+    viewArchivedBtn.addEventListener('click', () => {
+      currentHomeView = 'archived';
+      homeArchiveMode = true;
+      showPanel('home-grid', 'nav-projects-btn');
+      viewArchivedBtn.classList.add('active');
+      renderHomeGrid(homeSearchInput ? homeSearchInput.value : '');
+      if (graphAnimationFrame) cancelAnimationFrame(graphAnimationFrame);
+    });
+  }
+
 window.showPanel = function(panelId, btnId) {
+  // Leaving the Session page? Stop the Safe Haven ambience so it doesn't play unseen.
+  if (panelId !== 'home-session' && window.stopHaven) window.stopHaven();
   const dashboardBannerEl = document.getElementById('dashboard-banner');
   if (dashboardBannerEl) {
     if (panelId === 'home-grid' || panelId === 'home-graph') {
@@ -975,8 +1245,10 @@ window.showPanel = function(panelId, btnId) {
 
   const viewGridBtnEl = document.getElementById('view-grid-btn');
   const viewGraphBtnEl = document.getElementById('view-graph-btn');
+  const viewArchivedBtnEl = document.getElementById('view-archived-btn');
   if (viewGridBtnEl) viewGridBtnEl.classList.remove('active');
   if (viewGraphBtnEl) viewGraphBtnEl.classList.remove('active');
+  if (viewArchivedBtnEl) viewArchivedBtnEl.classList.remove('active');
 
   if (btnId) {
     const btn = document.getElementById(btnId);
@@ -986,11 +1258,13 @@ window.showPanel = function(panelId, btnId) {
 
 // Unified "Back" target for every panel — returns to the Projects/dashboard grid
 window.goToDashboard = function() {
-  setActiveNote(null);
   currentHomeView = 'grid';
+  homeArchiveMode = false;
+  setActiveNote(null);
   showPanel('home-grid', 'nav-projects-btn');
   const g = document.getElementById('view-grid-btn');
   if (g) g.classList.add('active');
+  renderHomeGrid(homeSearchInput ? homeSearchInput.value : '');
 };
 
 window.toggleDashboardBanner = function(e) {
@@ -2039,14 +2313,15 @@ function initGraph() {
   const rect = homeGraph.getBoundingClientRect();
   graphCanvas.width = rect.width;
   graphCanvas.height = rect.height;
+  const graphNotes = notes.filter(note => !isNoteArchived(note));
   
   // Give the layout a world larger than the viewport when there are many notes so
   // they spread out instead of packing into a cluttered blob; the view then
   // auto-fits (zooms out) to frame everything.
-  const spread = Math.min(2.2, Math.max(1, Math.sqrt(notes.length) / 5));
+  const spread = Math.min(2.2, Math.max(1, Math.sqrt(graphNotes.length) / 5));
   const worldW = rect.width * spread, worldH = rect.height * spread;
   const cx = worldW / 2, cy = worldH / 2;
-  const gNodes = notes.map(n => ({
+  const gNodes = graphNotes.map(n => ({
     id: n.id,
     title: n.title || 'Untitled',
     // spread across the world so the layout starts open, not collapsed in a ball
@@ -2058,7 +2333,7 @@ function initGraph() {
   }));
   
   const gEdges = [];
-  notes.forEach(n => {
+  graphNotes.forEach(n => {
     if (!n.body) return;
     const regex = /data-id="([^"]+)"/g;
     let match;
@@ -3676,26 +3951,58 @@ function showCollegeContextMenu(type, id, x, y) {
   const menu = document.getElementById('college-context-menu');
   if (!menu) return;
 
-  // Toggle Add to Folder wrapper visibility
+  const archiveBtn = document.getElementById('context-archive-btn');
+  const archiveLabel = document.getElementById('context-archive-label');
+  if (archiveBtn) {
+    if (type === 'note') {
+      archiveBtn.style.display = 'flex';
+      if (archiveLabel) archiveLabel.textContent = isNoteArchived(id) ? 'Restore' : 'Archive';
+    } else if (type === 'project-folder') {
+      const folderNotes = notesInProjectFolder(id);
+      const restoring = homeArchiveMode || (folderNotes.length > 0 && folderNotes.every(note => isNoteArchived(note)));
+      archiveBtn.style.display = 'flex';
+      if (archiveLabel) archiveLabel.textContent = restoring ? 'Restore Folder' : 'Archive Folder';
+    } else {
+      archiveBtn.style.display = 'none';
+    }
+  }
+
+  // Toggle project-folder movement wrapper visibility.
   const addToFolderWrapper = document.getElementById('context-add-to-folder-wrapper');
   if (addToFolderWrapper) {
     if (type === 'note') {
       addToFolderWrapper.style.display = 'block';
-      // Dynamically populate sub-menu folders list
       const submenu = document.getElementById('college-context-submenu');
       if (submenu) {
         submenu.innerHTML = '';
-        if (collegeFolders.length === 0) {
-          submenu.innerHTML = `<div style="padding: 8px 12px; color: var(--text-secondary); font-size: 0.85rem; text-align: center; white-space: nowrap;">No folders created</div>`;
+        const note = notes.find(n => n.id === id);
+        const currentFolder = note ? noteGroup(note) : '';
+        const folders = projectFolderNames(notes).filter(folder => folder !== currentFolder);
+        const newFolderItem = document.createElement('button');
+        newFolderItem.className = 'context-item';
+        newFolderItem.style.cssText = 'background: transparent; border: none; padding: 8px 12px; border-radius: 6px; font-family: inherit; font-size: 0.85rem; text-align: left; color: var(--accent-color); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; width: 100%; transition: background 0.15s;';
+        newFolderItem.textContent = 'New folder...';
+        newFolderItem.onclick = (e) => {
+          e.stopPropagation();
+          const folderName = prompt('Move note to new folder:');
+          if (folderName !== null && folderName.trim()) moveProjectNoteToFolder(id, folderName.trim());
+          menu.style.display = 'none';
+        };
+        submenu.appendChild(newFolderItem);
+        if (folders.length === 0) {
+          const empty = document.createElement('div');
+          empty.style.cssText = 'padding: 8px 12px; color: var(--text-secondary); font-size: 0.85rem; text-align: center; white-space: nowrap;';
+          empty.textContent = 'No other folders';
+          submenu.appendChild(empty);
         } else {
-          collegeFolders.forEach(folder => {
+          folders.forEach(folder => {
             const item = document.createElement('button');
             item.className = 'context-item';
             item.style.cssText = 'background: transparent; border: none; padding: 8px 12px; border-radius: 6px; font-family: inherit; font-size: 0.85rem; text-align: left; color: var(--text-primary); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; width: 100%; transition: background 0.15s;';
-            item.textContent = folder.name;
+            item.textContent = folder;
             item.onclick = (e) => {
               e.stopPropagation();
-              addNoteToCollegeFolder(id, folder.id);
+              moveProjectNoteToFolder(id, folder);
               menu.style.display = 'none';
             };
             submenu.appendChild(item);
@@ -3834,6 +4141,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const contextMenu = document.getElementById('college-context-menu');
   const contextOpenBtn = document.getElementById('context-open-btn');
   const contextRenameBtn = document.getElementById('context-rename-btn');
+  const contextArchiveBtn = document.getElementById('context-archive-btn');
   const contextDeleteBtn = document.getElementById('context-delete-btn');
 
   if (contextOpenBtn) {
@@ -3843,6 +4151,14 @@ document.addEventListener('DOMContentLoaded', () => {
         window.openCollegeFolder(contextTargetId);
       } else if (contextTargetType === 'pdf') {
         window.viewCollegePDF(contextTargetId);
+      } else if (contextTargetType === 'project-folder') {
+        homeFolderFilter = contextTargetId;
+        expandedProjectGroups.add(contextTargetId);
+        saveStringSet('opennotes_expanded_project_groups', expandedProjectGroups);
+        showPanel('home-grid', 'nav-projects-btn');
+        const activeTab = homeArchiveMode ? viewArchivedBtn : viewGridBtn;
+        if (activeTab) activeTab.classList.add('active');
+        renderHomeGrid(homeSearchInput ? homeSearchInput.value : '');
       } else if (contextTargetType === 'note') {
         setActiveNote(contextTargetId);
       }
@@ -3874,21 +4190,22 @@ document.addEventListener('DOMContentLoaded', () => {
             renderCollegeSingleFolder(activeCollegeFolderId);
           }
         }
+      } else if (contextTargetType === 'project-folder') {
+        renameProjectFolder(contextTargetId);
       } else if (contextTargetType === 'note') {
+        renameProjectNote(contextTargetId);
+      }
+    };
+  }
+
+  if (contextArchiveBtn) {
+    contextArchiveBtn.onclick = () => {
+      if (contextMenu) contextMenu.style.display = 'none';
+      if (contextTargetType === 'note') {
         const note = notes.find(n => n.id === contextTargetId);
-        if (note) {
-          const newTitle = prompt("Rename Note:", note.title || 'Untitled Note');
-          if (newTitle !== null) {
-            const trimmed = newTitle.trim();
-            if (trimmed) {
-              note.title = trimmed;
-              note.updatedAt = Date.now();
-              saveNotes();
-              renderHomeGrid();
-              renderNotesList();
-            }
-          }
-        }
+        if (note) setNoteArchived(contextTargetId, !isNoteArchived(note));
+      } else if (contextTargetType === 'project-folder') {
+        setProjectFolderArchived(contextTargetId, !homeArchiveMode);
       }
     };
   }
@@ -3900,23 +4217,10 @@ document.addEventListener('DOMContentLoaded', () => {
         window.deleteCollegeFolder(contextTargetId);
       } else if (contextTargetType === 'pdf') {
         window.deleteCollegePDF(contextTargetId);
+      } else if (contextTargetType === 'project-folder') {
+        deleteProjectFolder(contextTargetId);
       } else if (contextTargetType === 'note') {
-        const note = notes.find(n => n.id === contextTargetId);
-        if (note) {
-          if (confirm(`Are you sure you want to delete the note "${note.title || 'Untitled Note'}"?`)) {
-            notes = notes.filter(n => n.id !== contextTargetId);
-            saveNotes();
-            if (activeNoteId === contextTargetId) {
-              if (notes.length > 0) {
-                setActiveNote(notes[0].id);
-              } else {
-                setActiveNote(null);
-              }
-            }
-            renderHomeGrid();
-            renderNotesList();
-          }
-        }
+        deleteProjectNote(contextTargetId);
       }
     };
   }
@@ -4000,3 +4304,289 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   }
 });
+
+// ============================================================
+// Profile picture (settings + sidebar avatar)
+// ============================================================
+window.applyProfilePic = function () {
+  const url = localStorage.getItem('opennotes_profile_pic') || '';
+  const initial = ((localStorage.getItem('userName') || 'H').trim().charAt(0) || 'H').toUpperCase();
+  const set = (el) => {
+    if (!el) return;
+    if (url) { el.style.backgroundImage = `url("${url}")`; el.classList.add('has-pic'); el.textContent = ''; }
+    else { el.style.backgroundImage = ''; el.classList.remove('has-pic'); el.textContent = initial; }
+  };
+  set(document.getElementById('sidebar-profile-avatar'));
+  set(document.getElementById('settings-avatar'));
+  const rm = document.getElementById('profile-pic-remove');
+  if (rm) rm.style.display = url ? '' : 'none';
+};
+window.uploadProfilePic = async function (e) {
+  const f = e.target && e.target.files && e.target.files[0];
+  if (!f) return;
+  try {
+    if (window.electronAPI && window.electronAPI.saveBoardFile) {
+      const buf = await f.arrayBuffer();
+      const p = await window.electronAPI.saveBoardFile(f.name, buf);
+      localStorage.setItem('opennotes_profile_pic', 'file:///' + String(p).replace(/\\/g, '/'));
+      window.applyProfilePic();
+    } else {
+      const rd = new FileReader();
+      rd.onload = () => { localStorage.setItem('opennotes_profile_pic', rd.result); window.applyProfilePic(); };
+      rd.readAsDataURL(f);
+    }
+  } catch (_) {}
+  if (e.target) e.target.value = '';
+};
+window.removeProfilePic = function () { localStorage.removeItem('opennotes_profile_pic'); window.applyProfilePic(); };
+window.applyProfilePic();
+
+// ============================================================
+// 🧘 Safe Haven — animated calm retreat with procedural ambience
+// ============================================================
+(function () {
+  const stage = document.getElementById('haven-stage');
+  if (!stage) return;
+
+  let theme = localStorage.getItem('opennotes_haven_theme') || 'cabin';
+  let spot = parseInt(localStorage.getItem('opennotes_haven_spot') || '0', 10) || 0;
+  let volume = parseFloat(localStorage.getItem('opennotes_haven_vol'));
+  if (isNaN(volume)) volume = 0.5;
+  let playing = false;
+
+  const SUBS = {
+    cabin: 'Fireplace crackling in a snowed-in log cabin.',
+    beach: 'Waves rolling in under a warm sunset.',
+    city: 'City lights from a quiet high-rise bed.'
+  };
+  // 3 seats = 3 vantage points (re-framings of the same scene).
+  const SPOTS = ['scale(1)', 'scale(1.5) translate(-74px, 12px)', 'scale(1.5) translate(74px, -10px)'];
+
+  function twinkles(list) {
+    return list.map((p, i) => `<circle class="haven-twinkle" cx="${p[0]}" cy="${p[1]}" r="${p[2] || 1.6}" fill="${p[3] || '#fff'}" style="animation-delay:-${(i * 0.5).toFixed(1)}s"/>`).join('');
+  }
+
+  function sceneCabin() {
+    let planks = '';
+    for (let y = 12; y < 290; y += 24) planks += `<line x1="0" y1="${y}" x2="800" y2="${y}" stroke="#2c1a0f" stroke-width="2" opacity="0.45"/>`;
+    let floorp = '';
+    for (let x = 0; x < 800; x += 60) floorp += `<line x1="${x}" y1="290" x2="${x + 30}" y2="350" stroke="#2c1a0f" stroke-width="2" opacity="0.4"/>`;
+    const stones = [[345,168],[380,164],[418,166],[456,164],[490,168],[336,300],[478,300]]
+      .map(s => `<circle cx="${s[0]}" cy="${s[1]}" r="12" fill="#7a7a7a" opacity="0.5"/>`).join('');
+    const lights = [90,170,250,330,410,490,570,650,730].map((x, i) => {
+      const y = 40 + Math.sin(x / 90) * 14;
+      return `<circle class="haven-twinkle" cx="${x}" cy="${y + 6}" r="3.4" fill="#ffcf6b" style="animation-delay:-${(i * 0.4).toFixed(1)}s"/>`;
+    }).join('');
+    return `
+      <defs>
+        <linearGradient id="cabWall" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4a2f1c"/><stop offset="1" stop-color="#37220f"/></linearGradient>
+        <radialGradient id="cabGlow" cx="50%" cy="60%" r="60%"><stop offset="0" stop-color="#ff8a3d" stop-opacity="0.95"/><stop offset="1" stop-color="#ff8a3d" stop-opacity="0"/></radialGradient>
+      </defs>
+      <rect width="800" height="350" fill="url(#cabWall)"/>
+      <g>${planks}</g>
+      <rect y="290" width="800" height="60" fill="#5a3a22"/><g>${floorp}</g>
+      <ellipse cx="400" cy="332" rx="270" ry="26" fill="#7a2e2e" opacity="0.6"/>
+      <!-- window with snowy night -->
+      <rect x="70" y="80" width="120" height="120" rx="6" fill="#0c1730"/>
+      ${twinkles([[100,110,1.6,'#cde'],[140,130,1.4,'#cde'],[120,160,1.6,'#cde'],[160,100,1.3,'#cde'],[90,150,1.3,'#cde']])}
+      <rect x="70" y="80" width="120" height="120" rx="6" fill="none" stroke="#6b4526" stroke-width="9"/>
+      <line x1="130" y1="80" x2="130" y2="200" stroke="#6b4526" stroke-width="6"/>
+      <line x1="70" y1="140" x2="190" y2="140" stroke="#6b4526" stroke-width="6"/>
+      <!-- string lights -->
+      <path d="M0 46 Q 200 74 400 46 T 800 46" fill="none" stroke="#2c1a0f" stroke-width="2"/>${lights}
+      <!-- armchair -->
+      <g>
+        <rect x="600" y="222" width="150" height="92" rx="18" fill="#c19a63"/>
+        <rect x="586" y="196" width="40" height="118" rx="18" fill="#ac8850"/>
+        <rect x="612" y="176" width="130" height="52" rx="18" fill="#d3ad78"/>
+        <rect x="628" y="200" width="98" height="30" rx="14" fill="#efe6d2"/>
+      </g>
+      <!-- plant -->
+      <g transform="translate(250 250)"><rect x="-14" y="20" width="28" height="34" rx="6" fill="#6b4526"/>
+        <path d="M0 24 C -22 6 -20 -22 -4 -30" fill="none" stroke="#3f7a4a" stroke-width="6" stroke-linecap="round"/>
+        <path d="M0 24 C 22 8 22 -18 6 -30" fill="none" stroke="#4f8a55" stroke-width="6" stroke-linecap="round"/>
+        <path d="M0 24 C 2 -4 2 -26 0 -36" fill="none" stroke="#5f9a63" stroke-width="6" stroke-linecap="round"/></g>
+      <!-- fireplace -->
+      <rect x="316" y="150" width="188" height="162" rx="10" fill="#6f6f6f"/>
+      <rect x="316" y="150" width="188" height="162" rx="10" fill="none" stroke="#565656" stroke-width="3"/>
+      ${stones}
+      <rect x="348" y="184" width="124" height="118" rx="8" fill="#160a04"/>
+      <ellipse class="haven-glow" cx="410" cy="288" rx="96" ry="62" fill="url(#cabGlow)"/>
+      <rect x="360" y="272" width="96" height="14" rx="7" fill="#4a2f1c" transform="rotate(-6 408 279)"/>
+      <rect x="362" y="282" width="96" height="14" rx="7" fill="#3a2416" transform="rotate(5 410 289)"/>
+      <path class="haven-flame" d="M410 288 C 388 260 396 232 410 214 C 424 232 432 260 410 288 Z" fill="#ff7a1a"/>
+      <path class="haven-flame f2" d="M410 288 C 398 266 402 244 410 232 C 418 244 422 266 410 288 Z" fill="#ffb24d"/>
+      <path class="haven-flame f3" d="M410 288 C 405 272 407 258 410 250 C 413 258 415 272 410 288 Z" fill="#ffe08a"/>
+      <!-- mantel + candles -->
+      <rect x="298" y="150" width="224" height="16" rx="4" fill="#6b4526"/>
+      <rect x="330" y="130" width="8" height="20" fill="#e8dcc0"/><ellipse class="haven-candle" cx="334" cy="126" rx="3" ry="7" fill="#ffcf6b"/>
+      <rect x="482" y="130" width="8" height="20" fill="#e8dcc0"/><ellipse class="haven-candle" cx="486" cy="126" rx="3" ry="7" fill="#ffcf6b" style="animation-delay:-0.25s"/>`;
+  }
+
+  function sceneBeach() {
+    const wave = (y, cls) => {
+      let d = `M-120 ${y}`;
+      for (let x = -120; x <= 920; x += 80) d += ` q 40 -9 80 0`;
+      return `<path class="haven-wave ${cls}" d="${d}"/>`;
+    };
+    let matGrid = '';
+    for (let i = -140; i <= 140; i += 28) matGrid += `<line x1="${i}" y1="-30" x2="${i}" y2="40" stroke="#fff" stroke-opacity="0.35" stroke-width="2"/>`;
+    for (let j = -30; j <= 40; j += 24) matGrid += `<line x1="-150" y1="${j}" x2="150" y2="${j}" stroke="#fff" stroke-opacity="0.35" stroke-width="2"/>`;
+    return `
+      <defs>
+        <linearGradient id="beSky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a2a6d"/><stop offset="0.4" stop-color="#c65b7c"/><stop offset="0.72" stop-color="#f6a15a"/><stop offset="1" stop-color="#ffd18a"/></linearGradient>
+        <radialGradient id="beSun" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#fff6d6"/><stop offset="0.5" stop-color="#ffd06b"/><stop offset="1" stop-color="#ffd06b" stop-opacity="0"/></radialGradient>
+        <linearGradient id="beSea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e9915f"/><stop offset="1" stop-color="#2e5a8a"/></linearGradient>
+      </defs>
+      <rect width="800" height="350" fill="url(#beSky)"/>
+      <circle cx="400" cy="176" r="130" fill="url(#beSun)"/>
+      <circle cx="400" cy="182" r="48" fill="#fff2c4"/>
+      <rect y="182" width="800" height="96" fill="url(#beSea)"/>
+      <ellipse cx="400" cy="230" rx="70" ry="42" fill="#ffe3a0" opacity="0.35"/>
+      <g fill="none" stroke="#ffffff" stroke-opacity="0.5" stroke-width="3" stroke-linecap="round">
+        ${wave(212, '')}${wave(236, 'w2')}${wave(258, 'w3')}
+      </g>
+      <!-- birds -->
+      <g class="haven-drift" stroke="#3a2a4d" stroke-width="2" fill="none" stroke-linecap="round">
+        <path d="M150 86 q 8 -6 16 0"/><path d="M166 86 q 8 -6 16 0"/>
+        <path d="M210 66 q 6 -5 12 0"/><path d="M222 66 q 6 -5 12 0"/></g>
+      <!-- sand -->
+      <path d="M0 276 q 120 -8 240 0 t 240 0 t 240 0 t 160 0 v 82 H0 Z" fill="#e7c99a"/>
+      <path d="M0 276 q 120 -8 240 0 t 240 0 t 240 0 t 160 0" fill="none" stroke="#fff" stroke-opacity="0.6" stroke-width="4"/>
+      <!-- palm silhouette -->
+      <g fill="#233a2a" opacity="0.9" transform="translate(732 150)">
+        <rect x="-6" y="0" width="12" height="150" rx="6" fill="#3a2a1e"/>
+        <path d="M0 4 C -60 -6 -96 12 -110 30 C -80 8 -30 6 0 14 Z"/>
+        <path d="M0 4 C 60 -6 96 12 110 30 C 80 8 30 6 0 14 Z"/>
+        <path d="M0 0 C -14 -50 6 -84 24 -96 C 6 -70 6 -30 4 -4 Z"/>
+        <path d="M0 2 C 40 -40 34 -80 22 -98 C 40 -66 30 -26 6 -2 Z"/></g>
+      <!-- picnic mat -->
+      <g class="haven-bob" transform="translate(360 322) rotate(-3)">
+        <rect x="-150" y="-30" width="300" height="70" rx="8" fill="#c94f4f"/>
+        <clipPath id="matClip"><rect x="-150" y="-30" width="300" height="70" rx="8"/></clipPath>
+        <g clip-path="url(#matClip)">${matGrid}</g>
+        <!-- basket -->
+        <g transform="translate(96 -6)"><rect x="-22" y="-4" width="44" height="30" rx="4" fill="#a5722f"/><rect x="-26" y="-8" width="52" height="8" rx="4" fill="#8a5c22"/><path d="M-16 -8 A16 16 0 0 1 16 -8" fill="none" stroke="#8a5c22" stroke-width="4"/></g>
+        <!-- book + cup -->
+        <rect x="-96" y="-2" width="46" height="26" rx="3" fill="#5b8a72" transform="rotate(-8 -73 11)"/>
+        <rect x="-30" y="6" width="20" height="18" rx="3" fill="#f3ede0"/></g>`;
+  }
+
+  function sceneCity() {
+    let stars = '';
+    const sp = [[60,40],[140,70],[220,36],[300,60],[520,44],[600,80],[690,50],[760,34],[420,30],[180,110]];
+    sp.forEach((p, i) => { stars += `<circle class="haven-twinkle" cx="${p[0]}" cy="${p[1]}" r="1.6" fill="#fff" style="animation-delay:-${(i * 0.7).toFixed(1)}s"/>`; });
+    // skyline buildings with window grids
+    const buildings = [[20,150,80,120],[104,180,60,90],[168,120,74,150],[250,175,54,95],[560,140,70,130],[634,180,58,90],[696,130,84,140]];
+    let sky = '';
+    buildings.forEach((b, bi) => {
+      const [x, y, w, h] = b;
+      sky += `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="3" fill="#14162e"/>`;
+      let wi = 0;
+      for (let wy = y + 12; wy < y + h - 8; wy += 20)
+        for (let wx = x + 10; wx < x + w - 8; wx += 18) {
+          const tw = (bi + wi) % 5 === 0;
+          sky += `<rect ${tw ? 'class="haven-twinkle" style="animation-delay:-' + ((wi % 4) * 0.9).toFixed(1) + 's"' : ''} x="${wx}" y="${wy}" width="8" height="10" rx="1.5" fill="#ffd98a" opacity="${tw ? 1 : (Math.random() > 0.35 ? 0.85 : 0.15)}"/>`;
+          wi++;
+        }
+    });
+    return `
+      <defs>
+        <linearGradient id="ctSky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0a0f24"/><stop offset="0.6" stop-color="#1a2145"/><stop offset="1" stop-color="#3a2d55"/></linearGradient>
+        <radialGradient id="ctLamp" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#ffcf8a" stop-opacity="0.85"/><stop offset="1" stop-color="#ffcf8a" stop-opacity="0"/></radialGradient>
+        <radialGradient id="ctMoon" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#fff" stop-opacity="0.35"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+      </defs>
+      <rect width="800" height="350" fill="url(#ctSky)"/>
+      ${stars}
+      <circle cx="640" cy="66" r="46" fill="url(#ctMoon)"/><circle cx="640" cy="66" r="24" fill="#f2f0e6"/>
+      ${sky}
+      <!-- reflections on the glass -->
+      <rect y="250" width="800" height="12" fill="#ffd98a" opacity="0.06"/>
+      <!-- window mullion -->
+      <rect x="392" y="0" width="12" height="250" fill="#0a0d1c" opacity="0.85"/>
+      <rect x="0" y="244" width="800" height="10" fill="#0a0d1c" opacity="0.85"/>
+      <!-- room + bed -->
+      <rect y="254" width="800" height="96" fill="#241d33"/>
+      <ellipse class="haven-glow" cx="726" cy="236" rx="96" ry="72" fill="url(#ctLamp)"/>
+      <rect x="120" y="256" width="560" height="70" rx="16" fill="#3a3350"/>
+      <rect x="120" y="252" width="560" height="30" rx="14" fill="#e7e2f0"/>
+      <rect x="120" y="270" width="560" height="60" rx="14" fill="#cfc7e0"/>
+      <rect x="150" y="248" width="128" height="48" rx="18" fill="#f4f0fa"/>
+      <rect x="188" y="252" width="128" height="48" rx="18" fill="#e6dff2"/>
+      <!-- nightstand + lamp -->
+      <rect x="700" y="262" width="60" height="64" rx="6" fill="#2a2338"/>
+      <rect x="726" y="222" width="8" height="40" fill="#4a4360"/>
+      <path d="M708 222 h44 l-10 -26 h-24 z" fill="#ffcf8a"/>`;
+  }
+
+  function build() {
+    const inner = theme === 'beach' ? sceneBeach() : theme === 'city' ? sceneCity() : sceneCabin();
+    return `<svg viewBox="0 0 800 350" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg"><g class="haven-cam">${inner}</g></svg>`;
+  }
+  function applySpot() {
+    const cam = stage.querySelector('.haven-cam');
+    if (cam) cam.style.transform = SPOTS[spot] || SPOTS[0];
+  }
+  window.renderSafeHaven = function () {
+    stage.innerHTML = build();
+    applySpot();
+    const sub = document.getElementById('haven-sub'); if (sub) sub.textContent = SUBS[theme] || '';
+    document.querySelectorAll('.haven-theme-btn').forEach(b => b.classList.toggle('active', b.dataset.theme === theme));
+    document.querySelectorAll('.haven-spot').forEach(b => b.classList.toggle('active', +b.dataset.spot === spot));
+  };
+  window.setHavenTheme = function (t) { theme = t; localStorage.setItem('opennotes_haven_theme', t); window.renderSafeHaven(); if (playing) startAudio(); };
+  window.setHavenSpot = function (s) { spot = s; localStorage.setItem('opennotes_haven_spot', String(s)); document.querySelectorAll('.haven-spot').forEach(b => b.classList.toggle('active', +b.dataset.spot === s)); applySpot(); };
+
+  // ---- Procedural ambience (Web Audio; matches each theme's vibe) ----
+  let ctx = null, nodes = [], master = null, crackleTimer = null;
+  function noiseBuf(sec) { const b = ctx.createBuffer(1, Math.floor(ctx.sampleRate * sec), ctx.sampleRate); const d = b.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; return b; }
+  function stopAudio() { if (crackleTimer) { clearTimeout(crackleTimer); crackleTimer = null; } nodes.forEach(n => { try { n.stop && n.stop(); } catch (_) {} try { n.disconnect && n.disconnect(); } catch (_) {} }); nodes = []; master = null; }
+  function startAudio() {
+    if (!ctx) { const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return; ctx = new AC(); }
+    if (ctx.state === 'suspended') ctx.resume();
+    stopAudio();
+    master = ctx.createGain(); master.gain.value = volume; master.connect(ctx.destination); nodes.push(master);
+    if (theme === 'cabin') {
+      const src = ctx.createBufferSource(); src.buffer = noiseBuf(3); src.loop = true;
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 700;
+      const g = ctx.createGain(); g.gain.value = 0.22; src.connect(lp); lp.connect(g); g.connect(master); src.start(); nodes.push(src);
+      const pop = () => {
+        if (!ctx || theme !== 'cabin' || !master) return;
+        const s = ctx.createBufferSource(); s.buffer = noiseBuf(0.06);
+        const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 900 + Math.random() * 2200; bp.Q.value = 1.4;
+        const cg = ctx.createGain(); const t = ctx.currentTime;
+        cg.gain.setValueAtTime(0.0001, t); cg.gain.exponentialRampToValueAtTime(0.25 + Math.random() * 0.4, t + 0.004); cg.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
+        s.connect(bp); bp.connect(cg); cg.connect(master); s.start(); s.stop(t + 0.11);
+        crackleTimer = setTimeout(pop, 45 + Math.random() * 320);
+      };
+      pop();
+    } else if (theme === 'beach') {
+      const src = ctx.createBufferSource(); src.buffer = noiseBuf(4); src.loop = true;
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 520;
+      const g = ctx.createGain(); g.gain.value = 0.34;
+      const lfo = ctx.createOscillator(); lfo.frequency.value = 0.12; const lg = ctx.createGain(); lg.gain.value = 0.24; lfo.connect(lg); lg.connect(g.gain);
+      src.connect(lp); lp.connect(g); g.connect(master); src.start(); lfo.start(); nodes.push(src, lfo);
+    } else {
+      const o1 = ctx.createOscillator(); o1.type = 'sine'; o1.frequency.value = 58;
+      const o2 = ctx.createOscillator(); o2.type = 'sine'; o2.frequency.value = 61.5;
+      const g = ctx.createGain(); g.gain.value = 0.10; o1.connect(g); o2.connect(g); g.connect(master);
+      const src = ctx.createBufferSource(); src.buffer = noiseBuf(4); src.loop = true;
+      const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 4200; const ng = ctx.createGain(); ng.gain.value = 0.012;
+      src.connect(hp); hp.connect(ng); ng.connect(master);
+      o1.start(); o2.start(); src.start(); nodes.push(o1, o2, src);
+    }
+  }
+  function setPlayIcon() {
+    const b = document.getElementById('haven-play'); if (!b) return;
+    b.innerHTML = playing
+      ? '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><rect x="6" y="5" width="4" height="14"></rect><rect x="14" y="5" width="4" height="14"></rect></svg>'
+      : '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>';
+  }
+  window.startHavenAudio = startAudio;
+  window.toggleHaven = function () { playing = !playing; if (playing) startAudio(); else stopAudio(); setPlayIcon(); };
+  window.setHavenVolume = function (v) { volume = parseFloat(v); localStorage.setItem('opennotes_haven_vol', String(volume)); if (master) master.gain.value = volume; };
+  window.stopHaven = function () { if (playing) { playing = false; stopAudio(); setPlayIcon(); } };
+
+  const vol = document.getElementById('haven-volume'); if (vol) vol.value = volume;
+  window.renderSafeHaven(); setPlayIcon();
+})();

@@ -209,7 +209,7 @@
                  <button id="view-graph-btn">
                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg> Graph Map
                  </button>
-                 <button id="view-archived-btn" style="pointer-events:none; opacity:0.5;">
+                  <button id="view-archived-btn">
                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><polyline points="21 8 21 21 3 21 3 8"></polyline><rect x="1" y="3" width="22" height="5"></rect><line x1="10" y1="12" x2="14" y2="12"></line></svg> Archived
                  </button>
                </div>
@@ -452,6 +452,16 @@
                 </div>
               </div>
 
+              <!-- 🧘 Safe Haven — opens a fullscreen 3D calm retreat -->
+              <button id="haven-enter-btn" class="haven-enter" onclick="openHaven()">
+                <span class="haven-enter-emoji">🧘</span>
+                <span class="haven-enter-text">
+                  <strong>Enter Safe Haven</strong>
+                  <em>A calm 3D retreat — cabin, beach or high-rise. Choose a seat, breathe, and listen.</em>
+                </span>
+                <svg class="haven-enter-arrow" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+              </button>
+
 
               <div class="tasks-row" style="flex: none;">
                 <!-- Daily Journal / Mood (2) -->
@@ -522,6 +532,18 @@
               </div>
 
               <div style="display: flex; flex-direction: column; gap: 24px; max-width: 600px;">
+                <div style="display: flex; align-items: center; gap: 18px;">
+                  <div class="settings-avatar" id="settings-avatar">H</div>
+                  <div style="display: flex; flex-direction: column; gap: 8px;">
+                    <label style="display: block; font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em;">Profile Picture</label>
+                    <div style="display: flex; gap: 8px;">
+                      <button onclick="document.getElementById('profile-pic-input').click()" style="background: var(--accent-color); color: #fff; border: none; padding: 9px 16px; border-radius: 10px; font-weight: 600; cursor: pointer; font-size: 0.9rem;">Change photo</button>
+                      <button id="profile-pic-remove" onclick="removeProfilePic()" style="background: var(--overlay-medium); color: var(--text-primary); border: none; padding: 9px 16px; border-radius: 10px; font-weight: 600; cursor: pointer; font-size: 0.9rem;">Remove</button>
+                    </div>
+                    <input type="file" id="profile-pic-input" accept="image/*" style="display: none;" onchange="uploadProfilePic(event)" />
+                  </div>
+                </div>
+
                 <div>
                   <label style="display: block; font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em;" data-i18n="settings.name">Your Name</label>
                   <input type="text" id="settings-name" style="width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--panel-border); font-family: inherit; font-size: 1rem; outline: none; background: transparent; color: var(--text-primary);" placeholder="Name" onchange="saveSettings()" />
@@ -737,7 +759,7 @@
           <button class="context-item" id="context-add-to-folder-btn" style="background: transparent; border: none; padding: 10px 14px; border-radius: 8px; font-family: inherit; font-size: 0.9rem; text-align: left; color: var(--text-primary); cursor: pointer; display: flex; align-items: center; justify-content: space-between; width: 100%; transition: background 0.15s;">
             <span style="display: flex; align-items: center; gap: 8px;">
               <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
-              Add to Folder
+              Move to Folder
             </span>
             <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2" fill="none"><polyline points="9 18 15 12 9 6"></polyline></svg>
           </button>
@@ -748,6 +770,10 @@
           </div>
         </div>
 
+        <button class="context-item" id="context-archive-btn" style="background: transparent; border: none; padding: 10px 14px; border-radius: 8px; font-family: inherit; font-size: 0.9rem; text-align: left; color: var(--text-primary); cursor: pointer; display: none; align-items: center; gap: 8px; transition: background 0.15s;">
+          <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none"><polyline points="21 8 21 21 3 21 3 8"></polyline><rect x="1" y="3" width="22" height="5"></rect><line x1="10" y1="12" x2="14" y2="12"></line></svg>
+          <span id="context-archive-label">Archive</span>
+        </button>
         <div style="height: 1px; background: var(--panel-border); margin: 4px 0;"></div>
         <button class="context-item" id="context-delete-btn" style="background: transparent; border: none; padding: 10px 14px; border-radius: 8px; font-family: inherit; font-size: 0.9rem; text-align: left; color: #ef4444; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: background 0.15s;">
           <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
@@ -760,6 +786,41 @@
       <div class="ambient-glow glow-2"></div>
     </div>
     
+    <!-- 🧘 Safe Haven — Fullscreen 3D retreat -->
+    <div id="haven-fs" class="haven-fs" style="display: none;">
+      <div class="haven-viewport" id="haven-viewport">
+        <div class="haven-world" id="haven-world"><!-- 3D room built by JS --></div>
+      </div>
+      <div class="haven-vignette"></div>
+      <div class="haven-ui" id="haven-ui">
+        <div class="haven-ui-top">
+          <div class="haven-themes" id="haven-themes">
+            <button class="haven-theme-btn active" data-theme="cabin" onclick="setHavenTheme('cabin')">🪵 Log Cabin</button>
+            <button class="haven-theme-btn" data-theme="beach" onclick="setHavenTheme('beach')">🏖️ Beach</button>
+            <button class="haven-theme-btn" data-theme="city" onclick="setHavenTheme('city')">🌆 Highrise</button>
+          </div>
+          <button class="haven-close" onclick="closeHaven()" title="Exit (Esc)">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          </button>
+        </div>
+        <div class="haven-ui-bottom">
+          <div class="haven-title-badge"><span id="haven-sub">Fireplace crackling in a snowed-in log cabin.</span></div>
+          <div class="haven-ui-controls">
+            <div class="haven-spots" id="haven-spots">
+              <span class="haven-spots-label">Seat</span>
+              <button class="haven-spot active" data-spot="0" onclick="setHavenSpot(0)" title="Seat 1"></button>
+              <button class="haven-spot" data-spot="1" onclick="setHavenSpot(1)" title="Seat 2"></button>
+              <button class="haven-spot" data-spot="2" onclick="setHavenSpot(2)" title="Seat 3"></button>
+            </div>
+            <div class="haven-audio">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M3 10v4h4l5 5V5L7 10H3z"></path><path d="M16 8a5 5 0 0 1 0 8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg>
+              <input type="range" id="haven-volume" min="0" max="1" step="0.05" value="0.5" oninput="setHavenVolume(this.value)" title="Ambience volume" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Pomodoro Fullscreen Overlay -->
     <div id="pomodoro-fullscreen-modal" style="display: none; position: fixed; inset: 0; z-index: 9999; background: var(--bg-color); align-items: center; justify-content: center; overflow: hidden;">
       <!-- Lava Lamp Background -->
