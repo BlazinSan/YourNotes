@@ -32,3 +32,6 @@ release-builds/
 RESTORE-YOURNOTES.bat
 UPDATE-YOURNOTES.bat
 startup-diag.log
+
+# Cloud sync deployment config (secrets)
+.env.local

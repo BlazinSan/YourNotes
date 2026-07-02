@@ -1,4 +1,5 @@
 import './style.css'
+import './sync.js'
 
 // --- Data Persistence Override ---
 const _originalSetItem = Storage.prototype.setItem;
@@ -13,6 +14,8 @@ Storage.prototype.setItem = function(key, value) {
   } catch (e) {
     console.warn("Storage quota exceeded in browser context, but successfully backup-persisted via Electron API.", e);
   }
+  // Cloud sync: schedule a debounced push when signed in (no-op otherwise)
+  if (window.__syncNotifyChange) window.__syncNotifyChange(key);
 };
 
 Storage.prototype.getItem = function(key) {
@@ -245,8 +248,9 @@ function init() {
   // Dashboard Banner Initialization
   const savedBanner = localStorage.getItem('dashboardBanner');
   if (savedBanner && dashboardBanner) {
-    dashboardBanner.style.backgroundImage = `url(${savedBanner})`;
-    updateBannerTextColor(savedBanner);
+    const bannerSrc = window.resolveFileUrl ? window.resolveFileUrl(savedBanner) : savedBanner;
+    dashboardBanner.style.backgroundImage = `url(${bannerSrc})`;
+    updateBannerTextColor(bannerSrc);
   }
   
   if (bannerUpload) {
@@ -3512,7 +3516,7 @@ function renderBoard() {
     card.style.width = item.w + 'px'; card.style.height = item.h + 'px';
     card.style.transform = 'rotate(' + (item.rot || 0) + 'deg)';
     let inner = '';
-    if (item.type === 'image') inner = `<div class="board-body board-img" style="background-image:url('${fileUrlOf(item.path)}')"></div>`;
+    if (item.type === 'image') inner = `<div class="board-body board-img" style="background-image:url('${window.resolveFileUrl ? window.resolveFileUrl(fileUrlOf(item.path)) : fileUrlOf(item.path)}')"></div>`;
     else if (item.type === 'file') inner = `<div class="board-body board-file"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg><span>${gsEscape(item.name || 'File')}</span></div>`;
     else inner = `<div class="board-body board-text" contenteditable="true">${gsEscape(item.text || '')}</div>`;
     card.innerHTML = `<div class="board-pin">${boardPinSvg(BOARD_PIN_COLORS[item.pin || 0])}</div>` + inner + `<button class="board-del" title="Remove">&times;</button><div class="board-resize"></div>`;
@@ -4004,8 +4008,17 @@ window.viewCollegePDF = function(pdfId) {
       titleEl.textContent = pdf.name;
       noteContentEl.style.display = 'none';
       iframe.style.display = 'block';
-      // path = file stored on disk (large PDFs); data = inline base64 (legacy small uploads)
-      iframe.src = pdf.path || pdf.data;
+      // path = file stored on disk (large PDFs); data = inline base64 (legacy small
+      // uploads). On mobile the desktop file:// path resolves through cloud sync.
+      const src = window.resolveFileUrl ? window.resolveFileUrl(pdf.path || pdf.data) : (pdf.path || pdf.data);
+      if (String(src).startsWith('file:') && !window.electronAPI) {
+        // No local copy and no cloud URL yet — open nothing rather than a broken frame
+        noteContentEl.style.display = 'block';
+        iframe.style.display = 'none';
+        noteContentEl.innerHTML = '<p style="color: var(--text-secondary); font-style: italic;">This PDF lives on your computer. Sign in to Sync on both devices to view it here.</p>';
+      } else {
+        iframe.src = src;
+      }
     }
     modal.style.display = 'flex';
   }
@@ -4376,7 +4389,8 @@ document.addEventListener('DOMContentLoaded', () => {
 // Profile picture (settings + sidebar avatar)
 // ============================================================
 window.applyProfilePic = function () {
-  const url = localStorage.getItem('opennotes_profile_pic') || '';
+  let url = localStorage.getItem('opennotes_profile_pic') || '';
+  if (url && window.resolveFileUrl) url = window.resolveFileUrl(url);
   const initial = ((localStorage.getItem('userName') || 'H').trim().charAt(0) || 'H').toUpperCase();
   const set = (el) => {
     if (!el) return;
