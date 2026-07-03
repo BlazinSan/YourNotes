@@ -36,6 +36,15 @@ const SYNC_KEYS = [
 
 const FILE_REF_RE = /file:\/\/\/[^"'\\\s]*\/(college_pdfs|banner_files|board_files)\/([A-Za-z0-9._-]+)/g;
 
+// Convex caps a single stored value at 1 MiB. Split larger values across chunk
+// rows so any size (big note sets, inline base64 banners, etc.) syncs reliably.
+const KV_CHUNK = 700000;
+const KV_CHUNK_SEP = "c";           // separator that can't occur in a real key
+const KV_CHUNK_MARK = "YNCHUNKS";    // main-row sentinel: "reassemble from N chunks"
+const KV_BATCH_BYTES = 3000000;                  // keep each setKVBatch call well under arg limits
+
+const isChunkKey = (k) => k.indexOf(KV_CHUNK_SEP) !== -1;
+
 let client = CONVEX_URL ? new ConvexHttpClient(CONVEX_URL) : null;
 let pushTimer = null;
 let pushing = false;
@@ -146,34 +155,60 @@ window.syncNow = async function () {
   pushing = true;
   try {
     setStatus("Syncing…");
-    // 1) pull newer keys from the cloud
+    // 1) pull newer keys from the cloud (reassembling any chunked values)
     const meta = getMeta();
     const rows = await client.query(api.sync.getAll, { token });
+    const chunkMap = {};
+    const mainRows = [];
+    for (const r of rows) { if (isChunkKey(r.key)) chunkMap[r.key] = r.value; else mainRows.push(r); }
     let pulled = 0;
-    for (const row of rows) {
+    for (const row of mainRows) {
+      let value = row.value;
+      if (typeof value === "string" && value.startsWith(KV_CHUNK_MARK)) {
+        const n = parseInt(value.slice(KV_CHUNK_MARK.length), 10) || 0;
+        let acc = "";
+        for (let i = 0; i < n; i++) acc += (chunkMap[row.key + KV_CHUNK_SEP + i] || "");
+        value = acc;
+      }
       const known = meta[row.key];
       if (!known || row.updatedAt > known.t) {
-        if (!known || strHash(localStorage.getItem(row.key) || "") !== strHash(row.value)) {
-          localStorage.setItem(row.key, row.value);
+        if (!known || strHash(localStorage.getItem(row.key) || "") !== strHash(value)) {
+          localStorage.setItem(row.key, value);
           pulled++;
         }
-        meta[row.key] = { h: strHash(row.value), t: row.updatedAt };
+        meta[row.key] = { h: strHash(value), t: row.updatedAt };
       }
     }
-    // 2) push keys that changed locally
-    const entries = [];
+    // 2) push keys that changed locally (chunking values over the 1 MiB cap)
     const now = Date.now();
+    const changedValues = [];      // for file-reference scanning
+    const rowsToWrite = [];        // flat KV rows (incl. chunk rows)
+    const changedMeta = {};        // main-key -> hash, applied after success
     for (const k of SYNC_KEYS) {
       const v = localStorage.getItem(k);
       if (v === null || v === undefined) continue;
       const h = strHash(v);
       if (meta[k] && meta[k].h === h) continue;
-      entries.push({ key: k, value: v, updatedAt: now });
+      changedValues.push(v);
+      changedMeta[k] = h;
+      if (v.length <= KV_CHUNK) {
+        rowsToWrite.push({ key: k, value: v, updatedAt: now });
+      } else {
+        const n = Math.ceil(v.length / KV_CHUNK);
+        rowsToWrite.push({ key: k, value: KV_CHUNK_MARK + n, updatedAt: now });
+        for (let i = 0; i < n; i++) rowsToWrite.push({ key: k + KV_CHUNK_SEP + i, value: v.slice(i * KV_CHUNK, (i + 1) * KV_CHUNK), updatedAt: now });
+      }
     }
-    if (entries.length) {
-      await uploadReferencedFiles(token, entries.map((e) => e.value));
-      await client.mutation(api.sync.setKVBatch, { token, entries });
-      for (const e of entries) meta[e.key] = { h: strHash(e.value), t: e.updatedAt };
+    if (rowsToWrite.length) {
+      await uploadReferencedFiles(token, changedValues);
+      // send in size-bounded batches so a single mutation call never exceeds arg limits
+      let batch = [], size = 0;
+      for (const r of rowsToWrite) {
+        if (size + r.value.length > KV_BATCH_BYTES && batch.length) { await client.mutation(api.sync.setKVBatch, { token, entries: batch }); batch = []; size = 0; }
+        batch.push(r); size += r.value.length;
+      }
+      if (batch.length) await client.mutation(api.sync.setKVBatch, { token, entries: batch });
+      for (const k in changedMeta) meta[k] = { h: changedMeta[k], t: now };
     }
     setMeta(meta);
     // 3) refresh the filename→URL map (presigned R2 GET urls) so this device renders cloud files
