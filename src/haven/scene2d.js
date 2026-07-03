@@ -31,9 +31,9 @@ function disc(x, y, r, c) { ctx.fillStyle = c; ctx.beginPath(); ctx.arc(x, y, r,
 function L(depth, fn) { ctx.save(); ctx.translate(par.x * depth, par.y * depth); fn(); ctx.restore(); }
 function blob(x, y, w, h) { ctx.beginPath(); ctx.moveTo(x - w, y); ctx.bezierCurveTo(x - w, y - h * 1.3, x + w, y - h * 1.3, x + w, y); ctx.closePath(); ctx.fill(); }
 
-function makeStars(n, yMax, warm) {
+function makeStars(n, yMax, warm, yMin = 0) {
   const a = [];
-  for (let i = 0; i < n; i++) a.push({ x: rnd(-100, DW + 100), y: rnd(0, yMax), r: rnd(0.6, 2.0), ph: rnd(0, 7), a: rnd(0.4, 1), c: warm && Math.random() < 0.2 ? '#ffe6b0' : '#ffffff' });
+  for (let i = 0; i < n; i++) a.push({ x: rnd(-100, DW + 100), y: rnd(yMin, yMax), r: rnd(0.6, 2.0), ph: rnd(0, 7), a: rnd(0.4, 1), c: warm && Math.random() < 0.2 ? '#ffe6b0' : '#ffffff' });
   return a;
 }
 function starField(t, stars, depth) {
@@ -87,7 +87,7 @@ function beach(t) {
   // sky
   L(0.12, () => {
     ctx.fillStyle = lg(0, -100, 0, seaY, [[0, '#241a52'], [0.26, '#4a2870'], [0.48, '#8a3a74'], [0.68, '#c85a7a'], [0.85, '#f0925a'], [1, '#ffc179']]);
-    ctx.fillRect(-300, -300, DW + 600, seaY + 300);
+    ctx.fillRect(-400, -1400, DW + 800, seaY + 1400);
   });
   starField(t, state.stars, 0.16);
   // sun + glow + clouds
@@ -103,7 +103,7 @@ function beach(t) {
   // sea
   L(0.08, () => {
     ctx.fillStyle = lg(0, seaY, 0, DH, [[0, '#ec8f5e'], [0.12, '#c25e86'], [0.42, '#6a3f8e'], [1, '#28285c']]);
-    ctx.fillRect(-300, seaY, DW + 600, DH - seaY + 300);
+    ctx.fillRect(-400, seaY, DW + 800, DH - seaY + 1500);
     // distant island
     ctx.fillStyle = '#3a2a5c'; ctx.beginPath(); ctx.moveTo(DW * 0.78, seaY); ctx.quadraticCurveTo(DW * 0.9, seaY - 34, DW * 1.02, seaY); ctx.closePath(); ctx.fill();
     // shimmering sun path (soft organic reflection, not a ladder)
@@ -274,7 +274,7 @@ const SCENES = { beach, city, cabin };
 function buildScene() {
   state = {};
   if (theme === 'beach') {
-    state.stars = makeStars(160, DH * 0.5, false);
+    state.stars = makeStars(220, DH * 0.5, false, -DH * 1.3);
     state.clouds = [{ x: 300, y: DH * 0.4, w: 120, sp: 6 }, { x: 900, y: DH * 0.33, w: 170, sp: 9 }, { x: 1300, y: DH * 0.46, w: 100, sp: 5 }];
     state.rocks = [{ x: DW * 0.1, y: DH * 0.95, w: 70, h: 46 }, { x: DW * 0.3, y: DH * 0.98, w: 110, h: 60 }, { x: DW * 0.02, y: DH * 0.88, w: 50, h: 34 }];
   } else if (theme === 'city') {
@@ -311,7 +311,11 @@ function resize() {
 function render(t) {
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.save(); ctx.scale(dpr, dpr);
-  const s = Math.max(cw / DW, ch / DH) * cam.z;
+  // cover-fit for landscape; on portrait screens the wide beach composition
+  // gets center-cropped (sun + hut fall off the sides), so zoom out to show it whole.
+  let s = Math.max(cw / DW, ch / DH);
+  if (ch > cw && theme === 'beach') s = Math.max(cw / DW, ch / DH * 0.42);
+  s *= cam.z;
   ctx.translate(cw / 2, ch / 2); ctx.scale(s, s); ctx.translate(-DW / 2 - cam.x, -DH / 2 - cam.y);
   (SCENES[theme] || cabin)(t);
   ctx.restore();
