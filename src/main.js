@@ -5098,12 +5098,52 @@ document.addEventListener('click', (e) => {
   window.stopHaven = function () { if (isOpen) window.closeHaven(); };
 
   // ---------- Procedural ambience (Web Audio; per-theme) ----------
-  let actx = null, nodes = [], master = null, crackleTimer = null;
+  let actx = null, nodes = [], master = null, crackleTimer = null, audioTimers = [];
   function noiseBuf(sec) { const b = actx.createBuffer(1, Math.floor(actx.sampleRate * sec), actx.sampleRate); const d = b.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; return b; }
+  // brown-ish noise (softer, for waves/traffic)
+  function brownBuf(sec) { const b = actx.createBuffer(1, Math.floor(actx.sampleRate * sec), actx.sampleRate); const d = b.getChannelData(0); let last = 0; for (let i = 0; i < d.length; i++) { const w = Math.random() * 2 - 1; last = (last + 0.02 * w) / 1.02; d[i] = last * 3.5; } return b; }
+  function later(fn, ms) { const id = setTimeout(fn, ms); audioTimers.push(id); return id; }
   function stopAudio() {
     if (crackleTimer) { clearTimeout(crackleTimer); crackleTimer = null; }
+    audioTimers.forEach(clearTimeout); audioTimers = [];
     nodes.forEach(n => { try { n.stop && n.stop(); } catch (_) {} try { n.disconnect && n.disconnect(); } catch (_) {} });
     nodes = []; master = null;
+  }
+  // one seagull cry: two detuned oscillators swept up then down
+  function seagull() {
+    if (!actx || theme !== 'beach' || !master) return;
+    const t = actx.currentTime, dur = 0.34 + Math.random() * 0.2;
+    const pan = actx.createStereoPanner ? actx.createStereoPanner() : null; if (pan) pan.pan.value = Math.random() * 1.6 - 0.8;
+    const out = actx.createGain(); out.gain.setValueAtTime(0.0001, t); out.gain.exponentialRampToValueAtTime(0.09 + Math.random() * 0.05, t + 0.05); out.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    const bp = actx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1800; bp.Q.value = 2;
+    for (const det of [0, 8]) { const o = actx.createOscillator(); o.type = 'sawtooth'; const base = 900 + Math.random() * 300 + det; o.frequency.setValueAtTime(base, t); o.frequency.linearRampToValueAtTime(base + 500, t + dur * 0.35); o.frequency.linearRampToValueAtTime(base + 120, t + dur); const v = actx.createOscillator(); v.frequency.value = 22; const vg = actx.createGain(); vg.gain.value = 40; v.connect(vg); vg.connect(o.frequency); o.connect(bp); v.start(t); v.stop(t + dur); o.start(t); o.stop(t + dur); }
+    bp.connect(out); if (pan) { out.connect(pan); pan.connect(master); } else out.connect(master);
+    later(seagull, 5000 + Math.random() * 11000);
+  }
+  // a passing car: filtered brown-noise swell with a doppler pan
+  function carPass() {
+    if (!actx || theme !== 'city' || !master) return;
+    const t = actx.currentTime, dur = 2.2 + Math.random() * 1.8;
+    const src = actx.createBufferSource(); src.buffer = brownBuf(dur + 0.5);
+    const lp = actx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(500, t); lp.frequency.linearRampToValueAtTime(1400, t + dur * 0.5); lp.frequency.linearRampToValueAtTime(400, t + dur);
+    const g = actx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.06 + Math.random() * 0.05, t + dur * 0.5); g.gain.linearRampToValueAtTime(0.0001, t + dur);
+    const pan = actx.createStereoPanner ? actx.createStereoPanner() : null; const dir = Math.random() < 0.5 ? -1 : 1;
+    if (pan) { pan.pan.setValueAtTime(-dir, t); pan.pan.linearRampToValueAtTime(dir, t + dur); src.connect(lp); lp.connect(g); g.connect(pan); pan.connect(master); }
+    else { src.connect(lp); lp.connect(g); g.connect(master); }
+    src.start(t); src.stop(t + dur + 0.4);
+    later(carPass, 2600 + Math.random() * 4200);
+  }
+  // soft lo-fi jazz: a slow ii–V–I on mellow triangle/sine voices + brushed hat
+  const JAZZ = [[220, 261.63, 329.63, 415.30], [246.94, 293.66, 349.23, 440], [196, 246.94, 293.66, 349.23], [130.81, 164.81, 196, 246.94]];
+  let jazzStep = 0;
+  function jazzChord() {
+    if (!actx || theme !== 'city' || !master) return;
+    const t = actx.currentTime, chord = JAZZ[jazzStep % JAZZ.length]; jazzStep++;
+    const wet = actx.createGain(); wet.gain.value = 0.5; wet.connect(master);
+    chord.forEach((f, i) => { const o = actx.createOscillator(); o.type = i === 0 ? 'sine' : 'triangle'; o.frequency.value = f; o.detune.value = (Math.random() * 8 - 4); const g = actx.createGain(); const amp = i === 0 ? 0.05 : 0.028; g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(amp, t + 0.25); g.gain.linearRampToValueAtTime(0.0001, t + 2.6); o.connect(g); g.connect(wet); o.start(t); o.stop(t + 2.7); });
+    // brushed hats (swing)
+    for (let k = 0; k < 4; k++) { const ht = t + k * 0.6 + (k % 2 ? 0.12 : 0); const s = actx.createBufferSource(); s.buffer = noiseBuf(0.05); const hp = actx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 7000; const hg = actx.createGain(); hg.gain.setValueAtTime(0.0001, ht); hg.gain.exponentialRampToValueAtTime(0.02, ht + 0.01); hg.gain.exponentialRampToValueAtTime(0.0001, ht + 0.12); s.connect(hp); hp.connect(hg); hg.connect(master); s.start(ht); s.stop(ht + 0.14); }
+    later(jazzChord, 2600);
   }
   function startAudio() {
     if (!actx) { const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return; actx = new AC(); }
@@ -5138,6 +5178,7 @@ document.addEventListener('click', (e) => {
       src.connect(lp); lp.connect(g); g.connect(master);
       src2.connect(hp2); hp2.connect(g2); g2.connect(master);
       src.start(); src2.start(); lfo.start(); lfo2.start(); nodes.push(src, src2, lfo, lfo2);
+      later(seagull, 2500 + Math.random() * 4000);   // occasional gull cries
     } else {
       const o1 = actx.createOscillator(); o1.type = 'sine'; o1.frequency.value = 55;
       const o2 = actx.createOscillator(); o2.type = 'sine'; o2.frequency.value = 58.3;
@@ -5149,6 +5190,12 @@ document.addEventListener('click', (e) => {
       const lg = actx.createGain(); lg.gain.value = 0.006; lfo.connect(lg); lg.connect(ng.gain);
       src.connect(hp); hp.connect(ng); ng.connect(master);
       o1.start(); o2.start(); src.start(); lfo.start(); nodes.push(o1, o2, src, lfo);
+      // low traffic-rumble bed
+      const traf = actx.createBufferSource(); traf.buffer = brownBuf(5); traf.loop = true;
+      const tlp = actx.createBiquadFilter(); tlp.type = 'lowpass'; tlp.frequency.value = 320;
+      const tg = actx.createGain(); tg.gain.value = 0.14; traf.connect(tlp); tlp.connect(tg); tg.connect(master); traf.start(); nodes.push(traf);
+      jazzStep = 0; jazzChord();            // café jazz loop
+      later(carPass, 1500 + Math.random() * 2500);   // passing cars
     }
   }
 })();
