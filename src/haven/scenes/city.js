@@ -42,15 +42,21 @@ export function build(ctx) {
   scene.background = new THREE.Color(0x05070f);
 
   // ---------------------------------------------------------------- lights
-  root.add(new THREE.HemisphereLight(0x2a3455, 0x17131f, 0.45));
+  root.add(new THREE.HemisphereLight(0x38466e, 0x241d33, 0.7));
+  // soft warm ambient so the bed + room read as a cosy lamplit space, not black
+  root.add(new THREE.AmbientLight(0x35283f, 0.5));
 
-  const lampLightL = new THREE.PointLight(0xffb36b, 6, 4.6, 2);
-  lampLightL.position.set(-1.55, 1.0, 1.9);
-  const lampLightR = new THREE.PointLight(0xffb36b, 6, 4.6, 2);
-  lampLightR.position.set(1.55, 1.0, 1.9);
+  const lampLightL = new THREE.PointLight(0xffb36b, 9, 6.5, 2);
+  lampLightL.position.set(-1.55, 1.05, 1.9);
+  const lampLightR = new THREE.PointLight(0xffb36b, 9, 6.5, 2);
+  lampLightR.position.set(1.55, 1.05, 1.9);
   root.add(lampLightL, lampLightR);
+  // warm fill over the bed so the duvet/pillows catch light
+  const bedFill = new THREE.PointLight(0xffc98a, 3.2, 8, 1.7);
+  bedFill.position.set(0, 1.7, 1.2);
+  root.add(bedFill);
 
-  const coveLight = new THREE.PointLight(0xffb36b, 0.85, 7, 2);
+  const coveLight = new THREE.PointLight(0xffb36b, 1.1, 7, 2);
   coveLight.position.set(0, 2.65, 0.5);
   root.add(coveLight);
 

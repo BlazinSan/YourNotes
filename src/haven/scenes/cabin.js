@@ -165,16 +165,23 @@ export function build(ctx) {
   scene.background = new THREE.Color(0x0a0806);
   scene.fog = new THREE.FogExp2(0x110d12, 0.03);
 
-  const hemi = new THREE.HemisphereLight(0x3a4a70, 0x5a3d26, 1.25);
+  const hemi = new THREE.HemisphereLight(0x4a5a82, 0x6a4a30, 1.7);
   scene.add(hemi);
-  // broad warm fill so the room reads like the references (fire-lit, not black)
-  const roomFill = new THREE.PointLight(0xff9a50, 3.0, 13, 1.6);
-  roomFill.position.set(0, 1.8, -1.2);
+  // gentle warm ambient so nothing sits in pure black (the references glow softly)
+  scene.add(new THREE.AmbientLight(0x54381f, 0.7));
+  // broad warm fill so the whole room reads as fire-lit, not just the hearth
+  const roomFill = new THREE.PointLight(0xffa258, 4.6, 17, 1.5);
+  roomFill.position.set(0, 1.9, -0.6);
   scene.add(roomFill);
+  const roomFill2 = new THREE.PointLight(0xffb070, 2.4, 14, 1.6);
+  roomFill2.position.set(0, 1.7, 2.2);
+  scene.add(roomFill2);
 
   // ------------------------------------------------------------------ room
-  const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.95 });
-  const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.9 });
+  // A touch of emissive keyed to the wood texture lifts the walls/floor out of
+  // pure black so the cosy detail reads even in the dim corners.
+  const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.95, emissive: 0xffffff, emissiveMap: wallTex, emissiveIntensity: 0.22 });
+  const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.9, emissive: 0xffffff, emissiveMap: floorTex, emissiveIntensity: 0.16 });
   const darkWood = new THREE.MeshStandardMaterial({ color: 0x241407, roughness: 0.9 });
 
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(6, 7), floorMat);
@@ -635,9 +642,9 @@ export function build(ctx) {
 
   // ------------------------------------------------------------------ seats
   const seats = [
-    { pos: [0, 1.18, 2.4], look: [0, 1.0, -3.0] },          // sunk in the armchair, fire dead ahead
-    { pos: [-2.1, 1.3, 1.15], look: [-3.0, 1.65, -0.2] },   // window nook, moonlit corner
-    { pos: [2.3, 1.12, 1.7], look: [-1.6, 1.1, -2.5] }      // floor cushion by the bookshelf, fire + window in frame
+    { pos: [0.55, 1.62, 3.15], look: [-0.1, 0.95, -3.0] },  // cosy establishing shot: rug, chair, table + fire
+    { pos: [-2.05, 1.35, 1.2], look: [-3.0, 1.7, -0.3] },   // window nook, moonlit corner + snow
+    { pos: [2.35, 1.2, 1.9], look: [-1.4, 1.05, -2.6] }     // by the bookshelf, fire + room in frame
   ];
 
   function dispose() { /* no timers or listeners; engine disposes GPU resources */ }
