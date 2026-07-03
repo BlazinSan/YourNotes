@@ -35,3 +35,6 @@ startup-diag.log
 
 # Cloud sync deployment config (secrets)
 .env.local
+
+.asar-out/
+.asar-stage/

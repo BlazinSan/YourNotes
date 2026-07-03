@@ -60,10 +60,12 @@ function strHash(s) {
   return String(h);
 }
 
+let statusElId = "sync-status";
 function setStatus(msg, isErr) {
-  const el = document.getElementById("sync-status");
+  const el = document.getElementById(statusElId);
   if (el) { el.textContent = msg || ""; el.style.color = isErr ? "#ef4444" : "var(--text-secondary)"; }
 }
+const fieldVal = (id) => ((document.getElementById(id) || {}).value || "").trim();
 
 // ---------- File resolution (cross-device) ----------
 // Desktop stores app files as file:/// paths. Other devices resolve the same
@@ -85,21 +87,20 @@ async function afterAuth(res) {
   await window.syncNow();
 }
 
-window.syncSignUp = async function () {
-  if (!client) return setStatus("Sync isn't configured in this build.", true);
-  const email = (document.getElementById("sync-email") || {}).value || "";
-  const pw = (document.getElementById("sync-password") || {}).value || "";
-  try { setStatus("Creating your account…"); await afterAuth(await client.action(api.auth.signUp, { email, password: pw })); }
-  catch (e) { setStatus(cleanErr(e), true); }
-};
-
-window.syncSignIn = async function () {
-  if (!client) return setStatus("Sync isn't configured in this build.", true);
-  const email = (document.getElementById("sync-email") || {}).value || "";
-  const pw = (document.getElementById("sync-password") || {}).value || "";
-  try { setStatus("Signing in…"); await afterAuth(await client.action(api.auth.signIn, { email, password: pw })); }
-  catch (e) { setStatus(cleanErr(e), true); }
-};
+async function doAuth(kind, email, pw, elId) {
+  statusElId = elId || "sync-status";
+  if (!client) { setStatus("Sync isn't configured in this build.", true); return false; }
+  try {
+    setStatus(kind === "up" ? "Creating your account…" : "Signing in…");
+    const res = await client.action(kind === "up" ? api.auth.signUp : api.auth.signIn, { email, password: pw });
+    await afterAuth(res);
+    return true;
+  } catch (e) { setStatus(cleanErr(e), true); return false; }
+}
+window.syncSignUp = () => doAuth("up", fieldVal("sync-email"), fieldVal("sync-password"), "sync-status");
+window.syncSignIn = () => doAuth("in", fieldVal("sync-email"), fieldVal("sync-password"), "sync-status");
+// Used by the onboarding overlay (optional sign-in). Returns true on success.
+window.onboardingAuth = (kind) => doAuth(kind, fieldVal("onboarding-sync-email"), fieldVal("onboarding-sync-pass"), "onboarding-sync-status");
 
 window.syncSignOut = async function () {
   const token = getToken();

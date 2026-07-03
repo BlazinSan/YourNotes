@@ -3336,6 +3336,18 @@ body.haven-open {
 .calendar-cell.has-day-color { box-shadow: inset 0 0 0 2px var(--day-color); }
 .calendar-cell.has-day-color .date-num { color: var(--day-color); font-weight: 800; }
 
+/* Onboarding optional sign-in */
+.onboarding-sync { margin-top: 22px; text-align: left; }
+.onboarding-sync-divider { display: flex; align-items: center; gap: 12px; color: var(--text-secondary); font-size: 0.72rem; margin-bottom: 14px; text-transform: uppercase; letter-spacing: 0.04em; }
+.onboarding-sync-divider::before, .onboarding-sync-divider::after { content: ""; flex: 1; height: 1px; background: var(--panel-border); }
+.onboarding-sync-fields { display: flex; flex-direction: column; gap: 10px; }
+.onboarding-sync-fields input { width: 100%; padding: 11px 12px; border-radius: 10px; border: 1px solid var(--panel-border); background: var(--bg-color); color: var(--text-primary); font-family: inherit; font-size: 0.95rem; outline: none; }
+.onboarding-sync-fields input:focus { border-color: var(--accent-color); }
+.onboarding-sync-btns { display: flex; gap: 8px; }
+.onboarding-sync-btn { flex: 1; padding: 11px; border: none; border-radius: 10px; font-weight: 700; cursor: pointer; font-family: inherit; font-size: 0.9rem; background: var(--overlay-medium); color: var(--text-primary); }
+.onboarding-sync-btn.primary { background: var(--accent-color); color: #fff; }
+.onboarding-sync-status { min-height: 1.1em; font-size: 0.85rem; color: var(--text-secondary); margin-top: 2px; }
+
 /* ============================================================
    Mobile (Android app + narrow windows) — same theme, drawer sidebar
    ============================================================ */

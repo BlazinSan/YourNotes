@@ -2,7 +2,7 @@ import './style.css'
 import './sync.js'
 import { Capacitor, SystemBars, SystemBarsStyle } from '@capacitor/core'
 // Static import (not dynamic): Electron cannot fetch lazy chunks out of app.asar
-import * as __havenEngine from './haven/engine.js'
+import * as __havenEngine from './haven/scene2d.js'
 
 // --- Data Persistence Override ---
 const _originalSetItem = Storage.prototype.setItem;
@@ -182,14 +182,32 @@ function init() {
       onboardingSubmit.addEventListener('click', () => {
         savedUserName = onboardingNameInput.value.trim() || 'Guest';
         savedUserRole = onboardingRoleInput.value.trim() || 'Personal Account';
-        
+
         localStorage.setItem('userName', savedUserName);
         localStorage.setItem('userRole', savedUserRole);
-        
+
         updateSidebarProfile();
         onboardingOverlay.style.display = 'none';
       });
     }
+
+    // Optional sign-in from onboarding → syncs immediately and stays signed in.
+    const finishAuthedOnboarding = () => {
+      // If sign-in pulled cloud data, syncNow reloads the app; otherwise carry on
+      // with whatever name/job they typed (a fresh account) and dismiss onboarding.
+      if (!localStorage.getItem('userName')) {
+        localStorage.setItem('userName', (onboardingNameInput.value.trim() || 'Guest'));
+        localStorage.setItem('userRole', (onboardingRoleInput.value.trim() || 'Personal Account'));
+      }
+      savedUserName = localStorage.getItem('userName');
+      savedUserRole = localStorage.getItem('userRole');
+      updateSidebarProfile();
+      if (onboardingOverlay) onboardingOverlay.style.display = 'none';
+    };
+    const onbSignin = document.getElementById('onboarding-signin');
+    const onbSignup = document.getElementById('onboarding-signup');
+    if (onbSignin) onbSignin.addEventListener('click', async () => { if (window.onboardingAuth && await window.onboardingAuth('in')) finishAuthedOnboarding(); });
+    if (onbSignup) onbSignup.addEventListener('click', async () => { if (window.onboardingAuth && await window.onboardingAuth('up')) finishAuthedOnboarding(); });
   } else {
     updateSidebarProfile();
   }
