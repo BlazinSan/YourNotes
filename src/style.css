@@ -3206,6 +3206,9 @@ body {
 .haven-theme-btn.active { background: #fff; color: #1a1a1a; }
 .haven-close { pointer-events: auto; background: rgba(255,255,255,0.12); color: #fff; border: 1px solid rgba(255,255,255,0.14); backdrop-filter: blur(8px); width: 46px; height: 46px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: background 0.2s; }
 .haven-close:hover { background: rgba(255,80,80,0.5); }
+.haven-rotate { display: none; pointer-events: auto; background: rgba(255,255,255,0.12); color: #fff; border: 1px solid rgba(255,255,255,0.14); backdrop-filter: blur(8px); width: 46px; height: 46px; border-radius: 50%; cursor: pointer; align-items: center; justify-content: center; flex-shrink: 0; transition: background 0.2s; }
+.haven-rotate:hover, .haven-rotate.active { background: rgba(255,255,255,0.3); }
+@media (pointer: coarse) { .haven-rotate { display: flex; } }
 .haven-title-badge { color: rgba(255,255,255,0.85); font-size: 0.95rem; font-weight: 600; text-shadow: 0 2px 8px rgba(0,0,0,0.6); align-self: center; }
 .haven-ui-controls { display: flex; align-items: center; gap: 22px; pointer-events: auto; flex-wrap: wrap; }
 .haven-spots { display: flex; align-items: center; gap: 10px; }

@@ -1,6 +1,7 @@
 import './style.css'
 import './sync.js'
 import { Capacitor, SystemBars, SystemBarsStyle } from '@capacitor/core'
+import { ScreenOrientation } from '@capacitor/screen-orientation'
 // Static import (not dynamic): Electron cannot fetch lazy chunks out of app.asar
 import * as __havenEngine from './haven/scene2d.js'
 
@@ -5024,9 +5025,28 @@ document.addEventListener('click', (e) => {
   function onKey(e) { if (e.key === 'Escape') window.closeHaven(); else pokeUi(); }
 
   // ---------- Public API ----------
+  // On phone, open the haven in landscape (it's a wide cinematic space).
+  // User can flip to portrait with the rotate button; we don't hard-lock.
+  let havenPortrait = false;
+  async function lockOrientation(orient) {
+    if (!Capacitor.isNativePlatform()) return;
+    try { await ScreenOrientation.lock({ orientation: orient }); } catch (_) {}
+  }
+  async function unlockOrientation() {
+    if (!Capacitor.isNativePlatform()) return;
+    try { await ScreenOrientation.unlock(); } catch (_) {}
+  }
+  window.toggleHavenOrientation = function () {
+    havenPortrait = !havenPortrait;
+    lockOrientation(havenPortrait ? 'portrait' : 'landscape');
+    const b = document.getElementById('haven-rotate'); if (b) b.classList.toggle('active', havenPortrait);
+  };
+
   window.openHaven = async function () {
     if (isOpen) return;
     isOpen = true;
+    havenPortrait = false;
+    lockOrientation('landscape');
     fsEl.style.display = 'block';
     syncUi();
     const vol = document.getElementById('haven-volume'); if (vol) vol.value = volume;
@@ -5044,6 +5064,7 @@ document.addEventListener('click', (e) => {
   window.closeHaven = function () {
     if (!isOpen) return;
     isOpen = false;
+    unlockOrientation();
     stopAudio();
     try { if (eng) eng.closeHaven3D(); } catch (_) {}
     fsEl.style.display = 'none';
