@@ -6,8 +6,18 @@
 import { ConvexHttpClient } from "convex/browser";
 import { anyApi } from "convex/server";
 
-const CONVEX_URL = import.meta.env.VITE_CONVEX_URL || "";
+// Public deployment URL (not a secret — the browser connects to it; auth is by
+// token). Pinned to the shared deployment that holds the functions + R2 config
+// (a local `convex dev` can put a different personal URL in .env.local).
+const CONVEX_URL = "https://quiet-jaguar-986.convex.cloud";
 const api = anyApi;
+
+function guessType(name) {
+  const e = (String(name).split(".").pop() || "").toLowerCase();
+  return e === "pdf" ? "application/pdf" : e === "png" ? "image/png"
+    : (e === "jpg" || e === "jpeg") ? "image/jpeg" : e === "webp" ? "image/webp"
+    : e === "gif" ? "image/gif" : "application/octet-stream";
+}
 
 // Content keys that sync. Device-local keys (session token, sync metadata,
 // haven prefs are fine to sync — they're preferences) — token/meta excluded.
@@ -116,10 +126,12 @@ async function uploadReferencedFiles(token, values) {
     try {
       const bytes = await window.electronAPI.readFileBytes(r.full);
       if (!bytes) continue;
-      const uploadUrl = await client.mutation(api.sync.genUploadUrl, { token });
-      const resp = await fetch(uploadUrl, { method: "POST", body: new Blob([bytes]) });
-      const { storageId } = await resp.json();
-      await client.mutation(api.sync.registerFile, { token, localKey: r.name, storageId, name: r.name, size: bytes.length || bytes.byteLength || 0 });
+      const ct = guessType(r.name);
+      // Presigned PUT straight to Cloudflare R2 (secret stays in Convex).
+      const { url: uploadUrl, r2Key } = await client.action(api.r2.presignUpload, { token, key: r.name });
+      const resp = await fetch(uploadUrl, { method: "PUT", body: new Blob([bytes]), headers: { "content-type": ct } });
+      if (!resp.ok) throw new Error("R2 upload " + resp.status);
+      await client.mutation(api.sync.registerFile, { token, localKey: r.name, r2Key, name: r.name, size: bytes.length || bytes.byteLength || 0 });
       uploaded.add(r.name);
       localStorage.setItem("yn_synced_files", JSON.stringify([...uploaded]));
       done++;
@@ -164,8 +176,8 @@ window.syncNow = async function () {
       for (const e of entries) meta[e.key] = { h: strHash(e.value), t: e.updatedAt };
     }
     setMeta(meta);
-    // 3) refresh the filename→URL map so this device can render cloud files
-    try { localStorage.setItem("yn_file_map", JSON.stringify(await client.query(api.sync.fileUrls, { token }))); } catch (_) {}
+    // 3) refresh the filename→URL map (presigned R2 GET urls) so this device renders cloud files
+    try { localStorage.setItem("yn_file_map", JSON.stringify(await client.action(api.r2.presignDownloads, { token }))); } catch (_) {}
     localStorage.setItem("yn_last_sync", String(Date.now()));
     updateSyncUi();
     setStatus(pulled ? `Synced — ${pulled} item${pulled > 1 ? "s" : ""} updated from the cloud.` : "Synced ✓");

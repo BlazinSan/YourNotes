@@ -24,11 +24,12 @@ export default defineSchema({
     .index("by_user", ["userId"]),
 
   // App-managed files (college PDFs, banner, board files, profile picture),
-  // keyed by their unique local filename
+  // keyed by their unique local filename. Bytes live in Cloudflare R2; here we
+  // only track localKey → r2Key so any device can presign a URL.
   files: defineTable({
     userId: v.id("users"),
     localKey: v.string(),
-    storageId: v.id("_storage"),
+    r2Key: v.string(),
     name: v.string(),
     size: v.number(),
   })
