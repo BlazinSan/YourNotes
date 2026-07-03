@@ -397,6 +397,38 @@ function groupTitle(folderName, title) {
   return folderName && folderName !== 'Ungrouped' ? `${folderName} · ${cleanTitle}` : cleanTitle;
 }
 
+// Promise-based text prompt. window.prompt() is disabled in Electron, which
+// silently broke every rename / new-folder / move action — this replaces it.
+window.uiPrompt = function (message, defaultValue = '') {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'ui-prompt-overlay';
+    overlay.innerHTML = `
+      <div class="ui-prompt-card">
+        <div class="ui-prompt-msg"></div>
+        <input type="text" class="ui-prompt-input" />
+        <div class="ui-prompt-actions">
+          <button class="ui-prompt-cancel">Cancel</button>
+          <button class="ui-prompt-ok">OK</button>
+        </div>
+      </div>`;
+    overlay.querySelector('.ui-prompt-msg').textContent = message;
+    document.body.appendChild(overlay);
+    const input = overlay.querySelector('.ui-prompt-input');
+    input.value = defaultValue || '';
+    input.focus(); input.select();
+    let done = false;
+    const close = (val) => { if (done) return; done = true; overlay.remove(); resolve(val); };
+    overlay.querySelector('.ui-prompt-ok').onclick = () => close(input.value);
+    overlay.querySelector('.ui-prompt-cancel').onclick = () => close(null);
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) close(null); });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); close(input.value); }
+      else if (e.key === 'Escape') { e.preventDefault(); close(null); }
+    });
+  });
+};
+
 // Render Notes List
 function renderNotesList(filterText = '') {
   notesListEl.innerHTML = '';
@@ -409,7 +441,9 @@ function renderNotesList(filterText = '') {
            noteGroup(note).toLowerCase().includes(term);
   });
 
-  filteredNotes.sort((a, b) => b.updatedAt - a.updatedAt);
+  // Stable order (matches the grid's manual order) so editing a note doesn't
+  // jump it to the top of the sidebar list either.
+  filteredNotes.sort((a, b) => noteOrderKey(a) - noteOrderKey(b));
 
   if (filteredNotes.length === 0) {
     notesListEl.innerHTML = `<div style="text-align:center; padding:20px; color:var(--text-secondary); font-size:0.9rem;">No notes found</div>`;
@@ -431,7 +465,10 @@ function renderNotesList(filterText = '') {
 
   groupNames.forEach(group => {
     const items = groups.get(group);
-    const expanded = !!term || expandedSidebarGroups.has(group) || items.some(note => note.id === activeNoteId);
+    // Don't force-expand the active note's folder every render — that made it
+    // impossible to collapse while a note in it was open. setActiveNote reveals
+    // it once; after that the user's collapse choice wins.
+    const expanded = !!term || expandedSidebarGroups.has(group);
     const header = document.createElement('div');
     header.className = 'sidebar-note-group';
     header.innerHTML = `
@@ -484,8 +521,14 @@ function renderNotesList(filterText = '') {
 function setActiveNote(id) {
   activeNoteId = id;
   const note = notes.find(n => n.id === id);
-  
+
   if (note) {
+    // Reveal the note's folder once on open (the user can still collapse it after).
+    const grp = noteGroup(note);
+    if (grp && grp !== 'Ungrouped' && !expandedSidebarGroups.has(grp)) {
+      expandedSidebarGroups.add(grp);
+      saveStringSet('opennotes_sidebar_expanded_groups', expandedSidebarGroups);
+    }
     noteTitleInput.value = note.title;
     
     if (!document.getElementById('note-body')) {
@@ -522,7 +565,15 @@ function setActiveNote(id) {
 }
 
 // --- Notes grouping / sort / filter state ---
-let homeSort = localStorage.getItem('opennotes_home_sort') || 'recent';
+let homeSort = localStorage.getItem('opennotes_home_sort') || 'manual';
+// One-time: move everyone off the old 'recent' default, which re-sorted a note
+// to the top the moment it was edited. 'manual' is a stable, drag-orderable list.
+if (!localStorage.getItem('opennotes_sort_migrated')) {
+  if (homeSort === 'recent') { homeSort = 'manual'; localStorage.setItem('opennotes_home_sort', 'manual'); }
+  localStorage.setItem('opennotes_sort_migrated', '1');
+}
+let dragNoteId = null; // in-flight note drag (manual reorder)
+const noteOrderKey = (n) => (typeof n.order === 'number' ? n.order : (parseInt(n.id, 10) || n.createdAt || 0));
 let homeFolderFilter = 'all';
 let expandedProjectGroups = loadStringSet('opennotes_expanded_project_groups');
 let homeArchiveMode = false;
@@ -651,8 +702,8 @@ function setProjectFolderArchived(folderName, archived) {
   else refreshNoteSurfaces();
 }
 
-function renameProjectFolder(folderName) {
-  const nextName = prompt('Rename folder:', folderName);
+async function renameProjectFolder(folderName) {
+  const nextName = await window.uiPrompt('Rename folder:', folderName);
   if (nextName === null) return;
   const trimmed = nextName.trim();
   if (!trimmed) return;
@@ -673,11 +724,11 @@ function renameProjectFolder(folderName) {
   refreshNoteSurfaces();
 }
 
-function renameProjectNote(noteId) {
+async function renameProjectNote(noteId) {
   const note = notes.find(n => n.id === noteId);
   if (!note) return;
   const folder = noteGroup(note);
-  const nextName = prompt('Rename note:', noteDisplayTitle(note));
+  const nextName = await window.uiPrompt('Rename note:', noteDisplayTitle(note));
   if (nextName === null) return;
   const trimmed = nextName.trim();
   if (!trimmed) return;
@@ -736,8 +787,8 @@ function moveProjectNoteToFolder(noteId, folderName) {
   refreshNoteSurfaces();
 }
 
-function createProjectFolderWithFirstNote() {
-  const folderName = prompt('New folder name:');
+async function createProjectFolderWithFirstNote() {
+  const folderName = await window.uiPrompt('New folder name:');
   if (folderName === null) return;
   const trimmed = folderName.trim();
   if (!trimmed) return;
@@ -755,8 +806,23 @@ function sortNotes(arr, mode) {
   if (mode === 'oldest') a.sort((x, y) => (x.updatedAt || 0) - (y.updatedAt || 0));
   else if (mode === 'az') a.sort((x, y) => (x.title || '').localeCompare(y.title || ''));
   else if (mode === 'za') a.sort((x, y) => (y.title || '').localeCompare(x.title || ''));
-  else a.sort((x, y) => (y.updatedAt || 0) - (x.updatedAt || 0));
+  else if (mode === 'recent') a.sort((x, y) => (y.updatedAt || 0) - (x.updatedAt || 0));
+  else a.sort((x, y) => noteOrderKey(x) - noteOrderKey(y)); // 'manual' (default) — stable, drag-ordered
   return a;
+}
+
+// Drag-reorder a note within its folder (manual sort). Rewrites the group's
+// order values so the arrangement is stable and survives edits.
+function reorderNoteInGroup(groupItems, fromId, toId) {
+  const arr = [...groupItems];
+  const from = arr.findIndex(n => n.id === fromId);
+  const to = arr.findIndex(n => n.id === toId);
+  if (from < 0 || to < 0 || from === to) return;
+  const [moved] = arr.splice(from, 1);
+  arr.splice(to, 0, moved);
+  arr.forEach((n, i) => { n.order = i; });
+  saveNotes();
+  renderHomeGrid(homeSearchInput ? homeSearchInput.value : '');
 }
 
 window.setHomeSort = function(v) { homeSort = v; localStorage.setItem('opennotes_home_sort', v); renderHomeGrid(homeSearchInput ? homeSearchInput.value : ''); };
@@ -775,7 +841,7 @@ function populateFolderFilter() {
   if (typeof refreshSelects === 'function') refreshSelects();
 }
 
-function makeNoteCard(note) {
+function makeNoteCard(note, groupItems) {
   const date = new Date(note.updatedAt);
   const dateString = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
   const card = document.createElement('div');
@@ -787,6 +853,18 @@ function makeNoteCard(note) {
     <div class="book-card-title">${gsEscape(noteDisplayTitle(note))}</div>
     <div class="book-card-date">${dateString}</div>
   `;
+  // Drag to reorder within a folder — only in the manual (default) sort.
+  if (homeSort === 'manual' && groupItems) {
+    card.draggable = true;
+    card.addEventListener('dragstart', (e) => { dragNoteId = note.id; e.dataTransfer.effectAllowed = 'move'; card.classList.add('note-dragging'); });
+    card.addEventListener('dragend', () => { dragNoteId = null; card.classList.remove('note-dragging'); document.querySelectorAll('.book-card.drop-target').forEach(c => c.classList.remove('drop-target')); });
+    card.addEventListener('dragover', (e) => { if (dragNoteId && dragNoteId !== note.id) { e.preventDefault(); card.classList.add('drop-target'); } });
+    card.addEventListener('dragleave', () => card.classList.remove('drop-target'));
+    card.addEventListener('drop', (e) => {
+      e.preventDefault(); card.classList.remove('drop-target');
+      if (dragNoteId && dragNoteId !== note.id) reorderNoteInGroup(groupItems, dragNoteId, note.id);
+    });
+  }
   return card;
 }
 
@@ -845,10 +923,12 @@ function renderHomeGrid(searchTerm = '') {
 
   // Order folders: pinned first, then by the chosen sort (which now sorts the folders too)
   const repTime = (items, oldest) => items.reduce((acc, n) => oldest ? Math.min(acc, n.updatedAt || 0) : Math.max(acc, n.updatedAt || 0), oldest ? Infinity : 0);
+  const folderKey = (g) => Math.min(...groups.get(g).map(n => parseInt(n.id, 10) || n.createdAt || 0));
   const rest = [...groups.keys()].filter(g => !pinnedGroups.includes(g)).sort((a, b) => {
     if (a === 'Ungrouped') return 1; if (b === 'Ungrouped') return -1;
     if (homeSort === 'az') return a.localeCompare(b);
     if (homeSort === 'za') return b.localeCompare(a);
+    if (homeSort === 'manual') return folderKey(a) - folderKey(b); // stable — editing a note won't move its folder
     const ta = repTime(groups.get(a), homeSort === 'oldest'), tb = repTime(groups.get(b), homeSort === 'oldest');
     return homeSort === 'oldest' ? ta - tb : tb - ta;
   });
@@ -884,18 +964,20 @@ function renderHomeGrid(searchTerm = '') {
     };
     homeGrid.appendChild(header);
     if (collapsed) return;
-    items.forEach(note => homeGrid.appendChild(makeNoteCard(note)));
+    items.forEach(note => homeGrid.appendChild(makeNoteCard(note, items)));
   });
 }
 
 // Create New Note
 function createNote(title = '', body = '') {
+  const now = Date.now();
   const newNote = {
-    id: Date.now().toString(),
+    id: now.toString(),
     title,
     body,
-    createdAt: Date.now(),
-    updatedAt: Date.now()
+    createdAt: now,
+    updatedAt: now,
+    order: now // stable manual position (end of list) until dragged
   };
   
   notes.push(newNote);
@@ -1603,6 +1685,39 @@ function openProjectDayModal(dayNotes, dateStr) {
 // Tasks Panel Logic
 // -----------------------------------------
 let calendarTasks = JSON.parse(localStorage.getItem('opennotes_calendar_tasks')) || [];
+
+// Per-day colour tags, keyed "year-month-date" → hex. Lets the user mark days
+// (exams, deadlines, focus days) with a colour that tints the cell + pill.
+let calendarDayColors = JSON.parse(localStorage.getItem('opennotes_calendar_day_colors') || '{}');
+const DAY_COLOR_PALETTE = ['#ef4444', '#f59e0b', '#eab308', '#22c55e', '#14b8a6', '#3b82f6', '#8b5cf6', '#ec4899'];
+const dayKey = (y, m, d) => `${y}-${m}-${d}`;
+function saveDayColors() { localStorage.setItem('opennotes_calendar_day_colors', JSON.stringify(calendarDayColors)); }
+function getDayColor(y, m, d) { return calendarDayColors[dayKey(y, m, d)] || ''; }
+function setDayColor(y, m, d, color) {
+  const k = dayKey(y, m, d);
+  if (color) calendarDayColors[k] = color; else delete calendarDayColors[k];
+  saveDayColors();
+}
+function renderDayColorSwatches(year, month, date) {
+  const wrap = document.getElementById('day-color-swatches');
+  if (!wrap) return;
+  const current = getDayColor(year, month, date);
+  wrap.innerHTML = '';
+  DAY_COLOR_PALETTE.forEach(col => {
+    const b = document.createElement('button');
+    b.className = 'day-swatch' + (current === col ? ' active' : '');
+    b.style.background = col;
+    b.title = 'Mark this day';
+    b.onclick = () => { setDayColor(year, month, date, current === col ? '' : col); renderDayColorSwatches(year, month, date); if (typeof renderCalendar === 'function') renderCalendar(); };
+    wrap.appendChild(b);
+  });
+  const clear = document.createElement('button');
+  clear.className = 'day-swatch day-swatch-clear' + (current ? '' : ' active');
+  clear.title = 'No colour';
+  clear.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+  clear.onclick = () => { setDayColor(year, month, date, ''); renderDayColorSwatches(year, month, date); if (typeof renderCalendar === 'function') renderCalendar(); };
+  wrap.appendChild(clear);
+}
 let activeDateIndex = 20;
 
 window.toggleTasksPanel = function() {
@@ -1683,11 +1798,19 @@ window.renderCalendar = function() {
         }
       }
       
+      // Per-day colour tag: tint the cell + pill so the day stands out.
+      const dayColor = getDayColor(year, month, dateNum);
+      if (dayColor) {
+        cell.classList.add('has-day-color');
+        cell.style.setProperty('--day-color', dayColor);
+      }
+
       let eventsHtml = '';
       if (dayTasks.length > 0) {
-        eventsHtml = `<div class="event">${dayTasks[dayTasks.length - 1].event}</div>`;
+        const pillStyle = dayColor ? ` style="background:${dayColor};color:#fff;"` : '';
+        eventsHtml = `<div class="event"${pillStyle}>${dayTasks[dayTasks.length - 1].event}</div>`;
       }
-      
+
       cell.innerHTML = `
         <div class="date-num">${dateNum}</div>
         ${eventsHtml}
@@ -1718,7 +1841,8 @@ function openDayView(year, month, date) {
   
   const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
   document.getElementById('day-view-title').textContent = `${monthNames[month]} ${date}, ${year}`;
-  
+
+  renderDayColorSwatches(year, month, date);
   renderDayEvents(year, month, date);
 }
 
@@ -4393,11 +4517,11 @@ function showCollegeContextMenu(type, id, x, y) {
         newFolderItem.className = 'context-item';
         newFolderItem.style.cssText = 'background: transparent; border: none; padding: 8px 12px; border-radius: 6px; font-family: inherit; font-size: 0.85rem; text-align: left; color: var(--accent-color); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; width: 100%; transition: background 0.15s;';
         newFolderItem.textContent = 'New folder...';
-        newFolderItem.onclick = (e) => {
+        newFolderItem.onclick = async (e) => {
           e.stopPropagation();
-          const folderName = prompt('Move note to new folder:');
-          if (folderName !== null && folderName.trim()) moveProjectNoteToFolder(id, folderName.trim());
           menu.style.display = 'none';
+          const folderName = await window.uiPrompt('Move note to new folder:');
+          if (folderName !== null && folderName.trim()) moveProjectNoteToFolder(id, folderName.trim());
         };
         submenu.appendChild(newFolderItem);
         if (folders.length === 0) {
@@ -4577,7 +4701,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   if (contextRenameBtn) {
-    contextRenameBtn.onclick = () => {
+    contextRenameBtn.onclick = async () => {
       if (contextMenu) contextMenu.style.display = 'none';
       if (contextTargetType === 'folder') {
         editingFolderId = contextTargetId;
@@ -4594,7 +4718,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const folder = collegeFolders.find(f => f.id === activeCollegeFolderId);
         const pdf = folder ? folder.pdfs.find(p => p.id === contextTargetId) : null;
         if (pdf) {
-          const newName = prompt("Rename PDF document:", pdf.name);
+          const newName = await window.uiPrompt("Rename PDF document:", pdf.name);
           if (newName && newName.trim()) {
             pdf.name = newName.trim();
             saveCollegeFolders();

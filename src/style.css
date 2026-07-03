@@ -3309,6 +3309,33 @@ body.haven-open {
 .pic-crop-cancel { background: var(--overlay-medium); color: var(--text-primary); }
 .pic-crop-save { background: var(--accent-color); color: #fff; }
 
+/* Promise-based prompt modal (replaces disabled window.prompt) */
+.ui-prompt-overlay { position: fixed; inset: 0; z-index: 16000; background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(5px); display: flex; align-items: center; justify-content: center; }
+.ui-prompt-card { background: var(--bg-color); border: 1px solid var(--panel-border); border-radius: 16px; padding: 24px; width: 380px; max-width: 92vw; box-shadow: 0 30px 70px rgba(0, 0, 0, 0.4); }
+.ui-prompt-msg { color: var(--text-primary); font-size: 1rem; font-weight: 600; margin-bottom: 14px; }
+.ui-prompt-input { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid var(--panel-border); background: transparent; color: var(--text-primary); font-family: inherit; font-size: 0.95rem; outline: none; }
+.ui-prompt-input:focus { border-color: var(--accent-color); }
+.ui-prompt-actions { display: flex; gap: 10px; margin-top: 16px; }
+.ui-prompt-actions button { flex: 1; padding: 11px; border: none; border-radius: 10px; font-weight: 700; cursor: pointer; font-family: inherit; font-size: 0.92rem; }
+.ui-prompt-cancel { background: var(--overlay-medium); color: var(--text-primary); }
+.ui-prompt-ok { background: var(--accent-color); color: #fff; }
+
+/* Note drag-reorder feedback (manual sort) */
+.book-card[draggable="true"] { cursor: grab; }
+.book-card.note-dragging { opacity: 0.45; }
+.book-card.drop-target { outline: 2px dashed var(--accent-color); outline-offset: 2px; }
+
+/* Calendar per-day colour tags */
+.day-color-row { display: flex; align-items: center; gap: 14px; padding: 6px 2px 16px; flex-wrap: wrap; }
+.day-color-label { font-size: 0.78rem; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.06em; }
+.day-color-swatches { display: flex; gap: 9px; flex-wrap: wrap; }
+.day-swatch { width: 26px; height: 26px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; display: flex; align-items: center; justify-content: center; transition: transform 0.15s; }
+.day-swatch:hover { transform: scale(1.15); }
+.day-swatch.active { box-shadow: 0 0 0 2px var(--bg-color), 0 0 0 4px var(--text-primary); }
+.day-swatch-clear { background: var(--overlay-medium); color: var(--text-secondary); }
+.calendar-cell.has-day-color { box-shadow: inset 0 0 0 2px var(--day-color); }
+.calendar-cell.has-day-color .date-num { color: var(--day-color); font-weight: 800; }
+
 /* ============================================================
    Mobile (Android app + narrow windows) — same theme, drawer sidebar
    ============================================================ */

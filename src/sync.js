@@ -13,6 +13,7 @@ const api = anyApi;
 // haven prefs are fine to sync — they're preferences) — token/meta excluded.
 const SYNC_KEYS = [
   "opennotes_data", "opennotes_college_folders", "opennotes_tasks", "opennotes_calendar_tasks",
+  "opennotes_calendar_day_colors", "opennotes_expanded_project_groups", "opennotes_sidebar_expanded_groups",
   "opennotes_expenses", "opennotes_journal_text", "opennotes_journal_mood", "opennotes_mood_history",
   "opennotes_books", "opennotes_goals", "opennotes_habits", "opennotes_quicklinks",
   "opennotes_favourites", "opennotes_pinned_groups", "opennotes_home_sort", "opennotes_nav_order",
