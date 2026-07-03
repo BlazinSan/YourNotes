@@ -1,6 +1,8 @@
 import './style.css'
 import './sync.js'
 import { Capacitor, SystemBars, SystemBarsStyle } from '@capacitor/core'
+// Static import (not dynamic): Electron cannot fetch lazy chunks out of app.asar
+import * as __havenEngine from './haven/engine.js'
 
 // --- Data Persistence Override ---
 const _originalSetItem = Storage.prototype.setItem;
@@ -4841,21 +4843,21 @@ document.addEventListener('click', (e) => {
 
 // ============================================================
 // 🧘 Safe Haven — fullscreen 3D retreat with procedural ambience
-// Real CSS-3D rooms: each seat is a camera pose (position + yaw),
-// so switching seats genuinely turns you inside the space.
+// Visuals: real WebGL engine (Three.js + bloom), loaded on demand
+// from ./haven/engine.js. This controller owns the overlay UI,
+// auto-hiding controls, seat/theme prefs and the ambience audio.
 // ============================================================
 (function () {
   const fsEl = document.getElementById('haven-fs');
-  const world = document.getElementById('haven-world');
-  if (!fsEl || !world) return;
+  const viewport = document.getElementById('haven-viewport');
+  if (!fsEl || !viewport) return;
 
   let theme = localStorage.getItem('opennotes_haven_theme') || 'cabin';
   let spot = parseInt(localStorage.getItem('opennotes_haven_spot') || '0', 10) || 0;
   let volume = parseFloat(localStorage.getItem('opennotes_haven_vol'));
   if (isNaN(volume)) volume = 0.5;
   let isOpen = false;
-  const isPhoneHaven = () => window.matchMedia('(max-width: 820px), (pointer: coarse)').matches;
-  const canUseNativeSystemBars = () => Capacitor.isNativePlatform() && SystemBars;
+  let eng = null; // engine module namespace (dynamic import)
 
   const SUBS = {
     cabin: 'Fireplace crackling in a snowed-in log cabin.',
@@ -4863,387 +4865,73 @@ document.addEventListener('click', (e) => {
     city: 'City lights from a quiet high-rise bed.'
   };
 
-  // Camera pose per theme per seat. The world gets the INVERSE camera
-  // transform: rotate first (turn in place), then translate (walk there).
-  const CAMS = {
-    cabin: [
-      'rotateY(0deg) translate3d(0px, -70px, 130px)',      // armchair, facing the fireplace
-      'rotateY(-58deg) translate3d(430px, -60px, 120px)',  // window nook — turned toward the left wall
-      'rotateY(56deg) translate3d(-430px, -60px, 100px)'   // reading corner — turned toward the bookshelf
-    ],
-    beach: [
-      'rotateY(0deg) translate3d(0px, -40px, 60px)',       // on the mat, facing the sea
-      'rotateY(-46deg) rotateX(-4deg) translate3d(380px, -30px, 60px)',  // gazing down the shore (palm side)
-      'rotateY(40deg) rotateX(-10deg) translate3d(-360px, -60px, 40px)'  // lying back, sky-watching
-    ],
-    city: [
-      'rotateY(0deg) translate3d(0px, -50px, 60px)',       // in bed, facing the window wall
-      'rotateY(-50deg) translate3d(390px, -40px, 110px)',  // bed edge, toward the lamp corner
-      'rotateY(48deg) translate3d(-390px, -50px, 90px)'    // by the shelf wall, looking back across
-    ]
-  };
-
-  // ---------- Scene builders ----------
-  const tw = (x, y, r, color, d) => `<span class="haven-twinkle" style="position:absolute;left:${x}px;top:${y}px;width:${r * 2}px;height:${r * 2}px;border-radius:50%;background:${color};animation-delay:-${d}s"></span>`;
-
-  function flameSvg(w, h, extra) {
-    return `<svg class="hv-flame" style="width:${w}px;height:${h}px;${extra || ''}" viewBox="0 0 90 170" preserveAspectRatio="none">
-      <path d="M45 168 C 12 128 22 84 45 20 C 68 84 78 128 45 168 Z" fill="#ff7a1a" opacity="0.95"/>
-      <path d="M45 168 C 24 136 30 100 45 52 C 60 100 66 136 45 168 Z" fill="#ffb24d"/>
-      <path d="M45 168 C 34 148 37 124 45 96 C 53 124 56 148 45 168 Z" fill="#ffe08a"/>
-    </svg>`;
-  }
-
-  function candle(x, y, s, delay) {
-    return `<div style="position:absolute;left:${x}px;top:${y}px;transform:scale(${s})">
-      <div style="width:16px;height:44px;background:linear-gradient(90deg,#d8cdb2,#efe6d0 40%,#cfc3a6);border-radius:4px 4px 2px 2px"></div>
-      <div class="hv-candle-fl" style="position:absolute;left:50%;top:-20px;width:10px;height:22px;margin-left:-5px;border-radius:50% 50% 45% 45%;background:radial-gradient(circle at 50% 78%,#fff3c4 12%,#ffcf6b 48%,#ff9a3d 82%,rgba(255,120,40,0));animation-delay:-${delay}s"></div>
-      <div class="haven-glow" style="position:absolute;left:50%;top:-34px;width:64px;height:64px;margin-left:-32px;border-radius:50%;background:radial-gradient(circle,rgba(255,200,110,0.5),rgba(255,200,110,0) 70%)"></div>
-    </div>`;
-  }
-
-  function bookRow(seed, count) {
-    const cols = ['#8a4a3b', '#3e5f52', '#8a7440', '#4a5a7a', '#7a4a63', '#5a6a45', '#9a6a4a', '#44607a'];
-    let out = '';
-    for (let i = 0; i < count; i++) {
-      const h = 52 + ((seed * 7 + i * 13) % 26);
-      const w = 13 + ((seed * 5 + i * 11) % 9);
-      const lean = (seed + i) % 7 === 3 ? 'transform:rotate(7deg);transform-origin:bottom left;' : '';
-      out += `<div style="width:${w}px;height:${h}px;background:linear-gradient(90deg,${cols[(seed + i) % cols.length]},rgba(0,0,0,0.25));border-radius:2px 2px 0 0;${lean}box-shadow:inset -2px 0 3px rgba(0,0,0,0.35)"></div>`;
-    }
-    return `<div style="position:absolute;left:0;right:0;bottom:0;display:flex;align-items:flex-end;gap:3px;padding:0 10px">${out}</div>`;
-  }
-
-  function sceneCabin() {
-    // Back wall — hearth centrepiece
-    let lights = '';
-    for (let i = 0; i < 12; i++) {
-      const x = 90 + i * 130, y = 66 + Math.sin(i * 1.1) * 22;
-      lights += `<div class="haven-twinkle" style="position:absolute;left:${x}px;top:${y}px;width:9px;height:9px;border-radius:50%;background:#ffcf6b;box-shadow:0 0 12px 3px rgba(255,200,100,0.55);animation-delay:-${(i * 0.45).toFixed(2)}s"></div>`;
-    }
-    const back = `
-      <svg style="position:absolute;left:0;top:0;width:100%;height:130px" viewBox="0 0 1600 130" preserveAspectRatio="none"><path d="M0 40 Q 400 110 800 44 T 1600 40" fill="none" stroke="#241407" stroke-width="4"/></svg>${lights}
-      <div class="hv-fire">
-        <div class="glow"></div>
-        <div class="stone"></div>
-        <div class="mantel"></div>
-        <div class="opening">
-          ${flameSvg(150, 240, 'left:50%;bottom:20px;margin-left:-75px;position:absolute')}
-          ${flameSvg(90, 150, 'left:50%;bottom:18px;margin-left:-70px;position:absolute;animation-duration:0.8s;opacity:0.85')}
-          <div class="logs"></div>
-          ${tw(60, 60, 2, '#ffb066', 0.4)}${tw(170, 40, 2, '#ffcf8a', 1.3)}
-        </div>
-        ${candle(52, -86, 1, 0.1)}${candle(310, -86, 0.85, 0.35)}
-      </div>
-      <div style="position:absolute;left:190px;top:250px;width:190px;height:150px;border:12px solid #5a3a22;border-radius:6px;background:linear-gradient(160deg,#26435a,#0e1e2e);box-shadow:0 12px 24px rgba(0,0,0,0.4)">
-        <div style="position:absolute;bottom:12px;left:0;right:0;height:44px;background:linear-gradient(0deg,rgba(255,255,255,0.85),rgba(255,255,255,0));border-radius:0 0 3px 3px"></div>
-        <div style="position:absolute;bottom:40px;left:20px;width:0;height:0;border-left:34px solid transparent;border-right:34px solid transparent;border-bottom:52px solid #1c3347"></div>
-        <div style="position:absolute;bottom:40px;right:14px;width:0;height:0;border-left:42px solid transparent;border-right:42px solid transparent;border-bottom:66px solid #142838"></div>
-        <div class="haven-twinkle" style="position:absolute;top:16px;right:22px;width:6px;height:6px;border-radius:50%;background:#fff"></div>
-      </div>
-      <div style="position:absolute;right:170px;top:230px;width:230px;height:210px">
-        <div style="position:absolute;inset:0;background:linear-gradient(#4a2f1c,#3a2414);border-radius:6px;box-shadow:0 14px 26px rgba(0,0,0,0.45)"></div>
-        <div style="position:absolute;left:12px;right:12px;top:12px;height:84px;background:#2c1a0f;border-radius:4px;overflow:hidden">${bookRow(3, 9)}</div>
-        <div style="position:absolute;left:12px;right:12px;bottom:12px;height:84px;background:#2c1a0f;border-radius:4px;overflow:hidden">${bookRow(8, 8)}</div>
-      </div>`;
-
-    // Left wall — window with snowy night + lantern shelf
-    const leftStars = tw(90, 90, 2, '#dfe8ff', 0.2) + tw(160, 140, 1.6, '#dfe8ff', 1.1) + tw(120, 210, 1.8, '#dfe8ff', 2.2) + tw(200, 100, 1.4, '#dfe8ff', 1.7) + tw(70, 170, 1.4, '#dfe8ff', 2.8);
-    const left = `
-      <div class="hv-cabin-window" style="left:34%;top:50%;margin-top:-170px;width:300px;height:340px">
-        <div class="glass">
-          ${leftStars}
-          <div style="position:absolute;left:0;right:0;bottom:0;height:60px;background:linear-gradient(0deg,rgba(235,240,250,0.92),rgba(235,240,250,0));border-radius:0 0 6px 6px"></div>
-          <div style="position:absolute;bottom:44px;left:30px;width:0;height:0;border-left:52px solid transparent;border-right:52px solid transparent;border-bottom:84px solid #16283c"></div>
-          <div style="position:absolute;bottom:52px;right:20px;width:0;height:0;border-left:64px solid transparent;border-right:64px solid transparent;border-bottom:104px solid #0f1e30"></div>
-          <div style="position:absolute;top:26px;right:40px;width:44px;height:44px;border-radius:50%;background:radial-gradient(circle,#f4f1e4 55%,rgba(244,241,228,0) 72%);box-shadow:0 0 34px 10px rgba(240,238,220,0.35)"></div>
-        </div>
-        <div class="frame"></div><div class="bar-v"></div><div class="bar-h"></div>
-      </div>
-      <div style="position:absolute;left:64%;top:52%;width:150px;height:14px;background:linear-gradient(#6b4526,#4a2f1c);border-radius:4px;box-shadow:0 10px 18px rgba(0,0,0,0.4)">
-        <div style="position:absolute;left:20px;top:-58px;width:44px;height:58px;border:5px solid #2e2620;border-radius:8px 8px 4px 4px;background:linear-gradient(rgba(255,200,110,0.25),rgba(255,170,70,0.4))"></div>
-        <div class="haven-glow" style="position:absolute;left:8px;top:-76px;width:96px;height:96px;border-radius:50%;background:radial-gradient(circle,rgba(255,190,100,0.55),rgba(255,190,100,0) 70%)"></div>
-      </div>`;
-
-    // Right wall — tall bookshelf + hanging plant
-    const right = `
-      <div style="position:absolute;left:30%;top:50%;margin-top:-235px;width:340px;height:470px">
-        <div style="position:absolute;inset:0;background:linear-gradient(#4a2f1c,#38220f);border-radius:8px;box-shadow:0 18px 34px rgba(0,0,0,0.5)"></div>
-        ${[0, 1, 2, 3].map(r => `<div style="position:absolute;left:14px;right:14px;top:${16 + r * 112}px;height:92px;background:#291809;border-radius:4px;overflow:hidden">${bookRow(r * 4 + 1, 10)}</div>`).join('')}
-      </div>
-      <div style="position:absolute;left:72%;top:24%">
-        <div style="width:4px;height:90px;background:#241407;margin:0 auto"></div>
-        <div style="width:64px;height:40px;background:linear-gradient(#7a5230,#5a3a22);border-radius:0 0 26px 26px"></div>
-        <svg width="120" height="90" viewBox="0 0 120 90" style="margin:-14px 0 0 -28px"><g fill="none" stroke="#3f6a4a" stroke-width="5" stroke-linecap="round"><path d="M60 6 C 30 26 24 56 34 84"/><path d="M60 6 C 90 26 96 56 86 84"/><path d="M60 4 C 56 34 58 62 60 86"/></g></svg>
-      </div>`;
-
-    const floor = `
-      <div style="position:absolute;left:50%;top:38%;width:760px;height:420px;margin-left:-380px;border-radius:50%;background:radial-gradient(ellipse,#8a3a34 0%,#7a2e2e 55%,rgba(122,46,46,0) 72%);box-shadow:inset 0 0 60px rgba(0,0,0,0.25)"></div>
-      <div class="haven-glow" style="position:absolute;left:50%;top:8%;width:900px;height:520px;margin-left:-450px;background:radial-gradient(ellipse,rgba(255,150,60,0.38),rgba(255,150,60,0) 70%)"></div>`;
-
-    const props = `
-      <div class="hv-prop" style="width:340px;height:300px;margin-left:-170px;margin-top:-150px;transform:translate3d(300px,310px,300px) rotateY(-24deg)">
-        <div style="position:absolute;left:24px;right:24px;top:0;height:190px;background:linear-gradient(#c8a06a,#a9834f);border-radius:26px 26px 10px 10px;box-shadow:inset 0 -14px 24px rgba(0,0,0,0.2)"></div>
-        <div style="position:absolute;left:40px;right:40px;top:26px;height:110px;background:linear-gradient(#efe4cc,#dccdb0);border-radius:18px"></div>
-        <div style="position:absolute;left:0;bottom:44px;width:74px;height:150px;background:linear-gradient(#b98f58,#96713d);border-radius:22px;box-shadow:6px 10px 18px rgba(0,0,0,0.3)"></div>
-        <div style="position:absolute;right:0;bottom:44px;width:74px;height:150px;background:linear-gradient(#b98f58,#96713d);border-radius:22px;box-shadow:-6px 10px 18px rgba(0,0,0,0.3)"></div>
-        <div style="position:absolute;left:30px;right:30px;bottom:16px;height:74px;background:linear-gradient(#c8a06a,#8f6c3c);border-radius:14px;box-shadow:0 18px 30px rgba(0,0,0,0.45)"></div>
-      </div>
-      <div class="hv-prop" style="width:150px;height:170px;margin-left:-75px;margin-top:-85px;transform:translate3d(60px,375px,420px) rotateY(14deg)">
-        <div style="position:absolute;left:50%;top:0;width:110px;height:16px;margin-left:-55px;background:linear-gradient(#7a5230,#5a3a22);border-radius:50%/60%;box-shadow:0 16px 24px rgba(0,0,0,0.4)"></div>
-        <div style="position:absolute;left:50%;top:14px;width:14px;height:110px;margin-left:-7px;background:linear-gradient(#5a3a22,#3a2414)"></div>
-        <div style="position:absolute;left:50%;bottom:0;width:84px;height:14px;margin-left:-42px;background:#3a2414;border-radius:50%"></div>
-        <div style="position:absolute;left:50%;top:-30px;margin-left:6px;width:34px;height:30px;background:linear-gradient(#e8ddc6,#cbbfa2);border-radius:5px 5px 10px 10px"></div>
-        <div style="position:absolute;left:50%;top:-26px;margin-left:38px;width:12px;height:16px;border:4px solid #cbbfa2;border-left:none;border-radius:0 10px 10px 0"></div>
-        ${tw(84, -46, 2.4, 'rgba(255,255,255,0.6)', 0.3)}${tw(92, -60, 2, 'rgba(255,255,255,0.45)', 1.4)}
-      </div>`;
-
-    const ceil = `<div class="haven-glow" style="position:absolute;left:50%;top:55%;width:700px;height:420px;margin-left:-350px;background:radial-gradient(ellipse,rgba(255,160,70,0.22),rgba(255,160,70,0) 70%)"></div>`;
-    return { back, left, right, floor, ceil, props };
-  }
-
-  function sceneBeach() {
-    const seaBand = (h) => `
-      <div class="hv-sea" style="height:${h}px">
-        <div class="shimmer"></div>
-        <div class="hv-wave" style="top:18%"></div>
-        <div class="hv-wave w2" style="top:44%"></div>
-        <div class="hv-wave w3" style="top:70%"></div>
-      </div>`;
-    const clouds = `
-      <div class="haven-drift" style="position:absolute;left:16%;top:14%;width:260px;height:54px;border-radius:60px;background:rgba(255,236,210,0.5);filter:blur(16px)"></div>
-      <div class="haven-drift" style="position:absolute;left:56%;top:22%;width:340px;height:64px;border-radius:70px;background:rgba(255,220,190,0.42);filter:blur(20px);animation-duration:30s"></div>`;
-    const back = `
-      ${clouds}
-      <div class="hv-sun" style="bottom:210px"></div>
-      <svg class="haven-drift" style="position:absolute;left:24%;top:26%;animation-duration:26s" width="140" height="40" viewBox="0 0 140 40"><g stroke="#4a2a44" stroke-width="3" fill="none" stroke-linecap="round"><path d="M8 20 q 10 -9 20 0"/><path d="M28 20 q 10 -9 20 0"/><path d="M78 10 q 8 -7 16 0"/><path d="M94 10 q 8 -7 16 0"/></g></svg>
-      <div style="position:absolute;right:14%;bottom:236px;width:220px;height:44px;border-radius:50% 50% 0 0/100% 100% 0 0;background:#5a3a5a;opacity:0.55"></div>
-      ${seaBand(230)}`;
-    const left = `${clouds}${seaBand(230)}`;
-    const right = `${clouds}${seaBand(230)}`;
-    const floor = `
-      <div style="position:absolute;left:8%;top:12%;width:120px;height:60px;border-radius:50%;background:rgba(0,0,0,0.12);filter:blur(6px)"></div>
-      <div class="hv-mat" style="left:50%;top:46%;width:460px;height:320px;margin-left:-230px;transform:rotate(-5deg)">
-        <div style="position:absolute;inset:14px;border:3px dashed rgba(255,255,255,0.35);border-radius:8px"></div>
-      </div>
-      <div style="position:absolute;left:26%;top:38%;width:70px;height:44px;border-radius:50%;background:rgba(90,60,40,0.6)"></div>
-      <div style="position:absolute;left:23%;top:41%;width:44px;height:30px;border-radius:50%;background:rgba(90,60,40,0.5)"></div>
-      <div style="position:absolute;right:14%;top:30%;width:230px;height:120px;border-radius:50%;background:rgba(0,0,0,0.16);filter:blur(10px)"></div>`;
-    const props = `
-      <div class="hv-prop" style="width:420px;height:560px;margin-left:-210px;margin-top:-280px;transform:translate3d(-560px,180px,-120px) rotateY(20deg)">
-        <svg width="420" height="560" viewBox="0 0 420 560">
-          <path d="M210 560 C 196 420 200 300 210 190 C 216 300 222 420 226 560 Z" fill="url(#hvTrunk)"/>
-          <defs><linearGradient id="hvTrunk" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#6b4a2e"/><stop offset="0.5" stop-color="#4a3018"/><stop offset="1" stop-color="#3a2412"/></linearGradient></defs>
-          <g fill="#1e3a28">
-            <path d="M212 196 C 130 150 60 160 10 200 C 80 168 160 178 212 210 Z"/>
-            <path d="M212 196 C 294 150 364 160 414 200 C 344 168 264 178 212 210 Z"/>
-            <path d="M210 190 C 180 110 190 50 226 10 C 200 70 208 140 220 196 Z"/>
-            <path d="M214 192 C 268 120 262 60 240 20 C 272 80 254 150 222 198 Z"/>
-            <path d="M210 194 C 150 140 130 90 140 40 C 148 100 180 160 216 200 Z"/>
-          </g>
-          <circle cx="206" cy="216" r="13" fill="#5a3a1e"/><circle cx="230" cy="208" r="11" fill="#4a3018"/>
-        </svg>
-      </div>
-      <div class="hv-prop" style="width:170px;height:130px;margin-left:-85px;margin-top:-65px;transform:translate3d(150px,395px,240px) rotateY(-14deg)">
-        <div style="position:absolute;left:0;right:0;bottom:24px;height:74px;background:repeating-linear-gradient(90deg,#a5722f 0 16px,#8a5c22 16px 30px);border-radius:10px 10px 14px 14px;box-shadow:0 16px 26px rgba(0,0,0,0.3)"></div>
-        <div style="position:absolute;left:-6px;right:-6px;bottom:92px;height:14px;background:#7a4f1c;border-radius:8px"></div>
-        <div style="position:absolute;left:50%;bottom:100px;width:90px;height:44px;margin-left:-45px;border:9px solid #7a4f1c;border-bottom:none;border-radius:48px 48px 0 0"></div>
-      </div>
-      <div class="hv-prop" style="width:120px;height:80px;margin-left:-60px;margin-top:-40px;transform:translate3d(-190px,415px,300px) rotateY(20deg)">
-        <div style="position:absolute;inset:8px 0;background:linear-gradient(#f4eee0,#ddd2ba);border-radius:6px;box-shadow:0 12px 20px rgba(0,0,0,0.28)"></div>
-        <div style="position:absolute;left:50%;top:8px;bottom:8px;width:3px;background:rgba(0,0,0,0.15)"></div>
-      </div>`;
-    const ceil = clouds;
-    return { back, left, right, floor, ceil, props };
-  }
-
-  function sceneCity() {
-    function building(x, w, h, hue, litRatio, bi) {
-      let wins = '';
-      let wi = 0;
-      for (let wy = 14; wy < h - 12; wy += 24) {
-        for (let wx = 10; wx < w - 10; wx += 20) {
-          const lit = ((bi * 7 + wi * 13) % 10) < litRatio * 10;
-          const twk = lit && (bi + wi) % 9 === 0;
-          wins += `<div ${twk ? 'class="haven-twinkle"' : ''} style="position:absolute;left:${wx}px;top:${wy}px;width:10px;height:13px;border-radius:1.5px;background:${lit ? hue : 'rgba(150,170,210,0.07)'};${twk ? `animation-delay:-${((wi % 5) * 0.8).toFixed(1)}s;` : ''}${lit ? 'box-shadow:0 0 7px rgba(255,210,140,0.28)' : ''}"></div>`;
-          wi++;
-        }
-      }
-      return `<div style="position:absolute;left:${x}px;bottom:0;width:${w}px;height:${h}px;background:linear-gradient(180deg,#151833,#0d1024);border-radius:4px 4px 0 0;box-shadow:inset 0 0 24px rgba(0,0,0,0.5)">${wins}</div>`;
-    }
-    const stars = [[70, 60], [190, 40], [320, 90], [470, 36], [620, 70], [780, 50], [930, 84], [1080, 44], [1230, 66], [1370, 96], [1470, 40]]
-      .map((p, i) => tw(p[0], p[1], 1.6, '#fff', i * 0.6)).join('');
-    const back = `
-      <div class="hv-cityview">
-        ${stars}
-        <div style="position:absolute;right:16%;top:8%;width:120px;height:120px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,0.32),rgba(255,255,255,0) 70%)"></div>
-        <div style="position:absolute;right:16%;top:8%;width:64px;height:64px;margin:28px;border-radius:50%;background:#f2f0e6;box-shadow:inset -12px -8px 18px rgba(190,190,175,0.7)"></div>
-        ${building(30, 150, 380, 'rgba(255,214,140,0.85)', 0.55, 1)}
-        ${building(200, 110, 300, 'rgba(150,210,220,0.75)', 0.4, 2)}
-        ${building(330, 180, 470, 'rgba(255,214,140,0.9)', 0.6, 3)}
-        ${building(530, 130, 340, 'rgba(255,190,120,0.8)', 0.45, 4)}
-        ${building(680, 200, 520, 'rgba(255,224,160,0.85)', 0.62, 5)}
-        <div class="haven-twinkle" style="position:absolute;left:772px;bottom:524px;width:8px;height:8px;border-radius:50%;background:#ff5a5a;box-shadow:0 0 10px 3px rgba(255,80,80,0.6);animation-duration:2.1s"></div>
-        ${building(910, 140, 400, 'rgba(160,200,230,0.75)', 0.5, 6)}
-        ${building(1070, 170, 460, 'rgba(255,214,140,0.85)', 0.55, 7)}
-        ${building(1260, 120, 320, 'rgba(255,190,120,0.8)', 0.42, 8)}
-        ${building(1400, 160, 430, 'rgba(255,224,160,0.85)', 0.58, 9)}
-        <div style="position:absolute;left:0;right:0;bottom:0;height:60px;background:linear-gradient(0deg,rgba(120,90,160,0.18),rgba(120,90,160,0))"></div>
-      </div>
-      <div class="hv-cityframe"><div class="mull" style="left:33%"></div><div class="mull" style="left:66%"></div></div>`;
-    const left = `
-      <div style="position:absolute;left:34%;top:22%;width:250px;height:170px;border:14px solid #100d1e;border-radius:6px;background:linear-gradient(140deg,#2a2145,#171230);box-shadow:0 16px 30px rgba(0,0,0,0.5)">
-        <div style="position:absolute;left:14px;bottom:12px;width:110px;height:70px;background:linear-gradient(0deg,#e668a0,#8a5adf);opacity:0.7;border-radius:4px"></div>
-        <div style="position:absolute;right:16px;top:14px;width:60px;height:60px;border-radius:50%;background:radial-gradient(circle,#ffd98a 30%,rgba(255,217,138,0) 70%)"></div>
-      </div>
-      <div style="position:absolute;left:30%;top:62%;width:320px;height:14px;background:#1c1730;border-radius:4px;box-shadow:0 12px 20px rgba(0,0,0,0.45)">
-        ${bookRow(5, 7).replace('bottom:0', 'bottom:14px')}
-      </div>`;
-    const right = `
-      <div style="position:absolute;left:30%;top:40%;width:190px;height:330px;background:linear-gradient(#241d3c,#181228);border:10px solid #100d1e;border-radius:10px;box-shadow:0 18px 34px rgba(0,0,0,0.5)">
-        <div style="position:absolute;inset:12px;background:linear-gradient(160deg,rgba(120,140,200,0.16),rgba(20,20,40,0.1));border-radius:4px"></div>
-      </div>
-      <div class="hv-lamp-glow" style="left:56%;top:30%"></div>`;
-    const floor = `
-      <div style="position:absolute;left:50%;top:40%;width:820px;height:520px;margin-left:-410px;border-radius:26px;background:linear-gradient(160deg,#332a4d,#241d3c);box-shadow:inset 0 0 50px rgba(0,0,0,0.35)"></div>
-      <div class="haven-glow" style="position:absolute;right:6%;top:26%;width:420px;height:360px;background:radial-gradient(ellipse,rgba(255,196,120,0.28),rgba(255,196,120,0) 70%)"></div>`;
-    const props = `
-      <div class="hv-prop" style="width:720px;height:300px;margin-left:-360px;margin-top:-150px;transform:translate3d(0px,310px,430px)">
-        <div style="position:absolute;left:0;right:0;bottom:0;height:150px;background:linear-gradient(#4b4168,#332a4d);border-radius:18px;box-shadow:0 26px 50px rgba(0,0,0,0.55)"></div>
-        <div style="position:absolute;left:10px;right:10px;bottom:96px;height:110px;background:linear-gradient(170deg,#efeaf6,#cdc3e0);border-radius:22px 22px 30px 30px;box-shadow:inset 0 -18px 28px rgba(90,80,130,0.35)"></div>
-        <div style="position:absolute;left:24px;right:24px;bottom:150px;height:52px;background:linear-gradient(#e2d9f0,#c4b8dd);border-radius:20px;transform:skewX(-2deg);box-shadow:inset 0 -10px 16px rgba(90,80,130,0.3)"></div>
-        <div style="position:absolute;left:70px;bottom:186px;width:200px;height:64px;background:linear-gradient(#f6f2fb,#dcd3ec);border-radius:20px;transform:rotate(-4deg);box-shadow:0 8px 16px rgba(0,0,0,0.25)"></div>
-        <div style="position:absolute;right:70px;bottom:186px;width:200px;height:64px;background:linear-gradient(#f6f2fb,#dcd3ec);border-radius:20px;transform:rotate(3deg);box-shadow:0 8px 16px rgba(0,0,0,0.25)"></div>
-      </div>
-      <div class="hv-prop" style="width:180px;height:250px;margin-left:-90px;margin-top:-125px;transform:translate3d(560px,335px,330px) rotateY(-18deg)">
-        <div style="position:absolute;left:0;right:0;bottom:0;height:120px;background:linear-gradient(#2c2444,#1e1834);border-radius:12px;box-shadow:0 18px 30px rgba(0,0,0,0.5)"></div>
-        <div style="position:absolute;left:50%;bottom:118px;width:10px;height:60px;margin-left:-5px;background:#141024"></div>
-        <div style="position:absolute;left:50%;bottom:170px;width:110px;height:56px;margin-left:-55px;background:linear-gradient(#ffd9a0,#f0b46a);border-radius:12px 12px 4px 4px;box-shadow:0 -6px 30px rgba(255,200,120,0.4)"></div>
-        <div class="haven-glow" style="position:absolute;left:50%;bottom:120px;width:240px;height:200px;margin-left:-120px;border-radius:50%;background:radial-gradient(circle,rgba(255,200,120,0.5),rgba(255,200,120,0) 70%)"></div>
-      </div>`;
-    const ceil = `<div class="haven-glow" style="position:absolute;right:10%;top:30%;width:480px;height:380px;background:radial-gradient(ellipse,rgba(255,196,120,0.14),rgba(255,196,120,0) 70%)"></div>`;
-    return { back, left, right, floor, ceil, props };
-  }
-
-  function buildScene() {
-    const s = theme === 'beach' ? sceneBeach() : theme === 'city' ? sceneCity() : sceneCabin();
-    world.innerHTML = `<div class="hv-sway"><div class="hv-room hv-${theme}">
-      <div class="hv-face hv-back">${s.back}</div>
-      <div class="hv-face hv-left">${s.left}</div>
-      <div class="hv-face hv-right">${s.right}</div>
-      <div class="hv-face hv-floor">${s.floor}</div>
-      <div class="hv-face hv-ceil">${s.ceil}</div>
-      ${s.props}
-    </div></div>`;
-  }
-
-  function applyCam(instant) {
-    const t = (CAMS[theme] || CAMS.cabin)[spot] || CAMS.cabin[0];
-    if (instant) { world.style.transition = 'none'; world.style.transform = t; void world.offsetHeight; world.style.transition = ''; }
-    else world.style.transform = t;
-  }
-
   function syncUi() {
     const sub = document.getElementById('haven-sub'); if (sub) sub.textContent = SUBS[theme] || '';
     document.querySelectorAll('#haven-fs .haven-theme-btn').forEach(b => b.classList.toggle('active', b.dataset.theme === theme));
     document.querySelectorAll('#haven-fs .haven-spot').forEach(b => b.classList.toggle('active', +b.dataset.spot === spot));
   }
 
-  // ---------- Cursor parallax + auto-hide UI ----------
-  let hideTimer = null, parallaxRaf = null, targetRx = 0, targetRy = 0, curRx = 0, curRy = 0;
+  // ---------- Auto-hide UI ----------
+  let hideTimer = null;
   function pokeUi() {
     fsEl.classList.remove('hide-ui');
     clearTimeout(hideTimer);
     hideTimer = setTimeout(() => fsEl.classList.add('hide-ui'), 3000);
   }
-  function onMove(e) {
-    if (isPhoneHaven()) return;
-    pokeUi();
-    const w = window.innerWidth, h = window.innerHeight;
-    targetRy = ((e.clientX / w) - 0.5) * 4;   // subtle look-around
-    targetRx = ((e.clientY / h) - 0.5) * -2.5;
-  }
-  function parallaxLoop() {
-    if (!isOpen || isPhoneHaven()) return;
-    curRx += (targetRx - curRx) * 0.045;
-    curRy += (targetRy - curRy) * 0.045;
-    const sway = world.querySelector('.hv-sway');
-    if (sway) sway.style.transform = `rotateX(${curRx.toFixed(3)}deg) rotateY(${curRy.toFixed(3)}deg)`;
-    parallaxRaf = requestAnimationFrame(parallaxLoop);
-  }
+  function onMove() { pokeUi(); }
   function onKey(e) { if (e.key === 'Escape') window.closeHaven(); else pokeUi(); }
 
-  async function enterHavenDisplayMode() {
-    const phone = isPhoneHaven();
-    fsEl.classList.toggle('haven-phone-landscape', phone);
-    fsEl.classList.toggle('haven-mobile-lite', phone);
-    document.body.classList.add('haven-open');
-    if (canUseNativeSystemBars()) {
-      SystemBars.hide().catch(() => {});
-    }
-    if (phone) {
-      try { await document.documentElement.requestFullscreen?.(); } catch (_) {}
-      try { await screen.orientation?.lock?.('landscape'); } catch (_) {}
-    }
-  }
-
-  function exitHavenDisplayMode() {
-    fsEl.classList.remove('haven-phone-landscape', 'haven-mobile-lite');
-    document.body.classList.remove('haven-open');
-    try { screen.orientation?.unlock?.(); } catch (_) {}
-    try {
-      if (document.fullscreenElement) document.exitFullscreen();
-    } catch (_) {}
-    if (canUseNativeSystemBars()) {
-      SystemBars.show().then(() => syncNativeSystemBars(localStorage.getItem('opennotes_theme') || 'light')).catch(() => {});
-    }
-  }
-
   // ---------- Public API ----------
-  window.openHaven = function () {
+  window.openHaven = async function () {
     if (isOpen) return;
     isOpen = true;
-    enterHavenDisplayMode();
-    buildScene();
-    applyCam(true);
-    syncUi();
     fsEl.style.display = 'block';
+    syncUi();
     const vol = document.getElementById('haven-volume'); if (vol) vol.value = volume;
     startAudio();
     pokeUi();
     document.addEventListener('mousemove', onMove);
     document.addEventListener('pointerdown', pokeUi);
     document.addEventListener('keydown', onKey);
-    targetRx = targetRy = curRx = curRy = 0;
-    if (!isPhoneHaven()) parallaxLoop();
+    try {
+      eng = eng || __havenEngine;
+      await eng.openHaven3D(viewport, theme, spot);
+    } catch (e) { console.error('Safe Haven engine failed to start', e); }
   };
+
   window.closeHaven = function () {
     if (!isOpen) return;
     isOpen = false;
     stopAudio();
-    exitHavenDisplayMode();
+    try { if (eng) eng.closeHaven3D(); } catch (_) {}
     fsEl.style.display = 'none';
-    world.innerHTML = '';
     clearTimeout(hideTimer);
-    cancelAnimationFrame(parallaxRaf);
     document.removeEventListener('mousemove', onMove);
     document.removeEventListener('pointerdown', pokeUi);
     document.removeEventListener('keydown', onKey);
   };
-  window.setHavenTheme = function (t) {
-    if (t === theme) return;
+
+  window.setHavenTheme = async function (t) {
+    if (t === theme) { syncUi(); return; }
     theme = t; localStorage.setItem('opennotes_haven_theme', t);
-    buildScene(); applyCam(true); syncUi();
-    if (isOpen) startAudio();
+    syncUi();
+    if (isOpen) {
+      startAudio();
+      try { if (eng) await eng.setHavenTheme3D(t); } catch (e) { console.error(e); }
+    }
   };
+
   window.setHavenSpot = function (s) {
     spot = s; localStorage.setItem('opennotes_haven_spot', String(s));
-    syncUi(); applyCam(false);
+    syncUi();
+    try { if (isOpen && eng) eng.setHavenSeat3D(s); } catch (_) {}
   };
+
   window.setHavenVolume = function (v) {
     volume = parseFloat(v); localStorage.setItem('opennotes_haven_vol', String(volume));
     if (master) master.gain.value = volume;
   };
+
   window.stopHaven = function () { if (isOpen) window.closeHaven(); };
 
   // ---------- Procedural ambience (Web Audio; per-theme) ----------

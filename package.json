@@ -29,8 +29,10 @@
     "@capacitor/android": "^8.4.1",
     "@capacitor/core": "^8.4.1",
     "@capacitor/preferences": "^8.0.1",
+    "aws4fetch": "^1.0.20",
     "convex": "^1.42.1",
-    "marked": "^18.0.5"
+    "marked": "^18.0.5",
+    "three": "^0.185.1"
   },
   "build": {
     "appId": "com.raj.yournotes",
@@ -80,7 +82,8 @@
       "dist/**/*",
       "electron-main.cjs",
       "preload.cjs",
-      "icon.png"
+      "icon.png",
+      "!node_modules/**"
     ]
   }
 }
