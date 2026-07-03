@@ -3,7 +3,7 @@ import './sync.js'
 import { Capacitor, SystemBars, SystemBarsStyle } from '@capacitor/core'
 import { ScreenOrientation } from '@capacitor/screen-orientation'
 // Static import (not dynamic): Electron cannot fetch lazy chunks out of app.asar
-import * as __havenEngine from './haven/scene2d.js'
+import * as __havenEngine from './haven/engine3d.js'
 
 // --- Data Persistence Override ---
 const _originalSetItem = Storage.prototype.setItem;
