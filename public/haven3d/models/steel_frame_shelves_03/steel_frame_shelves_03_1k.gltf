@@ -1,0 +1,515 @@
+{
+  "asset": {
+    "generator": "Khronos glTF Blender I/O v4.0.44",
+    "version": "2.0"
+  },
+  "scene": 0,
+  "scenes": [
+    {
+      "name": "Scene",
+      "nodes": [
+        0,
+        1,
+        2,
+        3
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "mesh": 0,
+      "name": "steel_frame_shelves_03"
+    },
+    {
+      "mesh": 1,
+      "name": "steel_frame_shelves_03_drawer_01",
+      "translation": [
+        -0.5146840214729309,
+        0.5844902992248535,
+        0.330425500869751
+      ]
+    },
+    {
+      "mesh": 2,
+      "name": "steel_frame_shelves_03_drawer_02",
+      "translation": [
+        -0.5146840214729309,
+        0.4684321880340576,
+        0.330425500869751
+      ]
+    },
+    {
+      "mesh": 3,
+      "name": "steel_frame_shelves_03_drawer_03",
+      "translation": [
+        -0.5146840214729309,
+        0.35096606612205505,
+        0.3304257392883301
+      ]
+    }
+  ],
+  "materials": [
+    {
+      "doubleSided": true,
+      "name": "steel_frame_shelves_03",
+      "normalTexture": {
+        "index": 0
+      },
+      "pbrMetallicRoughness": {
+        "baseColorTexture": {
+          "index": 1
+        },
+        "metallicRoughnessTexture": {
+          "index": 2
+        }
+      }
+    },
+    {
+      "doubleSided": true,
+      "name": "steel_frame_shelves_03_drawers",
+      "normalTexture": {
+        "index": 3
+      },
+      "pbrMetallicRoughness": {
+        "baseColorTexture": {
+          "index": 4
+        },
+        "metallicFactor": 0,
+        "metallicRoughnessTexture": {
+          "index": 5
+        }
+      }
+    }
+  ],
+  "meshes": [
+    {
+      "name": "Cube.001",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 0,
+            "NORMAL": 1,
+            "TEXCOORD_0": 2
+          },
+          "indices": 3,
+          "material": 0
+        },
+        {
+          "attributes": {
+            "POSITION": 4,
+            "NORMAL": 5,
+            "TEXCOORD_0": 6
+          },
+          "indices": 7,
+          "material": 1
+        }
+      ]
+    },
+    {
+      "name": "Cube.002",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 8,
+            "NORMAL": 9,
+            "TEXCOORD_0": 10
+          },
+          "indices": 11,
+          "material": 1
+        }
+      ]
+    },
+    {
+      "name": "Cube.004",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 12,
+            "NORMAL": 13,
+            "TEXCOORD_0": 14
+          },
+          "indices": 15,
+          "material": 1
+        }
+      ]
+    },
+    {
+      "name": "Cube.005",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 16,
+            "NORMAL": 17,
+            "TEXCOORD_0": 18
+          },
+          "indices": 19,
+          "material": 1
+        }
+      ]
+    }
+  ],
+  "textures": [
+    {
+      "sampler": 0,
+      "source": 0
+    },
+    {
+      "sampler": 0,
+      "source": 1
+    },
+    {
+      "sampler": 0,
+      "source": 2
+    },
+    {
+      "sampler": 0,
+      "source": 3
+    },
+    {
+      "sampler": 0,
+      "source": 4
+    },
+    {
+      "sampler": 0,
+      "source": 5
+    }
+  ],
+  "images": [
+    {
+      "mimeType": "image/jpeg",
+      "name": "steel_frame_shelves_03_nor_gl",
+      "uri": "textures/steel_frame_shelves_03_nor_gl_1k.jpg"
+    },
+    {
+      "mimeType": "image/jpeg",
+      "name": "steel_frame_shelves_03_diff",
+      "uri": "textures/steel_frame_shelves_03_diff_1k.jpg"
+    },
+    {
+      "mimeType": "image/jpeg",
+      "name": "steel_frame_shelves_03_metal-steel_frame_shelves_03_rough",
+      "uri": "textures/steel_frame_shelves_03_arm_1k.jpg"
+    },
+    {
+      "mimeType": "image/jpeg",
+      "name": "steel_frame_shelves_03_drawers_nor_gl",
+      "uri": "textures/steel_frame_shelves_03_drawers_nor_gl_1k.jpg"
+    },
+    {
+      "mimeType": "image/jpeg",
+      "name": "steel_frame_shelves_03_drawers_diff",
+      "uri": "textures/steel_frame_shelves_03_drawers_diff_1k.jpg"
+    },
+    {
+      "mimeType": "image/jpeg",
+      "name": "steel_frame_shelves_03_drawers_rough",
+      "uri": "textures/steel_frame_shelves_03_drawers_arm_1k.jpg"
+    }
+  ],
+  "accessors": [
+    {
+      "bufferView": 0,
+      "componentType": 5126,
+      "count": 3761,
+      "max": [
+        1.3066017627716064,
+        2.3116424083709717,
+        0.36013805866241455
+      ],
+      "min": [
+        -1.0443785190582275,
+        -0.00019049644470214844,
+        -0.3583051264286041
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 1,
+      "componentType": 5126,
+      "count": 3761,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 2,
+      "componentType": 5126,
+      "count": 3761,
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 3,
+      "componentType": 5123,
+      "count": 13740,
+      "type": "SCALAR"
+    },
+    {
+      "bufferView": 4,
+      "componentType": 5126,
+      "count": 790,
+      "max": [
+        1.2971062660217285,
+        1.7526829242706299,
+        0.3300355076789856
+      ],
+      "min": [
+        -1.0444751977920532,
+        0.27933594584465027,
+        -0.32823848724365234
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 5,
+      "componentType": 5126,
+      "count": 790,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 6,
+      "componentType": 5126,
+      "count": 790,
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 7,
+      "componentType": 5123,
+      "count": 2628,
+      "type": "SCALAR"
+    },
+    {
+      "bufferView": 8,
+      "componentType": 5126,
+      "count": 660,
+      "max": [
+        0.48217707872390747,
+        0.04987072944641113,
+        0.03251536190509796
+      ],
+      "min": [
+        -0.48217877745628357,
+        -0.04988223314285278,
+        -0.6157258152961731
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 9,
+      "componentType": 5126,
+      "count": 660,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 10,
+      "componentType": 5126,
+      "count": 660,
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 11,
+      "componentType": 5123,
+      "count": 2940,
+      "type": "SCALAR"
+    },
+    {
+      "bufferView": 12,
+      "componentType": 5126,
+      "count": 660,
+      "max": [
+        0.48217707872390747,
+        0.04976654052734375,
+        0.03251548111438751
+      ],
+      "min": [
+        -0.48217877745628357,
+        -0.049986332654953,
+        -0.6157256960868835
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 13,
+      "componentType": 5126,
+      "count": 660,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 14,
+      "componentType": 5126,
+      "count": 660,
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 15,
+      "componentType": 5123,
+      "count": 2940,
+      "type": "SCALAR"
+    },
+    {
+      "bufferView": 16,
+      "componentType": 5126,
+      "count": 660,
+      "max": [
+        0.48217707872390747,
+        0.04980561137199402,
+        0.03251524269580841
+      ],
+      "min": [
+        -0.48217877745628357,
+        -0.04994732141494751,
+        -0.6157259345054626
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 17,
+      "componentType": 5126,
+      "count": 660,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 18,
+      "componentType": 5126,
+      "count": 660,
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 19,
+      "componentType": 5123,
+      "count": 2940,
+      "type": "SCALAR"
+    }
+  ],
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteLength": 45132,
+      "byteOffset": 0,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 45132,
+      "byteOffset": 45132,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 30088,
+      "byteOffset": 90264,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 27480,
+      "byteOffset": 120352,
+      "target": 34963
+    },
+    {
+      "buffer": 0,
+      "byteLength": 9480,
+      "byteOffset": 147832,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 9480,
+      "byteOffset": 157312,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 6320,
+      "byteOffset": 166792,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 5256,
+      "byteOffset": 173112,
+      "target": 34963
+    },
+    {
+      "buffer": 0,
+      "byteLength": 7920,
+      "byteOffset": 178368,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 7920,
+      "byteOffset": 186288,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 5280,
+      "byteOffset": 194208,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 5880,
+      "byteOffset": 199488,
+      "target": 34963
+    },
+    {
+      "buffer": 0,
+      "byteLength": 7920,
+      "byteOffset": 205368,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 7920,
+      "byteOffset": 213288,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 5280,
+      "byteOffset": 221208,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 5880,
+      "byteOffset": 226488,
+      "target": 34963
+    },
+    {
+      "buffer": 0,
+      "byteLength": 7920,
+      "byteOffset": 232368,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 7920,
+      "byteOffset": 240288,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 5280,
+      "byteOffset": 248208,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 5880,
+      "byteOffset": 253488,
+      "target": 34963
+    }
+  ],
+  "samplers": [
+    {
+      "magFilter": 9729,
+      "minFilter": 9987
+    }
+  ],
+  "buffers": [
+    {
+      "byteLength": 259368,
+      "uri": "steel_frame_shelves_03.bin"
+    }
+  ]
+}
