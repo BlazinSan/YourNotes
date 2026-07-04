@@ -18,6 +18,7 @@ let sceneRoot = null, fireLight = null, flames = [];
 let camA = { pos: new THREE.Vector3(), tgt: new THREE.Vector3() };
 let camB = { pos: new THREE.Vector3(), tgt: new THREE.Vector3() };
 let camMix = 1;
+const basePos = new THREE.Vector3();   // camera position WITHOUT idle sway (sway added every frame on top)
 let mouse = { x: 0, y: 0 }, mouseT = { x: 0, y: 0 };
 const currentTarget = new THREE.Vector3();
 
@@ -91,7 +92,7 @@ function makeFire(root, x, y, z, scale) {
     s.scale.set(sc * 0.72, sc * 1.7, 1); s.position.set(x + (i - 3) * scale * 0.1, y + scale * 0.18, z);
     s.userData = { ph: Math.random() * 6, bx: s.position.x, by: s.position.y, sc }; root.add(s); flames.push(s);
   }
-  fireLight = new THREE.PointLight(0xff7a2a, 24, 11, 2); fireLight.position.set(x, y + scale * 0.6, z + 0.25); root.add(fireLight);
+  fireLight = new THREE.PointLight(0xff7a2a, 24, 11, 2); fireLight.position.set(x, y + scale * 0.6, z + 0.25); fireLight.castShadow = true; fireLight.shadow.mapSize.set(1024, 1024); fireLight.shadow.camera.near = 0.3; fireLight.shadow.camera.far = 12; fireLight.shadow.bias = -0.004; root.add(fireLight);
   const gm = new THREE.Mesh(new THREE.CircleGeometry(scale * 1.8, 24), new THREE.MeshBasicMaterial({ map: glowT, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, opacity: 0.4 })); gm.rotation.x = -Math.PI / 2; gm.position.set(x, 0.02, z + 0.5); root.add(gm);
 }
 
@@ -138,23 +139,40 @@ function cozyBed(root, x, z, ry) {
   for (const px of [-0.56, 0.56]) { const p = new THREE.Mesh(new THREE.BoxGeometry(0.94, 0.26, 0.56), stdMat({ color: 0xf1ebdc, roughness: 0.98 })); p.position.set(px, 0.86, -0.78); p.rotation.x = -0.32; g.add(p); }
   g.position.set(x, 0, z); if (ry) g.rotation.y = ry; root.add(g);
 }
+function rock(root, x, z, s, col) {
+  const geo = new THREE.DodecahedronGeometry(s, 0); const p = geo.attributes.position;
+  for (let i = 0; i < p.count; i++) { const j = 0.72 + (Math.abs(Math.sin(i * 12.9 + x)) * 0.5); p.setXYZ(i, p.getX(i) * j, p.getY(i) * (0.6 + 0.4 * j), p.getZ(i) * j); }
+  geo.computeVertexNormals();
+  const m = new THREE.Mesh(geo, stdMat({ color: col || 0x2a2438, roughness: 1 })); m.position.set(x, s * 0.35, z); m.rotation.set(x, z, x * 0.5); root.add(m); return m;
+}
 function buildBeach(root) {
-  // stylized gradient sunset sky (matches the lofi inspiration better than a photo HDRI)
-  const sky = new THREE.Mesh(new THREE.SphereGeometry(80, 40, 20), new THREE.MeshBasicMaterial({ side: THREE.BackSide, color: 0xb0b0b0, map: tex((x, w, h) => {
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(120, 40, 20), new THREE.MeshBasicMaterial({ side: THREE.BackSide, color: 0xb0b0b0, map: tex((x, w, h) => {
     const g = x.createLinearGradient(0, 0, 0, h); g.addColorStop(0, '#241a52'); g.addColorStop(0.34, '#6a3f8e'); g.addColorStop(0.52, '#b8567e'); g.addColorStop(0.64, '#d87a52'); g.addColorStop(0.71, '#e89a5a'); g.addColorStop(0.735, '#eaa864'); g.addColorStop(0.75, '#3f5f8e'); g.addColorStop(1, '#243056'); x.fillStyle = g; x.fillRect(0, 0, w, h);
-    for (let i = 0; i < 240; i++) { x.fillStyle = `rgba(255,255,255,${Math.random() * 0.6})`; x.fillRect(Math.random() * w, Math.random() * h * 0.45, 1.5, 1.5); }
+    for (let i = 0; i < 260; i++) { x.fillStyle = `rgba(255,255,255,${Math.random() * 0.6})`; x.fillRect(Math.random() * w, Math.random() * h * 0.45, 1.5, 1.5); }
   }, 2048, 1024) }));
-  sky.material.toneMapped = true; root.add(sky);
-  const sea = new THREE.Mesh(new THREE.PlaneGeometry(200, 200, 80, 80), new THREE.MeshStandardMaterial({ color: 0x38355e, roughness: 0.88, metalness: 0.04, envMapIntensity: 0.12 }));
-  sea.rotation.x = -Math.PI / 2; sea.position.y = -0.2; root.add(sea); root.userData.sea = sea;
-  // real sun on the horizon (world space, so it reads the same from every angle)
+  sky.material.toneMapped = true; sky.userData.noShadow = true; root.add(sky);
+  // sea (beyond the shoreline)
+  const sea = new THREE.Mesh(new THREE.PlaneGeometry(400, 400, 90, 90), new THREE.MeshStandardMaterial({ color: 0x38355e, roughness: 0.86, metalness: 0.05, envMapIntensity: 0.14 }));
+  sea.rotation.x = -Math.PI / 2; sea.position.set(0, -0.25, -40); sea.userData.noShadow = true; root.add(sea); root.userData.sea = sea;
+  // sandy shore in the foreground (receives shadows)
+  const sand = new THREE.Mesh(new THREE.PlaneGeometry(90, 44, 1, 1), stdMat({ color: 0x352c46, roughness: 1 })); sand.rotation.x = -Math.PI / 2; sand.position.set(0, 0, 12); sand.receiveShadow = true; sand.userData.noShadow = true; root.add(sand);
+  // wet foam line at the shore
+  const foam = new THREE.Mesh(new THREE.PlaneGeometry(90, 1.4), new THREE.MeshBasicMaterial({ color: 0xb9a6c8, transparent: true, opacity: 0.25 })); foam.rotation.x = -Math.PI / 2; foam.position.set(0, 0.01, -3); foam.userData.noShadow = true; root.add(foam);
+  // world-space sun on the horizon
   const sunT = tex((x, w, h) => { const g = x.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2); g.addColorStop(0, 'rgba(255,235,190,1)'); g.addColorStop(0.32, 'rgba(255,205,130,1)'); g.addColorStop(0.5, 'rgba(255,170,110,0.55)'); g.addColorStop(1, 'rgba(255,150,100,0)'); x.fillStyle = g; x.fillRect(0, 0, w, h); }, 128, 128);
-  const sun = new THREE.Sprite(new THREE.SpriteMaterial({ map: sunT, transparent: true, depthWrite: false })); sun.position.set(0, 1.4, -62); sun.scale.set(26, 26, 1); sun.material.toneMapped = true; root.add(sun);
-  const sunGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: sunT, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.5 })); sunGlow.position.set(0, 1.4, -61); sunGlow.scale.set(60, 60, 1); root.add(sunGlow);
-  const sunL = new THREE.DirectionalLight(0xffcaa0, 1.1); sunL.position.set(0, 4, -30); root.add(sunL);
-  root.add(new THREE.HemisphereLight(0xffb488, 0x2a2a5a, 0.55));
-  hut(root, 5, -9.5); palm(root, -4.6, -7.5); palm(root, -6.6, -10.5);
-  scene.fog = new THREE.FogExp2(0x2a2050, 0.009);
+  const sun = new THREE.Sprite(new THREE.SpriteMaterial({ map: sunT, transparent: true, depthWrite: false })); sun.position.set(0, 1.2, -62); sun.scale.set(26, 26, 1); sun.material.toneMapped = true; root.add(sun);
+  const sunGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: sunT, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.5 })); sunGlow.position.set(0, 1.2, -61); sunGlow.scale.set(60, 60, 1); root.add(sunGlow);
+  const sunL = new THREE.DirectionalLight(0xffcaa0, 1.5); sunL.position.set(-5, 6, -6); sunL.castShadow = true; sunL.shadow.mapSize.set(1024, 1024); const sc = sunL.shadow.camera; sc.left = -14; sc.right = 14; sc.top = 14; sc.bottom = -14; sc.near = 0.5; sc.far = 40; sunL.shadow.bias = -0.003; root.add(sunL);
+  root.add(new THREE.HemisphereLight(0xffb488, 0x2a2a5a, 0.5));
+  // bench facing the sea (back to camera, like the inspiration)
+  place(root, 'painted_wooden_bench', 0, 0, 1.5, 1.3, Math.PI);
+  // palms on the sand
+  palm(root, -5, 0.5); palm(root, -6.8, -1.5);
+  // rocks along the shore + foreground
+  rock(root, 3.5, -1.5, 0.6); rock(root, 4.4, -0.8, 0.4); rock(root, -3, 2.2, 0.5); rock(root, 2.4, 3, 0.35); rock(root, -4.6, 3.4, 0.45);
+  // stilt hut out on the water
+  hut(root, 8, -12);
+  scene.fog = new THREE.FogExp2(0x2a2050, 0.008);
 }
 function hut(root, x, z) {
   const g = new THREE.Group(); const m = stdMat({ color: 0x1a1226, roughness: 0.9 });
@@ -190,7 +208,7 @@ function bldgTex() {
 function cityBuildings(root) {
   // dusk sky backdrop far behind the city
   const sky = new THREE.Mesh(new THREE.PlaneGeometry(240, 110), new THREE.MeshBasicMaterial({ map: tex((x, w, h) => { const g = x.createLinearGradient(0, 0, 0, h); g.addColorStop(0, '#0c1230'); g.addColorStop(0.55, '#2a2450'); g.addColorStop(0.8, '#5a3a62'); g.addColorStop(1, '#8a4a5a'); x.fillStyle = g; x.fillRect(0, 0, w, h); x.fillStyle = '#eef2ff'; x.beginPath(); x.arc(w * 0.72, h * 0.24, 26, 0, 7); x.fill(); x.fillStyle = g; x.beginPath(); x.arc(w * 0.75, h * 0.2, 24, 0, 7); x.fill(); for (let i = 0; i < 140; i++) { x.fillStyle = `rgba(255,255,255,${Math.random() * 0.6})`; x.fillRect(Math.random() * w, Math.random() * h * 0.4, 1.4, 1.4); } }, 1024, 512) }));
-  sky.material.toneMapped = true; sky.position.set(0, 18, -48); root.add(sky);
+  sky.material.toneMapped = true; sky.position.set(0, 18, -48); sky.userData.noShadow = true; root.add(sky);
   // real 3D building field (parallax depth as the camera moves between angles)
   const texes = [bldgTex(), bldgTex(), bldgTex(), bldgTex()];
   const rand = (i) => { let s = Math.sin(i * 12.9898) * 43758.5453; return s - Math.floor(s); };
@@ -198,8 +216,18 @@ function cityBuildings(root) {
     const w = 2 + rand(i) * 3.5, d = 2 + rand(i + 99) * 3.5, hh = 6 + rand(i + 7) * 18;
     const t = texes[i % 4].clone(); t.repeat.set(Math.max(1, w / 2 | 0), Math.max(1, hh / 4 | 0)); t.wrapS = t.wrapT = THREE.RepeatWrapping;
     const b = new THREE.Mesh(new THREE.BoxGeometry(w, hh, d), new THREE.MeshBasicMaterial({ map: t }));
-    b.position.set((rand(i + 3) - 0.5) * 70, hh / 2 - 14.5, -7 - rand(i + 21) * 30); root.add(b);
+    b.position.set((rand(i + 3) - 0.5) * 70, hh / 2 - 14.5, -7 - rand(i + 21) * 30); b.userData.noShadow = true; root.add(b);
   }
+}
+function cityArt(root, x, y, z, ry, kind) {
+  const g = new THREE.Group();
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(0.07, 1.4, 1.8), stdMat({ color: 0x241812, roughness: 0.7 })); g.add(frame);
+  const t = tex((cx, w, h) => {
+    if (kind === 'car') { const gr = cx.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, '#2a1a3a'); gr.addColorStop(1, '#8a3a5a'); cx.fillStyle = gr; cx.fillRect(0, 0, w, h); cx.fillStyle = '#12101f'; cx.fillRect(w * 0.12, h * 0.5, w * 0.76, h * 0.34); cx.fillStyle = '#ff8a5a'; cx.fillRect(w * 0.2, h * 0.56, w * 0.6, 8); }
+    else { const gr = cx.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, '#33356a'); gr.addColorStop(0.6, '#c86a5a'); gr.addColorStop(1, '#f0a060'); cx.fillStyle = gr; cx.fillRect(0, 0, w, h); cx.fillStyle = '#ffe0a0'; cx.beginPath(); cx.arc(w * 0.5, h * 0.62, w * 0.16, 0, 7); cx.fill(); }
+  }, 256, 320);
+  const art = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.55), new THREE.MeshBasicMaterial({ map: t })); art.position.x = 0.05; art.rotation.y = Math.PI / 2; art.userData.noShadow = true; g.add(art);
+  g.position.set(x, y, z); g.rotation.y = ry; root.add(g);
 }
 function buildCity(root) {
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(16, 14), stdMat({ color: 0x191420, roughness: 0.55, metalness: 0.1 })); floor.rotation.x = -Math.PI / 2; root.add(floor);
@@ -215,22 +243,32 @@ function buildCity(root) {
   // mullion frame in the opening
   const fm = stdMat({ color: 0x181a2c, roughness: 0.6, metalness: 0.3 });
   addBox(root, 7.6, 0.14, 0.14, fm, 0, 2.9, -3.32); addBox(root, 0.14, 5, 0.14, fm, 0, 2.9, -3.32); addBox(root, 0.14, 5, 0.14, fm, -2.5, 2.9, -3.32); addBox(root, 0.14, 5, 0.14, fm, 2.5, 2.9, -3.32);
-  root.add(new THREE.HemisphereLight(0x8a7aa8, 0x241a30, 0.6));
-  const lamp = new THREE.PointLight(0xffb070, 3.6, 10); lamp.position.set(3.4, 1.6, 2.0); root.add(lamp);
-  const fill = new THREE.PointLight(0xbfc0e0, 1.0, 16); fill.position.set(-1, 3.4, 2.4); root.add(fill);
-  cozyBed(root, 0.8, 1.9, 0);
-  place(root, 'sofa_02', -3.6, 0, 0.9, 1.0, 0.6);
-  place(root, 'potted_plant_02', 4.6, 0, -1.4, 1.0, 0);
-  place(root, 'desk_lamp_arm_01', 3.1, 0.62, 2.0, 1.0, -0.6);
-  place(root, 'coffee_table_round_01', -1.9, 0, 2.6, 0.9, 0);
+  root.add(new THREE.HemisphereLight(0x8a7aa8, 0x241a30, 0.55));
+  const lamp = new THREE.PointLight(0xffb070, 3.4, 11); lamp.position.set(5.2, 1.5, 0.4); lamp.castShadow = true; lamp.shadow.mapSize.set(1024, 1024); lamp.shadow.camera.far = 14; lamp.shadow.bias = -0.004; root.add(lamp);
+  const fill = new THREE.PointLight(0xbfc0e0, 0.8, 18); fill.position.set(-2, 3.6, 3); root.add(fill);
+  // area rug
+  const rug = new THREE.Mesh(new THREE.PlaneGeometry(5.4, 3.6), stdMat({ color: 0x2e2038, roughness: 1 })); rug.rotation.x = -Math.PI / 2; rug.position.set(0.4, 0.02, 1.9); rug.receiveShadow = true; root.add(rug);
+  const rug2 = new THREE.Mesh(new THREE.PlaneGeometry(4.4, 2.7), stdMat({ color: 0x5a3a52, roughness: 1 })); rug2.rotation.x = -Math.PI / 2; rug2.position.set(0.4, 0.03, 1.9); root.add(rug2);
+  // bed (foreground right) + nightstand + reading lamp
+  place(root, 'vintage_day_bed', 2.7, 0, 1.4, 1.0, -0.45);
+  place(root, 'painted_wooden_nightstand', 5.4, 0, 0.0, 1.0, -0.3);
+  place(root, 'desk_lamp_arm_01', 5.4, 0.74, 0.0, 0.75, 0.6);
+  // sofa + coffee table + books (left) + plant + side table
+  place(root, 'sofa_02', -4.0, 0, 1.0, 1.0, 0.5);
+  place(root, 'coffee_table_round_01', -1.9, 0, 2.7, 0.9, 0);
+  place(root, 'book_encyclopedia_set_01', -1.9, 0.42, 2.7, 0.8, 0.3);
+  place(root, 'side_table_01', -6.4, 0, 0.4, 1.0, 0);
+  place(root, 'potted_plant_02', -6.3, 0, -1.4, 1.05, 0);
+  // wall art on the side walls
+  cityArt(root, -7.72, 3.3, -0.6, 0, 'sunset'); cityArt(root, 7.72, 3.3, 0.6, Math.PI, 'car');
   scene.fog = null;
 }
 const BUILDERS = { cabin: buildCabin, beach: buildBeach, city: buildCity };
 const HDRI_FOR = { cabin: 'cabin', beach: 'beach', city: 'city' };
 const MODELS_FOR = {
   cabin: ['modern_arm_chair_01', 'coffee_table_round_01', 'potted_plant_01', 'brass_candleholders', 'book_encyclopedia_set_01'],
-  beach: [],
-  city: ['sofa_02', 'potted_plant_02', 'desk_lamp_arm_01', 'coffee_table_round_01'],
+  beach: ['painted_wooden_bench'],
+  city: ['vintage_day_bed', 'sofa_02', 'potted_plant_02', 'desk_lamp_arm_01', 'coffee_table_round_01', 'painted_wooden_nightstand', 'side_table_01', 'book_encyclopedia_set_01'],
 };
 
 async function buildScene() {
@@ -245,6 +283,8 @@ async function buildScene() {
   scene.backgroundBlurriness = 0;
   sceneRoot = new THREE.Group();
   (BUILDERS[theme] || buildCabin)(sceneRoot);
+  // shadows: everything casts + receives (grounds the furniture)
+  sceneRoot.traverse(o => { if (o.isMesh && !o.userData.noShadow) { o.castShadow = true; o.receiveShadow = true; } });
   scene.add(sceneRoot);
   applyAngle(spot, true);
 }
@@ -253,8 +293,8 @@ function disposeTree(obj) { obj.traverse(o => { if (o.geometry && !o.userData.ke
 function applyAngle(sp, instant) {
   const a = (ANGLES[theme] || ANGLES.cabin)[sp] || ANGLES[theme][0];
   camB.pos.set(a.pos[0], a.pos[1], a.pos[2]); camB.tgt.set(a.tgt[0], a.tgt[1], a.tgt[2]);
-  if (instant) { camA.pos.copy(camB.pos); camA.tgt.copy(camB.tgt); camMix = 1; camera.position.copy(camB.pos); currentTarget.copy(camB.tgt); camera.lookAt(camB.tgt); }
-  else { camA.pos.copy(camera.position); camA.tgt.copy(currentTarget); camMix = 0; }
+  if (instant) { camA.pos.copy(camB.pos); camA.tgt.copy(camB.tgt); camMix = 1; basePos.copy(camB.pos); currentTarget.copy(camB.tgt); camera.position.copy(camB.pos); camera.lookAt(camB.tgt); }
+  else { camA.pos.copy(basePos); camA.tgt.copy(currentTarget); camMix = 0; }
 }
 function resize() { const r = container.getBoundingClientRect(); const w = r.width || innerWidth, h = r.height || innerHeight; renderer.setSize(w, h); composer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); }
 function onMove(e) { mouseT.x = (e.clientX / innerWidth) * 2 - 1; mouseT.y = (e.clientY / innerHeight) * 2 - 1; }
@@ -264,10 +304,11 @@ function loop() {
   // NOTE: getDelta() must be read first — getElapsedTime() also consumes the
   // internal delta, which would leave dt≈0 and freeze the camera tween.
   const dt = Math.min(0.05, clock.getDelta()), t = clock.elapsedTime;
-  if (camMix < 1) { camMix = Math.min(1, camMix + dt / 1.1); const e = camMix < 0.5 ? 2 * camMix * camMix : 1 - Math.pow(-2 * camMix + 2, 2) / 2; camera.position.lerpVectors(camA.pos, camB.pos, e); currentTarget.lerpVectors(camA.tgt, camB.tgt, e); }
-  else currentTarget.copy(camB.tgt);
+  if (camMix < 1) { camMix = Math.min(1, camMix + dt / 1.1); const e = camMix < 0.5 ? 2 * camMix * camMix : 1 - Math.pow(-2 * camMix + 2, 2) / 2; basePos.lerpVectors(camA.pos, camB.pos, e); currentTarget.lerpVectors(camA.tgt, camB.tgt, e); }
+  else { basePos.copy(camB.pos); currentTarget.copy(camB.tgt); }
   mouse.x += (mouseT.x - mouse.x) * 0.04; mouse.y += (mouseT.y - mouse.y) * 0.04;
-  if (camMix >= 1) camera.position.set(camB.pos.x + Math.sin(t * 0.3) * 0.05 + mouse.x * 0.22, camB.pos.y + Math.cos(t * 0.24) * 0.03 - mouse.y * 0.1, camB.pos.z);
+  // idle sway + mouse parallax applied continuously on top of the base position (no jump at transition end)
+  camera.position.set(basePos.x + Math.sin(t * 0.3) * 0.05 + mouse.x * 0.22, basePos.y + Math.cos(t * 0.24) * 0.03 - mouse.y * 0.1, basePos.z);
   camera.lookAt(currentTarget);
   if (fireLight) fireLight.intensity = 20 + Math.sin(t * 12) * 5 + Math.sin(t * 27) * 3 + (Math.random() - 0.5) * 3;
   for (const f of flames) { const u = f.userData; const fl = 1 + 0.18 * Math.sin(t * 9 + u.ph) + 0.1 * Math.sin(t * 19 + u.ph); f.scale.set(u.sc * 0.72 * (0.9 + 0.1 * Math.sin(t * 7 + u.ph)), u.sc * 1.7 * fl, 1); f.position.x = u.bx + Math.sin(t * 3 + u.ph) * 0.04; f.material.rotation = Math.sin(t * 2.3 + u.ph) * 0.13; }
@@ -280,6 +321,7 @@ export async function openHaven3D(el, th, sp) {
   renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.75));
   renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.0; renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.domElement.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;display:block;';
   container.appendChild(renderer.domElement);
   scene = new THREE.Scene(); scene.background = new THREE.Color(0x0a0705);

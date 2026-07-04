@@ -1,6 +1,6 @@
 {
   "asset": {
-    "generator": "Khronos glTF Blender I/O v5.1.20",
+    "generator": "Khronos glTF Blender I/O v1.6.8",
     "version": "2.0"
   },
   "scene": 0,
@@ -15,13 +15,13 @@
   "nodes": [
     {
       "mesh": 0,
-      "name": "old_bed_frame"
+      "name": "side_table_01"
     }
   ],
   "materials": [
     {
       "doubleSided": true,
-      "name": "old_bed_frame",
+      "name": "side_table_01",
       "normalTexture": {
         "index": 0
       },
@@ -37,17 +37,15 @@
   ],
   "meshes": [
     {
-      "name": "Plane.037",
+      "name": "Cube.011",
       "primitives": [
         {
           "attributes": {
             "POSITION": 0,
             "NORMAL": 1,
-            "TEXCOORD_0": 2,
-            "COLOR_0": 3,
-            "COLOR_1": 4
+            "TEXCOORD_0": 2
           },
-          "indices": 5,
+          "indices": 3,
           "material": 0
         }
       ]
@@ -70,106 +68,76 @@
   "images": [
     {
       "mimeType": "image/jpeg",
-      "name": "old_bed_frame_nor_gl",
-      "uri": "textures/old_bed_frame_nor_gl_1k.jpg"
+      "name": "side_table_01_gl_normal",
+      "uri": "textures/side_table_01_nor_gl_1k.jpg"
     },
     {
       "mimeType": "image/jpeg",
-      "name": "old_bed_frame_diff",
-      "uri": "textures/old_bed_frame_diff_1k.jpg"
+      "name": "side_table_01_BaseColor.png",
+      "uri": "textures/side_table_01_diff_1k.jpg"
     },
     {
       "mimeType": "image/jpeg",
-      "name": "old_bed_frame_metal-old_bed_frame_rough",
-      "uri": "textures/old_bed_frame_arm_1k.jpg"
+      "name": "side_table_01_metallic-side_table_01_roughness",
+      "uri": "textures/side_table_01_arm_1k.jpg"
     }
   ],
   "accessors": [
     {
       "bufferView": 0,
       "componentType": 5126,
-      "count": 35560,
+      "count": 3164,
       "max": [
-        0.4570513665676117,
-        1.2014838457107544,
-        1.0032745599746704
+        0.27500003576278687,
+        0.5483058094978333,
+        0.22500000894069672
       ],
       "min": [
-        -0.44760647416114807,
-        5.0353154534832356e-8,
-        -0.9984514713287354
+        -0.27500003576278687,
+        -0.0023564721923321486,
+        -0.22500000894069672
       ],
       "type": "VEC3"
     },
     {
       "bufferView": 1,
       "componentType": 5126,
-      "count": 35560,
+      "count": 3164,
       "type": "VEC3"
     },
     {
       "bufferView": 2,
       "componentType": 5126,
-      "count": 35560,
+      "count": 3164,
       "type": "VEC2"
     },
     {
       "bufferView": 3,
-      "componentType": 5121,
-      "count": 35560,
-      "normalized": true,
-      "type": "VEC4"
-    },
-    {
-      "bufferView": 4,
       "componentType": 5123,
-      "count": 35560,
-      "normalized": true,
-      "type": "VEC4"
-    },
-    {
-      "bufferView": 5,
-      "componentType": 5123,
-      "count": 149970,
+      "count": 8268,
       "type": "SCALAR"
     }
   ],
   "bufferViews": [
     {
       "buffer": 0,
-      "byteLength": 426720,
-      "byteOffset": 0,
-      "target": 34962
+      "byteLength": 37968,
+      "byteOffset": 0
     },
     {
       "buffer": 0,
-      "byteLength": 426720,
-      "byteOffset": 426720,
-      "target": 34962
+      "byteLength": 37968,
+      "byteOffset": 37968
     },
     {
       "buffer": 0,
-      "byteLength": 284480,
-      "byteOffset": 853440,
-      "target": 34962
+      "byteLength": 25312,
+      "byteOffset": 75936
     },
     {
       "buffer": 0,
-      "byteLength": 142240,
-      "byteOffset": 1137920,
-      "target": 34962
-    },
-    {
-      "buffer": 0,
-      "byteLength": 284480,
-      "byteOffset": 1280160,
-      "target": 34962
-    },
-    {
-      "buffer": 0,
-      "byteLength": 299940,
-      "byteOffset": 1564640,
-      "target": 34963
+      "byteLength": 16536,
+      "byteOffset": 101248
     }
   ],
   "samplers": [
@@ -180,8 +148,8 @@
   ],
   "buffers": [
     {
-      "byteLength": 1864580,
-      "uri": "old_bed_frame.bin"
+      "byteLength": 117784,
+      "uri": "side_table_01.bin"
     }
   ]
 }
