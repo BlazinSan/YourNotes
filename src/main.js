@@ -106,6 +106,46 @@ function showAppAlert(message = '') {
 
 window.alert = showAppAlert;
 
+let activeAppToast = null;
+let appToastTimer = null;
+function showAppToast(message = '', options = {}) {
+  if (!document.body) {
+    setTimeout(() => showAppToast(message, options), 0);
+    return null;
+  }
+  if (activeAppToast) activeAppToast.remove();
+  clearTimeout(appToastTimer);
+  const toast = document.createElement('div');
+  toast.className = 'app-toast';
+  toast.setAttribute('role', 'status');
+  toast.innerHTML = `
+    <span>${gsEscape(String(message))}</span>
+    <button type="button" aria-label="Dismiss notification">&times;</button>
+  `;
+  const dismiss = (persist = false) => {
+    if (!toast.isConnected) return;
+    toast.classList.add('is-hiding');
+    setTimeout(() => toast.remove(), 180);
+    if (activeAppToast === toast) activeAppToast = null;
+    if (persist && options.persistKey) localStorage.setItem(options.persistKey, '1');
+  };
+  let startX = 0, startY = 0;
+  toast.addEventListener('pointerdown', (e) => {
+    startX = e.clientX; startY = e.clientY;
+    try { toast.setPointerCapture(e.pointerId); } catch (_) {}
+  });
+  toast.addEventListener('pointerup', (e) => {
+    if (Math.abs(e.clientX - startX) > 44 || Math.abs(e.clientY - startY) > 36) dismiss(true);
+  });
+  toast.querySelector('button').addEventListener('click', () => dismiss(true));
+  document.body.appendChild(toast);
+  activeAppToast = toast;
+  if (options.duration !== 0) {
+    appToastTimer = setTimeout(() => dismiss(false), options.duration || 7200);
+  }
+  return toast;
+}
+
 // State
 let notes = JSON.parse(localStorage.getItem('opennotes_data')) || [];
 let activeNoteId = null;
@@ -1445,6 +1485,7 @@ function closeVisibleModal() {
 function handleAppBackNavigation() {
   if (closeAppAlert()) return true;
   closeBoardAddSheet();
+  if (closeBoardViewer()) return true;
 
   const haven = document.getElementById('haven-fs');
   if (haven && getComputedStyle(haven).display !== 'none' && window.closeHaven) {
@@ -1614,6 +1655,8 @@ function renderProjectCalendar() {
       
       let projectsHtml = '';
       if (dayNotes.length > 0) {
+        cell.classList.add('has-projects');
+        cell.dataset.projectCount = String(dayNotes.length);
         projectsHtml = `<div class="project-items-container">`;
         
         // Show only the latest 1 project created on this date
@@ -1641,6 +1684,7 @@ function renderProjectCalendar() {
             </div>
           `;
         }
+        projectsHtml += `<div class="project-count-dot" aria-label="${dayNotes.length} project${dayNotes.length === 1 ? '' : 's'}">${dayNotes.length}</div>`;
         
         projectsHtml += `</div>`;
       }
@@ -1826,8 +1870,13 @@ window.renderCalendar = function() {
 
       let eventsHtml = '';
       if (dayTasks.length > 0) {
+        cell.classList.add('has-events');
+        cell.dataset.eventCount = String(dayTasks.length);
         const pillStyle = dayColor ? ` style="background:${dayColor};color:#fff;"` : '';
-        eventsHtml = `<div class="event"${pillStyle}>${dayTasks[dayTasks.length - 1].event}</div>`;
+        eventsHtml = `
+          <div class="event"${pillStyle}>${gsEscape(dayTasks[dayTasks.length - 1].event)}</div>
+          <div class="event-dot" aria-label="${dayTasks.length} event${dayTasks.length === 1 ? '' : 's'}">${dayTasks.length}</div>
+        `;
       }
 
       cell.innerHTML = `
@@ -1902,6 +1951,7 @@ window.deleteCalendarEvent = function(index, year, month, date) {
   calendarTasks.splice(index, 1);
   localStorage.setItem('opennotes_calendar_tasks', JSON.stringify(calendarTasks));
   renderDayEvents(year, month, date);
+  renderCalendar();
 };
 
 let tasks = JSON.parse(localStorage.getItem('opennotes_tasks')) || [];
@@ -2393,6 +2443,7 @@ document.addEventListener('DOMContentLoaded', () => {
       calendarTasks.push({ date: activeDateIndex, month: month, year: year, event: text });
       localStorage.setItem('opennotes_calendar_tasks', JSON.stringify(calendarTasks));
       newEventInput.value = '';
+      renderCalendar();
       renderDayEvents(year, month, activeDateIndex);
     }
   }
@@ -3781,6 +3832,117 @@ function saveBoard() { localStorage.setItem('opennotes_board', JSON.stringify(bo
 // board_files names are safe (timestamp+random+ext) and userData has no spaces
 const fileUrlOf = (p) => 'file:///' + String(p).replace(/\\/g, '/');
 const isTouchLayout = () => window.matchMedia('(pointer: coarse), (max-width: 820px)').matches;
+let activeBoardViewer = null;
+
+function boardDb() {
+  if (!('indexedDB' in window)) return Promise.resolve(null);
+  if (boardDb._promise) return boardDb._promise;
+  boardDb._promise = new Promise((resolve) => {
+    const req = indexedDB.open('yn-board-files', 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('files');
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => resolve(null);
+  });
+  return boardDb._promise;
+}
+
+async function saveBoardBlob(fileId, file) {
+  const db = await boardDb();
+  if (!db) return false;
+  return new Promise((resolve) => {
+    const tx = db.transaction('files', 'readwrite');
+    tx.objectStore('files').put(file, fileId);
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => resolve(false);
+  });
+}
+
+async function boardBlobUrl(fileId) {
+  const db = await boardDb();
+  if (!db) return '';
+  return new Promise((resolve) => {
+    const tx = db.transaction('files', 'readonly');
+    const req = tx.objectStore('files').get(fileId);
+    req.onsuccess = () => resolve(req.result ? URL.createObjectURL(req.result) : '');
+    req.onerror = () => resolve('');
+  });
+}
+
+function closeBoardViewer() {
+  if (!activeBoardViewer) return false;
+  const url = activeBoardViewer.dataset.blobUrl;
+  if (url) URL.revokeObjectURL(url);
+  activeBoardViewer.remove();
+  activeBoardViewer = null;
+  return true;
+}
+
+function showBoardViewer(item, src, isBlob = false) {
+  closeBoardViewer();
+  const overlay = document.createElement('div');
+  overlay.className = 'board-viewer-overlay';
+  if (isBlob) overlay.dataset.blobUrl = src;
+  const isImage = item.type === 'image' || /^image\//.test(item.mime || '') || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(item.name || '');
+  const isPdf = /pdf/i.test(item.mime || '') || /\.pdf$/i.test(item.name || '');
+  overlay.innerHTML = `
+    <div class="board-viewer-card">
+      <div class="board-viewer-head">
+        <strong>${gsEscape(item.name || (isImage ? 'Pinned image' : 'Pinned file'))}</strong>
+        <button type="button" aria-label="Close pinned item">&times;</button>
+      </div>
+      <div class="board-viewer-body">
+        ${isImage ? `<img src="${src}" alt="${gsEscape(item.name || 'Pinned image')}">` : ''}
+        ${!isImage && isPdf ? `<iframe src="${src}" title="${gsEscape(item.name || 'Pinned file')}"></iframe>` : ''}
+        ${!isImage && !isPdf ? `<div class="board-viewer-file"><svg viewBox="0 0 24 24" width="42" height="42" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg><span>${gsEscape(item.name || 'Pinned file')}</span></div>` : ''}
+      </div>
+      <div class="board-viewer-actions">
+        <a href="${src}" target="_blank" rel="noopener" download="${gsEscape(item.name || 'pinned-file')}">Open file</a>
+      </div>
+    </div>
+  `;
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeBoardViewer(); });
+  overlay.querySelector('.board-viewer-head button').addEventListener('click', closeBoardViewer);
+  document.body.appendChild(overlay);
+  activeBoardViewer = overlay;
+}
+
+async function openBoardItem(item) {
+  if (!item || item.type === 'text') return false;
+  if (item.path && window.electronAPI && window.electronAPI.openPath) {
+    window.electronAPI.openPath(item.path);
+    return true;
+  }
+  if (item.dataUrl) {
+    showBoardViewer(item, item.dataUrl);
+    return true;
+  }
+  if (item.fileId) {
+    const url = await boardBlobUrl(item.fileId);
+    if (url) {
+      showBoardViewer(item, url, true);
+      return true;
+    }
+  }
+  const resolved = item.path && window.resolveFileUrl ? window.resolveFileUrl(fileUrlOf(item.path)) : '';
+  if (resolved && !String(resolved).startsWith('file:///')) {
+    showBoardViewer(item, resolved);
+    return true;
+  }
+  showAppToast('This pinned file is not available on this phone. Re-pin it here to open it.', { duration: 6200 });
+  return false;
+}
+
+function maybeShowBoardTipToast() {
+  if (!isTouchLayout() || localStorage.getItem('yn_board_tip_dismissed')) return;
+  if (maybeShowBoardTipToast._shown) return;
+  maybeShowBoardTipToast._shown = true;
+  setTimeout(() => {
+    showAppToast('Tip: drag/drop a file here to pin it to your dashboard.', {
+      persistKey: 'yn_board_tip_dismissed',
+      duration: 7600
+    });
+  }, 700);
+}
 
 function boardDefaultPoint(offset = 0) {
   const banner = document.getElementById('dashboard-banner');
@@ -3904,10 +4066,13 @@ async function addBoardFiles(files, origin = null) {
     if (isImg) {
       const dataUrl = await imageFileToDataUrl(f);
       if (dataUrl) {
-        boardItems.push({ id: 'b' + Date.now() + '-' + i, type: 'image', dataUrl, name: f.name, x: pos.x, y: pos.y, w: 220, h: 160 });
+        boardItems.push({ id: 'b' + Date.now() + '-' + i, type: 'image', dataUrl, name: f.name, mime: f.type, x: pos.x, y: pos.y, w: 220, h: 160 });
       }
     } else {
-      boardItems.push({ id: 'b' + Date.now() + '-' + i, type: 'file', name: f.name, x: pos.x, y: pos.y, w: 190, h: 90 });
+      const fileId = 'bf-' + Date.now() + '-' + i + '-' + Math.random().toString(36).slice(2);
+      const stored = await saveBoardBlob(fileId, f);
+      boardItems.push({ id: 'b' + Date.now() + '-' + i, type: 'file', name: f.name, mime: f.type, size: f.size, fileId: stored ? fileId : '', x: pos.x, y: pos.y, w: 190, h: 90 });
+      if (!stored) showAppToast('Pinned the file label, but this phone could not store the file data.', { duration: 6200 });
     }
   }
   saveBoard();
@@ -3962,9 +4127,10 @@ function renderBoard() {
     hint.style.display = boardItems.length ? 'none' : '';
     const label = hint.querySelector('span');
     if (label) label.textContent = isTouchLayout()
-      ? 'Tap + to pin files, images or notes'
+      ? ''
       : 'Drop files, images or notes here — they pin to your board';
   }
+  maybeShowBoardTipToast();
   const banner = document.getElementById('dashboard-banner');
   if (banner && !document.getElementById('board-mobile-add')) {
     const add = document.createElement('button');
@@ -4023,7 +4189,7 @@ function makeBoardCardInteractive(card, item) {
     const up = () => {
       card.removeEventListener('pointermove', move); card.removeEventListener('pointerup', up);
       if (moved) { card.classList.remove('dragging'); card.style.transform = 'rotate(' + rot + 'deg)'; saveBoard(); }
-      else if (item.type !== 'text' && item.path && window.electronAPI && window.electronAPI.openPath) { window.electronAPI.openPath(item.path); } // clean click → open
+      else if (item.type !== 'text') { openBoardItem(item); } // clean click → open
     };
     card.addEventListener('pointermove', move); card.addEventListener('pointerup', up);
   });
