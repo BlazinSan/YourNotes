@@ -345,6 +345,148 @@ function init() {
     img.src = dataUrl;
   }
 
+  function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function saveDashboardBannerBlob(blob, fileName = 'dashboard-cover.jpg') {
+    let url = '';
+    if (window.electronAPI && window.electronAPI.saveBoardFile) {
+      try {
+        const buf = await blob.arrayBuffer();
+        const osPath = await window.electronAPI.saveBoardFile(fileName || 'dashboard-cover.jpg', buf);
+        url = 'file:///' + String(osPath).replace(/\\/g, '/');
+      } catch (_) {
+        url = '';
+      }
+    }
+    if (!url) url = await blobToDataUrl(blob);
+    dashboardBanner.style.backgroundImage = `url(${url})`;
+    updateBannerTextColor(url);
+    try { localStorage.setItem('dashboardBanner', url); } catch (_) {}
+  }
+
+  function openBannerCropper(img, fileName = 'dashboard-cover.jpg') {
+    if (!dashboardBanner) return;
+    const rect = dashboardBanner.getBoundingClientRect();
+    const rawAspect = rect.width > 20 && rect.height > 20 ? rect.width / rect.height : 16 / 9;
+    const aspect = Math.max(0.62, Math.min(3.2, rawAspect));
+    const maxStageW = Math.min(460, Math.max(280, window.innerWidth - 44));
+    const maxStageH = Math.min(Math.max(260, window.innerHeight * 0.48), 520);
+    let stageW = maxStageW;
+    let stageH = stageW / aspect;
+    if (stageH > maxStageH) {
+      stageH = maxStageH;
+      stageW = stageH * aspect;
+    }
+    stageW = Math.max(240, Math.round(stageW));
+    stageH = Math.max(170, Math.round(stageH));
+
+    const overlay = document.createElement('div');
+    overlay.className = 'pic-crop-overlay cover-crop-overlay';
+    overlay.innerHTML = `
+      <div class="pic-crop-card cover-crop-card">
+        <h4>Crop dashboard cover</h4>
+        <p>Drag to frame the cover, then zoom until it feels right.</p>
+        <div class="cover-crop-stage" style="width:${stageW}px;height:${stageH}px">
+          <canvas width="${stageW}" height="${stageH}"></canvas>
+          <div class="cover-crop-mask"></div>
+        </div>
+        <input type="range" class="pic-crop-zoom" min="1" max="4" step="0.01" value="1" />
+        <div class="pic-crop-actions">
+          <button class="pic-crop-cancel">Cancel</button>
+          <button class="pic-crop-save">Save cover</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    const canvas = overlay.querySelector('canvas');
+    const ctx = canvas.getContext('2d');
+    const zoomEl = overlay.querySelector('.pic-crop-zoom');
+    const base = Math.max(stageW / img.width, stageH / img.height);
+    let zoom = 1;
+    let ox = 0;
+    let oy = 0;
+
+    function clampPan() {
+      const w = img.width * base * zoom;
+      const h = img.height * base * zoom;
+      ox = Math.min(Math.max(0, (w - stageW) / 2), Math.max(-Math.max(0, (w - stageW) / 2), ox));
+      oy = Math.min(Math.max(0, (h - stageH) / 2), Math.max(-Math.max(0, (h - stageH) / 2), oy));
+    }
+
+    function draw() {
+      clampPan();
+      const w = img.width * base * zoom;
+      const h = img.height * base * zoom;
+      ctx.fillStyle = '#efe5d4';
+      ctx.fillRect(0, 0, stageW, stageH);
+      ctx.drawImage(img, (stageW - w) / 2 + ox, (stageH - h) / 2 + oy, w, h);
+    }
+    draw();
+
+    let dragging = false;
+    let sx = 0;
+    let sy = 0;
+    let sox = 0;
+    let soy = 0;
+    const stage = overlay.querySelector('.cover-crop-stage');
+    stage.addEventListener('pointerdown', (e) => {
+      dragging = true;
+      sx = e.clientX;
+      sy = e.clientY;
+      sox = ox;
+      soy = oy;
+      try { stage.setPointerCapture(e.pointerId); } catch (_) {}
+    });
+    stage.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      ox = sox + (e.clientX - sx);
+      oy = soy + (e.clientY - sy);
+      draw();
+    });
+    stage.addEventListener('pointerup', () => { dragging = false; });
+    stage.addEventListener('pointercancel', () => { dragging = false; });
+    stage.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      zoom = Math.min(4, Math.max(1, zoom * (e.deltaY < 0 ? 1.08 : 1 / 1.08)));
+      zoomEl.value = zoom;
+      draw();
+    }, { passive: false });
+    zoomEl.addEventListener('input', () => {
+      zoom = parseFloat(zoomEl.value);
+      draw();
+    });
+
+    const close = () => overlay.remove();
+    overlay.querySelector('.pic-crop-cancel').onclick = close;
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    overlay.querySelector('.pic-crop-save').onclick = async () => {
+      const maxSide = 1800;
+      const outW = aspect >= 1 ? maxSide : Math.round(maxSide * aspect);
+      const outH = aspect >= 1 ? Math.round(maxSide / aspect) : maxSide;
+      const out = document.createElement('canvas');
+      out.width = Math.max(1, outW);
+      out.height = Math.max(1, outH);
+      const octx = out.getContext('2d');
+      const kx = out.width / stageW;
+      const ky = out.height / stageH;
+      const w = img.width * base * zoom;
+      const h = img.height * base * zoom;
+      octx.fillStyle = '#efe5d4';
+      octx.fillRect(0, 0, out.width, out.height);
+      octx.drawImage(img, ((stageW - w) / 2 + ox) * kx, ((stageH - h) / 2 + oy) * ky, w * kx, h * ky);
+      const blob = await new Promise(resolve => out.toBlob(resolve, 'image/jpeg', 0.9));
+      if (blob) await saveDashboardBannerBlob(blob, fileName.replace(/\.[^.]+$/, '') + '-cover.jpg');
+      close();
+    };
+  }
+
   // Dashboard Banner Initialization
   const savedBanner = localStorage.getItem('dashboardBanner');
   if (savedBanner && dashboardBanner) {
@@ -357,26 +499,18 @@ function init() {
     bannerUpload.addEventListener('change', async (e) => {
       const file = e.target.files[0];
       if (!file) return;
-      // Save the cover to disk (path only in the store) so the store stays small/fast.
-      if (window.electronAPI && window.electronAPI.saveBoardFile) {
-        try {
-          const buf = await file.arrayBuffer();
-          const osPath = await window.electronAPI.saveBoardFile(file.name || 'banner.png', buf);
-          const url = 'file:///' + String(osPath).replace(/\\/g, '/');
-          dashboardBanner.style.backgroundImage = `url(${url})`;
-          updateBannerTextColor(url);
-          localStorage.setItem('dashboardBanner', url);
-          return;
-        } catch (err) { /* fall through to inline data URL */ }
-      }
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        const dataUrl = ev.target.result;
-        dashboardBanner.style.backgroundImage = `url(${dataUrl})`;
-        updateBannerTextColor(dataUrl);
-        try { localStorage.setItem('dashboardBanner', dataUrl); } catch (_) {}
+      const objectUrl = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        openBannerCropper(img, file.name || 'dashboard-cover.jpg');
+        URL.revokeObjectURL(objectUrl);
       };
-      reader.readAsDataURL(file);
+      img.onerror = async () => {
+        URL.revokeObjectURL(objectUrl);
+        try { await saveDashboardBannerBlob(file, file.name || 'dashboard-cover.jpg'); } catch (_) {}
+      };
+      img.src = objectUrl;
+      e.target.value = '';
     });
   }
   
@@ -1403,6 +1537,9 @@ if (searchInput) {
 window.showPanel = function(panelId, btnId) {
   // Leaving the Session page? Stop the Safe Haven ambience so it doesn't play unseen.
   if (panelId !== 'home-session' && window.stopHaven) window.stopHaven();
+  if (document.body.classList.contains('sidebar-open') && window.matchMedia('(max-width: 820px), (pointer: coarse)').matches) {
+    document.body.classList.remove('sidebar-open');
+  }
   const dashboardBannerEl = document.getElementById('dashboard-banner');
   if (dashboardBannerEl) {
     if (panelId === 'home-grid' || panelId === 'home-graph') {
@@ -1429,6 +1566,7 @@ window.showPanel = function(panelId, btnId) {
     const activeEl = document.getElementById(panelId);
     if (activeEl) activeEl.style.display = 'flex';
   }
+  if (homePage) homePage.classList.toggle('graph-active', panelId === 'home-graph');
 
   const header = document.querySelector('.home-header');
   const controls = document.querySelector('.dashboard-controls');
@@ -1580,6 +1718,11 @@ window.showInnerTaskTab = function(tabId) {
   
   const activeNav = document.getElementById(`inner-nav-${tabId}`);
   if (activeNav) activeNav.classList.add('active');
+  if (activeNav && window.matchMedia('(max-width: 820px), (pointer: coarse)').matches) {
+    activeNav.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' });
+    const content = document.querySelector('.tasks-inner-content');
+    if (content) content.scrollTo({ top: 0, behavior: 'smooth' });
+  }
 
   if (tabId === 'projects') {
     renderProjectCalendar();
@@ -2805,6 +2948,56 @@ function initGraph() {
   graphCanvas.onmousedown = null;
   graphCanvas.onmousemove = null;
 
+  let pinchStart = null;
+  const touchMetrics = (touches) => {
+    const r = graphCanvas.getBoundingClientRect();
+    const a = touches[0];
+    const b = touches[1];
+    const ax = a.clientX - r.left;
+    const ay = a.clientY - r.top;
+    const bx = b.clientX - r.left;
+    const by = b.clientY - r.top;
+    return {
+      midX: (ax + bx) / 2,
+      midY: (ay + by) / 2,
+      dist: Math.max(1, Math.hypot(ax - bx, ay - by))
+    };
+  };
+  graphCanvas.ontouchstart = (e) => {
+    if (e.touches.length === 1) {
+      e.preventDefault();
+      return;
+    }
+    if (e.touches.length >= 2) {
+      e.preventDefault();
+      const m = touchMetrics(e.touches);
+      pinchStart = { ...m, scale, panX, panY };
+      draggedNode = null;
+      panning = false;
+      userAdjusted = true;
+    }
+  };
+  graphCanvas.ontouchmove = (e) => {
+    if (e.touches.length < 2 || !pinchStart) {
+      e.preventDefault();
+      return;
+    }
+    e.preventDefault();
+    const m = touchMetrics(e.touches);
+    const nextScale = Math.max(0.22, Math.min(4.5, pinchStart.scale * (m.dist / pinchStart.dist)));
+    const worldX = (pinchStart.midX - pinchStart.panX) / pinchStart.scale;
+    const worldY = (pinchStart.midY - pinchStart.panY) / pinchStart.scale;
+    scale = nextScale;
+    panX = m.midX - worldX * scale;
+    panY = m.midY - worldY * scale;
+  };
+  graphCanvas.ontouchend = (e) => {
+    if (e.touches.length < 2) pinchStart = null;
+  };
+  graphCanvas.ontouchcancel = () => {
+    pinchStart = null;
+  };
+
   // Wheel to zoom toward the cursor
   graphCanvas.onwheel = (e) => {
     e.preventDefault();
@@ -3879,11 +4072,11 @@ function closeBoardViewer() {
 
 function showBoardViewer(item, src, isBlob = false) {
   closeBoardViewer();
-  const overlay = document.createElement('div');
-  overlay.className = 'board-viewer-overlay';
-  if (isBlob) overlay.dataset.blobUrl = src;
   const isImage = item.type === 'image' || /^image\//.test(item.mime || '') || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(item.name || '');
   const isPdf = /pdf/i.test(item.mime || '') || /\.pdf$/i.test(item.name || '');
+  const overlay = document.createElement('div');
+  overlay.className = `board-viewer-overlay ${isImage ? 'board-viewer-image' : ''} ${isPdf ? 'board-viewer-pdf' : ''}`;
+  if (isBlob) overlay.dataset.blobUrl = src;
   overlay.innerHTML = `
     <div class="board-viewer-card">
       <div class="board-viewer-head">
@@ -5146,8 +5339,8 @@ window.toggleMobileSidebar = function (force) {
 document.addEventListener('click', (e) => {
   if (window.innerWidth > 820) return;
   if (!document.body.classList.contains('sidebar-open')) return;
-  const nav = e.target.closest('.sidebar .nav-link, .sidebar button, .sidebar a');
-  if (nav) setTimeout(() => window.toggleMobileSidebar(false), 120);
+  const nav = e.target.closest('.sidebar .nav-link, .sidebar .sidebar-profile');
+  if (nav) window.toggleMobileSidebar(false);
 });
 
 // ============================================================
