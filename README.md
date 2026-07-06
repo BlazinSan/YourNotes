@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="icon.png" width="120" alt="YourNotes Icon">
+  <img width="230" height="230"  alt="YourNotes Icon (1)" src="https://github.com/user-attachments/assets/93a3d879-2db0-4ab7-8222-9f13d213885e" />
   <h1>YourNotes</h1>
   <p><b>My personal productivity workspace</b> — notes, tasks, college PDFs, a focus session with lofi, and an expense tracker, all in one calm desktop app.</p>
   <p>
