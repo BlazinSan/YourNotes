@@ -17,6 +17,7 @@
     "package:linux": "npm run build && electron-builder -l"
   },
   "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
     "@capacitor/cli": "^8.4.1",
     "chrome-remote-interface": "^0.34.0",
     "concurrently": "^10.0.3",
