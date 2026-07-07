@@ -185,9 +185,12 @@ window.syncNow = async function () {
         meta[row.key] = { h: strHash(value), t: row.updatedAt };
       }
     }
-    // 2) push keys that changed locally (chunking values over the 1 MiB cap)
+    // 2) upload any files referenced in local storage that aren't marked as uploaded
+    const allSyncValues = SYNC_KEYS.map(k => localStorage.getItem(k)).filter(Boolean);
+    await uploadReferencedFiles(token, allSyncValues);
+
+    // 3) push keys that changed locally (chunking values over the 1 MiB cap)
     const now = Date.now();
-    const changedValues = [];      // for file-reference scanning
     const rowsToWrite = [];        // flat KV rows (incl. chunk rows)
     const changedMeta = {};        // main-key -> hash, applied after success
     for (const k of SYNC_KEYS) {
@@ -195,7 +198,6 @@ window.syncNow = async function () {
       if (v === null || v === undefined) continue;
       const h = strHash(v);
       if (meta[k] && meta[k].h === h) continue;
-      changedValues.push(v);
       changedMeta[k] = h;
       if (v.length <= KV_CHUNK) {
         rowsToWrite.push({ key: k, value: v, updatedAt: now });
@@ -206,7 +208,6 @@ window.syncNow = async function () {
       }
     }
     if (rowsToWrite.length) {
-      await uploadReferencedFiles(token, changedValues);
       // send in size-bounded batches so a single mutation call never exceeds arg limits
       let batch = [], size = 0;
       for (const r of rowsToWrite) {

@@ -4220,7 +4220,7 @@ function showBoardViewer(item, src, isBlob = false) {
         <button type="button" aria-label="Close pinned item">&times;</button>
       </div>
       <div class="board-viewer-body">
-        ${isImage ? `<img src="${src}" alt="${gsEscape(item.name || 'Pinned image')}">` : ''}
+        ${isImage ? `<div class="board-viewer-img-wrap" style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; overflow:hidden;"><img src="${src}" alt="${gsEscape(item.name || 'Pinned image')}"></div>` : ''}
         ${!isImage && isPdf ? `<iframe src="${iframeSrc}" title="${gsEscape(item.name || 'Pinned file')}"></iframe>` : ''}
         ${!isImage && !isPdf ? `<div class="board-viewer-file"><svg viewBox="0 0 24 24" width="42" height="42" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg><span>${gsEscape(item.name || 'Pinned file')}</span></div>` : ''}
       </div>
@@ -4235,7 +4235,7 @@ function showBoardViewer(item, src, isBlob = false) {
   activeBoardViewer = overlay;
 
   if (isImage) {
-    const imgEl = overlay.querySelector('.board-viewer-body img');
+    const imgEl = overlay.querySelector('.board-viewer-img-wrap img');
     if (imgEl) enablePinchToZoom(imgEl);
   }
 }
@@ -4502,6 +4502,11 @@ function renderBoard() {
       : 'Drop files, images or notes here — they pin to your board';
   }
   maybeShowBoardTipToast();
+
+  const banner = document.getElementById('dashboard-banner');
+  const boardWidth = banner ? banner.clientWidth : 1000;
+  const scale = boardWidth / 1000;
+
   let assigned = false;
   boardItems.forEach(item => {
     // Give each pinned item a stable slight tilt + pin colour once (never upside-down/90°).
@@ -4509,8 +4514,8 @@ function renderBoard() {
     const card = document.createElement('div');
     card.className = 'board-card board-' + item.type;
     card.dataset.boardId = item.id;
-    card.style.left = item.x + 'px'; card.style.top = item.y + 'px';
-    card.style.width = item.w + 'px'; card.style.height = item.h + 'px';
+    card.style.left = (item.x * scale) + 'px'; card.style.top = (item.y * scale) + 'px';
+    card.style.width = (item.w * scale) + 'px'; card.style.height = (item.h * scale) + 'px';
     card.style.transform = 'rotate(' + (item.rot || 0) + 'deg)';
     let inner = '';
     if (item.type === 'image') {
@@ -4549,16 +4554,31 @@ function renderBoard() {
 }
 
 function makeBoardCardInteractive(card, item) {
+  // Capture clean click event to prevent WebView navigation crash
+  card.addEventListener('click', (e) => {
+    const link = e.target.closest('a');
+    if (link) {
+      e.preventDefault();
+      e.stopPropagation();
+      window.open(link.href, '_blank');
+    }
+  });
+
   card.addEventListener('pointerdown', (e) => {
     const link = e.target.closest('a');
     if (link) {
+      e.preventDefault();
       e.stopPropagation();
-      window.open(link.href, '_blank');
       return;
     }
     if (e.target.closest('.board-resize') || e.target.closest('.board-del')) return;
     if (item.type === 'text' && e.target.closest('.board-text-content')) return; // let text editing work
     e.stopPropagation();
+
+    const banner = document.getElementById('dashboard-banner');
+    const boardWidth = banner ? banner.clientWidth : 1000;
+    const scale = boardWidth / 1000;
+
     const sx = e.clientX, sy = e.clientY, ox = item.x, oy = item.y;
     const rot = item.rot || 0;
     let moved = false; // a real drag only once the pointer travels past a small threshold
@@ -4568,8 +4588,12 @@ function makeBoardCardInteractive(card, item) {
         if (Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) <= 4) return; // still a click
         moved = true; card.classList.add('dragging'); card.style.transform = 'rotate(' + rot + 'deg) scale(1.03)';
       }
-      item.x = Math.max(0, ox + (ev.clientX - sx)); item.y = Math.max(0, oy + (ev.clientY - sy));
-      card.style.left = item.x + 'px'; card.style.top = item.y + 'px';
+      const dx = (ev.clientX - sx) / scale;
+      const dy = (ev.clientY - sy) / scale;
+      item.x = Math.max(0, Math.round(ox + dx)); 
+      item.y = Math.max(0, Math.round(oy + dy));
+      card.style.left = (item.x * scale) + 'px'; 
+      card.style.top = (item.y * scale) + 'px';
     };
     const up = () => {
       card.removeEventListener('pointermove', move); card.removeEventListener('pointerup', up);
@@ -4578,16 +4602,31 @@ function makeBoardCardInteractive(card, item) {
     };
     card.addEventListener('pointermove', move); card.addEventListener('pointerup', up);
   });
+
   const handle = card.querySelector('.board-resize');
-  handle.addEventListener('pointerdown', (e) => {
-    e.stopPropagation(); e.preventDefault();
-    const sx = e.clientX, sy = e.clientY, ow = item.w, oh = item.h;
-    try { handle.setPointerCapture(e.pointerId); } catch (_) {}
-    card.classList.add('dragging');
-    const move = (ev) => { item.w = Math.max(90, ow + (ev.clientX - sx)); item.h = Math.max(60, oh + (ev.clientY - sy)); card.style.width = item.w + 'px'; card.style.height = item.h + 'px'; };
-    const up = () => { card.classList.remove('dragging'); handle.removeEventListener('pointermove', move); handle.removeEventListener('pointerup', up); saveBoard(); };
-    handle.addEventListener('pointermove', move); handle.addEventListener('pointerup', up);
-  });
+  if (handle) {
+    handle.addEventListener('pointerdown', (e) => {
+      e.stopPropagation(); e.preventDefault();
+
+      const banner = document.getElementById('dashboard-banner');
+      const boardWidth = banner ? banner.clientWidth : 1000;
+      const scale = boardWidth / 1000;
+
+      const sx = e.clientX, sy = e.clientY, ow = item.w, oh = item.h;
+      try { handle.setPointerCapture(e.pointerId); } catch (_) {}
+      card.classList.add('dragging');
+      const move = (ev) => { 
+        const dx = (ev.clientX - sx) / scale;
+        const dy = (ev.clientY - sy) / scale;
+        item.w = Math.max(90, Math.round(ow + dx)); 
+        item.h = Math.max(60, Math.round(oh + dy)); 
+        card.style.width = (item.w * scale) + 'px'; 
+        card.style.height = (item.h * scale) + 'px'; 
+      };
+      const up = () => { card.classList.remove('dragging'); handle.removeEventListener('pointermove', move); handle.removeEventListener('pointerup', up); saveBoard(); };
+      handle.addEventListener('pointermove', move); handle.addEventListener('pointerup', up);
+    });
+  }
 }
 
 // -----------------------------------------
@@ -5541,7 +5580,10 @@ function syncGlobalSearchPlaceholder() {
     : 'Search everything — notes, folders, PDFs, tasks, links...';
 }
 syncGlobalSearchPlaceholder();
-window.addEventListener('resize', syncGlobalSearchPlaceholder);
+window.addEventListener('resize', () => {
+  syncGlobalSearchPlaceholder();
+  renderBoard();
+});
 
 // ============================================================
 // Mobile drawer sidebar (Android app + narrow windows)
