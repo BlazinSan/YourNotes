@@ -3800,16 +3800,46 @@ body.haven-open {
   }
 
   #board-mobile-add {
-    display: flex;
+    display: none !important;
   }
 
   .dashboard-banner.expanded #dashboard-board {
     pointer-events: auto;
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px 12px;
+    overflow-y: auto;
+    background: rgba(0, 0, 0, 0.2);
   }
 
   .board-card {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
+    position: relative !important;
+    left: 0 !important;
+    top: 0 !important;
+    transform: none !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    min-height: 80px;
+  }
+
+  .board-card.board-image {
+    height: 200px !important;
+  }
+
+  .board-card.board-file {
+    height: 90px !important;
+  }
+
+  .board-card.board-text {
+    height: 140px !important;
   }
 
   .board-del,
@@ -3820,9 +3850,11 @@ body.haven-open {
   }
 
   .board-resize {
-    width: 26px;
-    height: 26px;
-    opacity: 0.7;
+    display: none !important;
+  }
+
+  .board-pin {
+    display: none !important;
   }
 
   .dashboard-banner.expanded .banner-controls {
@@ -5376,16 +5408,19 @@ body.haven-open {
     min-height: 0 !important;
     padding: 8px;
     overflow: hidden !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
   }
 
   .board-viewer-image .board-viewer-body img {
     display: block;
-    width: 100% !important;
-    height: 100% !important;
     max-width: 100% !important;
     max-height: 100% !important;
+    width: auto !important;
+    height: auto !important;
     object-fit: contain !important;
-    object-position: center center !important;
+    margin: auto !important;
     border-radius: 12px;
   }
 

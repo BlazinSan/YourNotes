@@ -4207,6 +4207,12 @@ function showBoardViewer(item, src, isBlob = false) {
   const overlay = document.createElement('div');
   overlay.className = `board-viewer-overlay ${isImage ? 'board-viewer-image' : ''} ${isPdf ? 'board-viewer-pdf' : ''}`;
   if (isBlob) overlay.dataset.blobUrl = src;
+
+  let iframeSrc = src;
+  if (!isImage && isPdf && isTouchLayout() && (src.startsWith('http://') || src.startsWith('https://'))) {
+    iframeSrc = `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(src)}`;
+  }
+
   overlay.innerHTML = `
     <div class="board-viewer-card">
       <div class="board-viewer-head">
@@ -4215,7 +4221,7 @@ function showBoardViewer(item, src, isBlob = false) {
       </div>
       <div class="board-viewer-body">
         ${isImage ? `<img src="${src}" alt="${gsEscape(item.name || 'Pinned image')}">` : ''}
-        ${!isImage && isPdf ? `<iframe src="${src}" title="${gsEscape(item.name || 'Pinned file')}"></iframe>` : ''}
+        ${!isImage && isPdf ? `<iframe src="${iframeSrc}" title="${gsEscape(item.name || 'Pinned file')}"></iframe>` : ''}
         ${!isImage && !isPdf ? `<div class="board-viewer-file"><svg viewBox="0 0 24 24" width="42" height="42" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg><span>${gsEscape(item.name || 'Pinned file')}</span></div>` : ''}
       </div>
       <div class="board-viewer-actions">
@@ -4227,7 +4233,32 @@ function showBoardViewer(item, src, isBlob = false) {
   overlay.querySelector('.board-viewer-head button').addEventListener('click', closeBoardViewer);
   document.body.appendChild(overlay);
   activeBoardViewer = overlay;
+
+  if (isImage) {
+    const imgEl = overlay.querySelector('.board-viewer-body img');
+    if (imgEl) enablePinchToZoom(imgEl);
+  }
 }
+
+window.viewBoardPDF = function(name, src) {
+  const modal = document.getElementById('college-pdf-viewer-modal');
+  const titleEl = document.getElementById('college-pdf-viewer-title');
+  const iframe = document.getElementById('college-pdf-iframe');
+  const noteContentEl = document.getElementById('college-note-viewer-content');
+
+  if (modal && titleEl && iframe && noteContentEl) {
+    titleEl.textContent = name;
+    noteContentEl.style.display = 'none';
+    iframe.style.display = 'block';
+    
+    let targetSrc = src;
+    if (isTouchLayout() && (src.startsWith('http://') || src.startsWith('https://'))) {
+      targetSrc = `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(src)}`;
+    }
+    iframe.src = targetSrc;
+    modal.style.display = 'flex';
+  }
+};
 
 async function openBoardItem(item) {
   if (!item || item.type === 'text') return false;
@@ -4236,19 +4267,31 @@ async function openBoardItem(item) {
     return true;
   }
   if (item.dataUrl) {
-    showBoardViewer(item, item.dataUrl);
+    if (item.type === 'file' && /\.pdf$/i.test(item.name || '')) {
+      window.viewBoardPDF(item.name, item.dataUrl);
+    } else {
+      showBoardViewer(item, item.dataUrl);
+    }
     return true;
   }
   if (item.fileId) {
     const url = await boardBlobUrl(item.fileId);
     if (url) {
-      showBoardViewer(item, url, true);
+      if (item.type === 'file' && /\.pdf$/i.test(item.name || '')) {
+        window.viewBoardPDF(item.name, url);
+      } else {
+        showBoardViewer(item, url, true);
+      }
       return true;
     }
   }
   const resolved = item.path && window.resolveFileUrl ? window.resolveFileUrl(fileUrlOf(item.path)) : '';
   if (resolved && !String(resolved).startsWith('file:///')) {
-    showBoardViewer(item, resolved);
+    if (item.type === 'file' && /\.pdf$/i.test(item.name || '')) {
+      window.viewBoardPDF(item.name, resolved);
+    } else {
+      showBoardViewer(item, resolved);
+    }
     return true;
   }
   showAppToast('This pinned file is not available on this phone. Re-pin it here to open it.', { duration: 6200 });
@@ -4441,6 +4484,11 @@ function boardPinSvg(color) {
     + '<ellipse cx="17.5" cy="11" rx="4.5" ry="3" fill="rgba(255,255,255,0.5)"/>'
     + '</svg>';
 }
+function linkifyText(text) {
+  const urlRegex = /(https?:\/\/[^\s<]+)/g;
+  return gsEscape(text || '').replace(urlRegex, '<a href="$1" class="board-link" style="color: var(--accent-color); text-decoration: underline;" target="_blank">$1</a>');
+}
+
 function renderBoard() {
   const board = document.getElementById('dashboard-board');
   if (!board) return;
@@ -4454,16 +4502,6 @@ function renderBoard() {
       : 'Drop files, images or notes here — they pin to your board';
   }
   maybeShowBoardTipToast();
-  const banner = document.getElementById('dashboard-banner');
-  if (banner && !document.getElementById('board-mobile-add')) {
-    const add = document.createElement('button');
-    add.id = 'board-mobile-add';
-    add.type = 'button';
-    add.title = 'Add pin';
-    add.innerHTML = '<span>+</span>';
-    add.addEventListener('click', window.openBoardAddSheet);
-    banner.appendChild(add);
-  }
   let assigned = false;
   boardItems.forEach(item => {
     // Give each pinned item a stable slight tilt + pin colour once (never upside-down/90°).
@@ -4480,11 +4518,16 @@ function renderBoard() {
       inner = `<div class="board-body board-img" style="background-image:url('${imgUrl}')"></div>`;
     }
     else if (item.type === 'file') inner = `<div class="board-body board-file"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg><span>${gsEscape(item.name || 'File')}</span></div>`;
-    else inner = `<div class="board-body board-text" contenteditable="true">${gsEscape(item.text || '')}</div>`;
+    else {
+      // Split into a non-editable top header drag zone and an editable content area below
+      inner = `<div class="board-body board-text"><div class="board-text-header" style="height:14px; margin-bottom:4px; cursor:grab;"></div><div class="board-text-content" contenteditable="true" style="outline:none; height:calc(100% - 18px); overflow:auto;">${linkifyText(item.text || '')}</div></div>`;
+    }
     card.innerHTML = `<div class="board-pin">${boardPinSvg(BOARD_PIN_COLORS[item.pin || 0])}</div>` + inner + `<button class="board-del" title="Remove">&times;</button><div class="board-resize"></div>`;
     card.onclick = (ev) => ev.stopPropagation();
-    const bodyEl = card.querySelector('.board-body');
-    if (item.type === 'text') bodyEl.onblur = () => { item.text = bodyEl.innerText; saveBoard(); };
+    const bodyContentEl = card.querySelector('.board-text-content');
+    if (item.type === 'text' && bodyContentEl) {
+      bodyContentEl.onblur = () => { item.text = bodyContentEl.innerText; saveBoard(); };
+    }
     card.querySelector('.board-del').onclick = (ev) => {
       ev.stopPropagation();
       trashItems.push({
@@ -4507,8 +4550,14 @@ function renderBoard() {
 
 function makeBoardCardInteractive(card, item) {
   card.addEventListener('pointerdown', (e) => {
+    const link = e.target.closest('a');
+    if (link) {
+      e.stopPropagation();
+      window.open(link.href, '_blank');
+      return;
+    }
     if (e.target.closest('.board-resize') || e.target.closest('.board-del')) return;
-    if (item.type === 'text' && e.target.closest('.board-text')) return; // let text editing work
+    if (item.type === 'text' && e.target.closest('.board-text-content')) return; // let text editing work
     e.stopPropagation();
     const sx = e.clientX, sy = e.clientY, ox = item.x, oy = item.y;
     const rot = item.rot || 0;
@@ -5012,7 +5061,11 @@ window.viewCollegePDF = function(pdfId) {
         iframe.style.display = 'none';
         noteContentEl.innerHTML = '<p style="color: var(--text-secondary); font-style: italic;">This PDF lives on your computer. Sign in to Sync on both devices to view it here.</p>';
       } else {
-        iframe.src = src;
+        let collegeSrc = src;
+        if (isTouchLayout() && (src.startsWith('http://') || src.startsWith('https://'))) {
+          collegeSrc = `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(src)}`;
+        }
+        iframe.src = collegeSrc;
       }
     }
     modal.style.display = 'flex';
@@ -6487,4 +6540,79 @@ function startImageCrop(wrapper) {
       updateNoteContent();
     };
   };
+}
+
+function enablePinchToZoom(img) {
+  let scale = 1;
+  let startScale = 1;
+  let startDistance = 0;
+  let posX = 0, posY = 0;
+  let startX = 0, startY = 0;
+  let isDragging = false;
+  let isPinching = false;
+  
+  img.style.transformOrigin = "center center";
+  img.style.transition = "none";
+  img.style.cursor = "grab";
+  
+  img.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 2) {
+      isPinching = true;
+      isDragging = false;
+      startDistance = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      startScale = scale;
+    } else if (e.touches.length === 1 && scale > 1) {
+      isDragging = true;
+      startX = e.touches[0].clientX - posX;
+      startY = e.touches[0].clientY - posY;
+    }
+  });
+  
+  img.addEventListener('touchmove', (e) => {
+    if (isPinching && e.touches.length === 2) {
+      e.preventDefault();
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      scale = Math.max(1, Math.min(4, startScale * (dist / startDistance)));
+      
+      if (scale === 1) {
+        posX = 0;
+        posY = 0;
+      }
+      img.style.transform = `translate(${posX}px, ${posY}px) scale(${scale})`;
+    } else if (isDragging && e.touches.length === 1 && scale > 1) {
+      e.preventDefault();
+      posX = e.touches[0].clientX - startX;
+      posY = e.touches[0].clientY - startY;
+      
+      const maxDragX = (scale - 1) * (img.clientWidth / 2);
+      const maxDragY = (scale - 1) * (img.clientHeight / 2);
+      posX = Math.max(-maxDragX, Math.min(maxDragX, posX));
+      posY = Math.max(-maxDragY, Math.min(maxDragY, posY));
+      
+      img.style.transform = `translate(${posX}px, ${posY}px) scale(${scale})`;
+    }
+  });
+  
+  img.addEventListener('touchend', (e) => {
+    if (e.touches.length < 2) {
+      isPinching = false;
+    }
+    if (e.touches.length === 0) {
+      isDragging = false;
+    }
+    if (scale <= 1.05) {
+      scale = 1;
+      posX = 0;
+      posY = 0;
+      img.style.transition = "transform 0.2s ease";
+      img.style.transform = `translate(0px, 0px) scale(1)`;
+      setTimeout(() => { img.style.transition = "none"; }, 200);
+    }
+  });
 }

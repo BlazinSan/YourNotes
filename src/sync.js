@@ -34,7 +34,7 @@ const SYNC_KEYS = [
   "dashboardTitle", "dashboardBanner", "opennotes_profile_pic", "opennotes_initialized"
 ];
 
-const FILE_REF_RE = /file:\/\/\/[^"'\\\s]*\/(college_pdfs|banner_files|board_files)\/([A-Za-z0-9._-]+)/g;
+const FILE_REF_RE = /(?:file:\/\/\/[^"'\s]*|[^"'\s]*?)(college_pdfs|banner_files|board_files)(?:\\\\|\/)+([A-Za-z0-9._\-]+)/g;
 
 // Convex caps a single stored value at 1 MiB. Split larger values across chunk
 // rows so any size (big note sets, inline base64 banners, etc.) syncs reliably.
@@ -126,7 +126,12 @@ async function uploadReferencedFiles(token, values) {
     let m;
     FILE_REF_RE.lastIndex = 0;
     while ((m = FILE_REF_RE.exec(v)) !== null) {
-      if (!seen.has(m[2])) { seen.add(m[2]); refs.push({ full: m[0], name: m[2] }); }
+      if (!seen.has(m[2])) {
+        // Normalize the full matched path by stripping file:/// and converting double backslashes
+        const cleanPath = m[0].replace(/^file:\/\/\//, '').replace(/\\\\/g, '/');
+        seen.add(m[2]);
+        refs.push({ full: cleanPath, name: m[2] });
+      }
     }
   }
   const uploaded = new Set(JSON.parse(localStorage.getItem("yn_synced_files") || "[]"));
