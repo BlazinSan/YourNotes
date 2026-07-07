@@ -717,6 +717,12 @@ function renderNotesList(filterText = '') {
 
 // Set Active Note
 function setActiveNote(id) {
+  // Flush any pending debounced save before switching context
+  if (_saveDebounceTimer) {
+    clearTimeout(_saveDebounceTimer);
+    _saveDebounceTimer = null;
+    saveNotes();
+  }
   activeNoteId = id;
   const note = notes.find(n => n.id === id);
 
@@ -1246,19 +1252,28 @@ function deleteNote() {
 }
 
 // Update Note Content
+// Debounce timer for expensive persist + render work
+let _saveDebounceTimer = null;
+
 function updateNoteContent() {
   if (!activeNoteId) return;
   const note = notes.find(n => n.id === activeNoteId);
   if (note) {
+    // ── Immediate: keep in-memory data current (cheap) ──
     note.title = noteTitleInput.value;
     if (noteBodyInput) {
       note.body = noteBodyInput.innerHTML;
     }
     note.updatedAt = Date.now();
-    
-    saveNotes();
-    renderNotesList(searchInput.value);
-    showSaveIndicator();
+
+    // ── Deferred: batch the expensive work ──
+    if (_saveDebounceTimer) clearTimeout(_saveDebounceTimer);
+    _saveDebounceTimer = setTimeout(() => {
+      _saveDebounceTimer = null;
+      saveNotes();
+      renderNotesList(searchInput.value);
+      showSaveIndicator();
+    }, 400);
   }
 }
 

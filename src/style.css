@@ -4636,6 +4636,12 @@ body.haven-open {
     color: var(--text-primary);
   }
 
+  /* Hide custom floating toolbar on mobile — Android provides its own native
+     text-selection toolbar (Cut / Copy / Paste) and the two overlap. */
+  .floating-toolbar {
+    display: none !important;
+  }
+
   .board-drop-hint span {
     display: none;
   }
