@@ -1565,6 +1565,29 @@ function reattachNoteBodyListeners() {
     });
     noteBodyInput.addEventListener('keydown', handleEditorKeydown);
     noteBodyInput.addEventListener('keyup', handleMarkdownShortcuts);
+    
+    // Paste Image Intercept
+    noteBodyInput.addEventListener('paste', (e) => {
+      const items = (e.clipboardData || e.originalEvent?.clipboardData)?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.indexOf('image') === 0) {
+          e.preventDefault();
+          const file = item.getAsFile();
+          if (!file) continue;
+          const reader = new FileReader();
+          reader.onload = (evt) => {
+            const src = evt.target.result;
+            const html = `<div class="resizable-image-wrapper" contenteditable="false" style="width:300px;"><img src="${src}" /></div><p><br></p>`;
+            noteBodyInput.focus();
+            window.insertHtmlAtCursor(html);
+            updateNoteContent();
+          };
+          reader.readAsDataURL(file);
+          break;
+        }
+      }
+    });
   }
 }
 
@@ -5835,9 +5858,7 @@ window.triggerInsertPicture = function() {
     const reader = new FileReader();
     reader.onload = (evt) => {
       const src = evt.target.result;
-      const html = `<div class="resizable-image-wrapper" style="position: relative; display: inline-block; resize: both; overflow: hidden; width: 300px; height: 200px; max-width: 100%; min-width: 50px; min-height: 50px; border: 1px dashed var(--panel-border); margin: 8px; vertical-align: bottom;">
-        <img src="${src}" style="width: 100%; height: 100%; object-fit: contain; pointer-events: none;" />
-      </div><p><br></p>`;
+      const html = `<div class="resizable-image-wrapper" contenteditable="false" style="width:300px;"><img src="${src}" /></div><p><br></p>`;
       noteBodyInput.focus();
       window.insertHtmlAtCursor(html);
       updateNoteContent();
@@ -6134,4 +6155,336 @@ function exportNoteAsImageA4(note) {
     if (toast) toast.remove();
     alert('Failed to generate A4 image export.');
   });
+}
+
+// -----------------------------------------
+// Interactive Image Resize & Crop System
+// -----------------------------------------
+let selectedImageWrapper = null;
+
+// Clean up selection when clicking outside
+document.addEventListener('click', (e) => {
+  if (e.target.closest('.resizable-image-wrapper')) {
+    const wrapper = e.target.closest('.resizable-image-wrapper');
+    if (selectedImageWrapper && selectedImageWrapper !== wrapper) {
+      deselectImage();
+    }
+    selectImage(wrapper);
+    return;
+  }
+  
+  if (e.target.closest('.img-action-bar') || e.target.closest('.crop-overlay') || e.target.closest('.crop-toolbar')) {
+    return;
+  }
+  
+  deselectImage();
+});
+
+function deselectImage() {
+  if (selectedImageWrapper) {
+    selectedImageWrapper.classList.remove('img-selected');
+    const handles = selectedImageWrapper.querySelectorAll('.img-resize-handle, .img-action-bar');
+    handles.forEach(h => h.remove());
+    selectedImageWrapper = null;
+  }
+}
+
+function selectImage(wrapper) {
+  if (selectedImageWrapper === wrapper) return;
+  selectedImageWrapper = wrapper;
+  wrapper.classList.add('img-selected');
+  
+  if (!wrapper.querySelector('.img-resize-handle')) {
+    const directions = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+    directions.forEach(dir => {
+      const handle = document.createElement('div');
+      handle.className = `img-resize-handle handle-${dir}`;
+      handle.dataset.handle = dir;
+      handle.addEventListener('mousedown', (e) => startImageResize(e, wrapper, dir));
+      handle.addEventListener('touchstart', (e) => startImageResize(e, wrapper, dir), { passive: false });
+      wrapper.appendChild(handle);
+    });
+  }
+  
+  if (!wrapper.querySelector('.img-action-bar')) {
+    const actionBar = document.createElement('div');
+    actionBar.className = 'img-action-bar';
+    actionBar.innerHTML = `
+      <button class="img-action-btn preset-25">25%</button>
+      <button class="img-action-btn preset-50">50%</button>
+      <button class="img-action-btn preset-100">100%</button>
+      <div class="img-action-divider"></div>
+      <button class="img-action-btn crop-btn">✂️ Crop</button>
+      <button class="img-action-btn delete-btn">🗑️ Delete</button>
+    `;
+    
+    actionBar.querySelector('.preset-25').onclick = (e) => {
+      e.stopPropagation();
+      wrapper.style.width = '25%';
+      updateNoteContent();
+    };
+    actionBar.querySelector('.preset-50').onclick = (e) => {
+      e.stopPropagation();
+      wrapper.style.width = '50%';
+      updateNoteContent();
+    };
+    actionBar.querySelector('.preset-100').onclick = (e) => {
+      e.stopPropagation();
+      wrapper.style.width = '100%';
+      updateNoteContent();
+    };
+    actionBar.querySelector('.crop-btn').onclick = (e) => {
+      e.stopPropagation();
+      startImageCrop(wrapper);
+    };
+    actionBar.querySelector('.delete-btn').onclick = (e) => {
+      e.stopPropagation();
+      deselectImage();
+      wrapper.remove();
+      updateNoteContent();
+    };
+    
+    wrapper.appendChild(actionBar);
+  }
+}
+
+function startImageResize(e, wrapper, direction) {
+  e.preventDefault();
+  e.stopPropagation();
+  
+  const startX = e.clientX || (e.touches && e.touches[0].clientX);
+  const startY = e.clientY || (e.touches && e.touches[0].clientY);
+  const startWidth = wrapper.getBoundingClientRect().width;
+  const startHeight = wrapper.getBoundingClientRect().height;
+  const parentWidth = wrapper.parentElement.getBoundingClientRect().width;
+  
+  const actionBar = wrapper.querySelector('.img-action-bar');
+  if (actionBar) actionBar.style.display = 'none';
+
+  function onResizeMove(moveEvent) {
+    const currentX = moveEvent.clientX || (moveEvent.touches && moveEvent.touches[0].clientX);
+    const currentY = moveEvent.clientY || (moveEvent.touches && moveEvent.touches[0].clientY);
+    
+    const dx = currentX - startX;
+    const dy = currentY - startY;
+    
+    let newWidth = startWidth;
+    
+    if (direction.includes('e')) {
+      newWidth = startWidth + dx;
+    } else if (direction.includes('w')) {
+      newWidth = startWidth - dx;
+    } else if (direction === 's') {
+      newWidth = startWidth + (dy * (startWidth / startHeight));
+    } else if (direction === 'n') {
+      newWidth = startWidth - (dy * (startWidth / startHeight));
+    }
+    
+    newWidth = Math.max(50, Math.min(newWidth, parentWidth));
+    wrapper.style.width = `${newWidth}px`;
+  }
+
+  function onResizeEnd() {
+    document.removeEventListener('mousemove', onResizeMove);
+    document.removeEventListener('mouseup', onResizeEnd);
+    document.removeEventListener('touchmove', onResizeMove);
+    document.removeEventListener('touchend', onResizeEnd);
+    
+    if (actionBar) actionBar.style.display = '';
+    updateNoteContent();
+  }
+
+  document.addEventListener('mousemove', onResizeMove);
+  document.addEventListener('mouseup', onResizeEnd);
+  document.addEventListener('touchmove', onResizeMove, { passive: false });
+  document.addEventListener('touchend', onResizeEnd);
+}
+
+function startImageCrop(wrapper) {
+  const img = wrapper.querySelector('img');
+  if (!img) return;
+  
+  deselectImage();
+  
+  const cropOverlay = document.createElement('div');
+  cropOverlay.className = 'crop-overlay';
+  cropOverlay.innerHTML = `
+    <div class="crop-container">
+      <img src="${img.src}" id="crop-source-img" />
+      <div class="crop-selection" id="crop-selector">
+        <div class="crop-handle ch-nw" data-handle="nw"></div>
+        <div class="crop-handle ch-ne" data-handle="ne"></div>
+        <div class="crop-handle ch-sw" data-handle="sw"></div>
+        <div class="crop-handle ch-se" data-handle="se"></div>
+      </div>
+    </div>
+    <div class="crop-toolbar">
+      <button class="crop-btn-cancel">Cancel</button>
+      <button class="crop-btn-apply">Crop Image</button>
+    </div>
+  `;
+  document.body.appendChild(cropOverlay);
+  
+  const sourceImg = cropOverlay.querySelector('#crop-source-img');
+  const selector = cropOverlay.querySelector('#crop-selector');
+  const cancelBtn = cropOverlay.querySelector('.crop-btn-cancel');
+  const applyBtn = cropOverlay.querySelector('.crop-btn-apply');
+  
+  cancelBtn.onclick = () => cropOverlay.remove();
+  
+  sourceImg.onload = () => {
+    const imgWidth = sourceImg.clientWidth;
+    const imgHeight = sourceImg.clientHeight;
+    
+    let selWidth = imgWidth * 0.8;
+    let selHeight = imgHeight * 0.8;
+    let selLeft = (imgWidth - selWidth) / 2;
+    let selTop = (imgHeight - selHeight) / 2;
+    
+    updateSelectorDOM();
+    
+    function updateSelectorDOM() {
+      selector.style.left = `${selLeft}px`;
+      selector.style.top = `${selTop}px`;
+      selector.style.width = `${selWidth}px`;
+      selector.style.height = `${selHeight}px`;
+    }
+    
+    selector.onmousedown = (e) => {
+      if (e.target.classList.contains('crop-handle')) return;
+      e.preventDefault();
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const initialLeft = selLeft;
+      const initialTop = selTop;
+      
+      function onMove(moveEvent) {
+        let dx = moveEvent.clientX - startX;
+        let dy = moveEvent.clientY - startY;
+        
+        selLeft = Math.max(0, Math.min(initialLeft + dx, imgWidth - selWidth));
+        selTop = Math.max(0, Math.min(initialTop + dy, imgHeight - selHeight));
+        updateSelectorDOM();
+      }
+      
+      function onMoveEnd() {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onMoveEnd);
+      }
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onMoveEnd);
+    };
+    
+    selector.addEventListener('touchstart', (e) => {
+      if (e.target.classList.contains('crop-handle')) return;
+      e.preventDefault();
+      const touch = e.touches[0];
+      const startX = touch.clientX;
+      const startY = touch.clientY;
+      const initialLeft = selLeft;
+      const initialTop = selTop;
+      
+      function onTouchMove(moveEvent) {
+        const currentTouch = moveEvent.touches[0];
+        let dx = currentTouch.clientX - startX;
+        let dy = currentTouch.clientY - startY;
+        
+        selLeft = Math.max(0, Math.min(initialLeft + dx, imgWidth - selWidth));
+        selTop = Math.max(0, Math.min(initialTop + dy, imgHeight - selHeight));
+        updateSelectorDOM();
+      }
+      
+      function onTouchEnd() {
+        document.removeEventListener('touchmove', onTouchMove);
+        document.removeEventListener('touchend', onTouchEnd);
+      }
+      document.addEventListener('touchmove', onTouchMove, { passive: false });
+      document.addEventListener('touchend', onTouchEnd);
+    }, { passive: false });
+    
+    cropOverlay.querySelectorAll('.crop-handle').forEach(handle => {
+      const handleType = handle.dataset.handle;
+      
+      const onDragStart = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const clientX = e.clientX || e.touches[0].clientX;
+        const clientY = e.clientY || e.touches[0].clientY;
+        const initialLeft = selLeft;
+        const initialTop = selTop;
+        const initialWidth = selWidth;
+        const initialHeight = selHeight;
+        
+        function onDragMove(moveEvent) {
+          const curX = moveEvent.clientX || (moveEvent.touches && moveEvent.touches[0].clientX);
+          const curY = moveEvent.clientY || (moveEvent.touches && moveEvent.touches[0].clientY);
+          const dx = curX - clientX;
+          const dy = curY - clientY;
+          
+          if (handleType === 'se') {
+            selWidth = Math.max(30, Math.min(initialWidth + dx, imgWidth - initialLeft));
+            selHeight = Math.max(30, Math.min(initialHeight + dy, imgHeight - initialTop));
+          } else if (handleType === 'sw') {
+            const newLeft = Math.max(0, Math.min(initialLeft + dx, initialLeft + initialWidth - 30));
+            selWidth = initialWidth + (initialLeft - newLeft);
+            selLeft = newLeft;
+            selHeight = Math.max(30, Math.min(initialHeight + dy, imgHeight - initialTop));
+          } else if (handleType === 'ne') {
+            const newTop = Math.max(0, Math.min(initialTop + dy, initialTop + initialHeight - 30));
+            selHeight = initialHeight + (initialTop - newTop);
+            selTop = newTop;
+            selWidth = Math.max(30, Math.min(initialWidth + dx, imgWidth - initialLeft));
+          } else if (handleType === 'nw') {
+            const newLeft = Math.max(0, Math.min(initialLeft + dx, initialLeft + initialWidth - 30));
+            const newTop = Math.max(0, Math.min(initialTop + dy, initialTop + initialHeight - 30));
+            selWidth = initialWidth + (initialLeft - newLeft);
+            selLeft = newLeft;
+            selHeight = initialHeight + (initialTop - newTop);
+            selTop = newTop;
+          }
+          updateSelectorDOM();
+        }
+        
+        function onDragEnd() {
+          document.removeEventListener('mousemove', onDragMove);
+          document.removeEventListener('mouseup', onDragEnd);
+          document.removeEventListener('touchmove', onDragMove);
+          document.removeEventListener('touchend', onDragEnd);
+        }
+        
+        document.addEventListener('mousemove', onDragMove);
+        document.addEventListener('mouseup', onDragEnd);
+        document.addEventListener('touchmove', onDragMove, { passive: false });
+        document.addEventListener('touchend', onDragEnd);
+      };
+      
+      handle.addEventListener('mousedown', onDragStart);
+      handle.addEventListener('touchstart', onDragStart, { passive: false });
+    });
+    
+    applyBtn.onclick = () => {
+      const naturalWidth = img.naturalWidth;
+      const naturalHeight = img.naturalHeight;
+      
+      const scaleX = naturalWidth / imgWidth;
+      const scaleY = naturalHeight / imgHeight;
+      
+      const cropX = selLeft * scaleX;
+      const cropY = selTop * scaleY;
+      const cropW = selWidth * scaleX;
+      const cropH = selHeight * scaleY;
+      
+      const canvas = document.createElement('canvas');
+      canvas.width = cropW;
+      canvas.height = cropH;
+      const ctx = canvas.getContext('2d');
+      
+      ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+      
+      img.src = canvas.toDataURL('image/png');
+      
+      cropOverlay.remove();
+      updateNoteContent();
+    };
+  };
 }
