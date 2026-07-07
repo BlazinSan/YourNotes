@@ -740,6 +740,8 @@ function setActiveNote(id) {
     
     editorHeader.style.display = 'flex';
     document.querySelector('.editor-content').style.display = 'flex';
+    const toolbar = document.querySelector('.static-editor-toolbar');
+    if (toolbar) toolbar.style.display = 'flex';
     if (homePage) homePage.style.display = 'none';
     if (appContainer) appContainer.classList.remove('home-active');
     
@@ -748,6 +750,8 @@ function setActiveNote(id) {
     
     editorHeader.style.display = 'none';
     document.querySelector('.editor-content').style.display = 'none';
+    const toolbar = document.querySelector('.static-editor-toolbar');
+    if (toolbar) toolbar.style.display = 'none';
     if (appContainer) appContainer.classList.add('home-active');
     
     if (homePage) {
@@ -1618,6 +1622,9 @@ if (searchInput) {
   }
 
 window.showPanel = function(panelId, btnId) {
+  if (activeNoteId) {
+    setActiveNote(null);
+  }
   // Leaving the Session page? Stop the Safe Haven ambience so it doesn't play unseen.
   if (panelId !== 'home-session' && window.stopHaven) window.stopHaven();
   if (document.body.classList.contains('sidebar-open') && window.matchMedia('(max-width: 820px), (pointer: coarse)').matches) {

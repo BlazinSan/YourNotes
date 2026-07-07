@@ -3247,6 +3247,7 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  padding-right: 64px;
 }
 
 .college-folder-category-badge {
@@ -3332,6 +3333,7 @@ body {
   flex-direction: column;
   min-width: 0;
   flex: 1;
+  padding-right: 64px;
 }
 
 .college-pdf-name {
@@ -5444,7 +5446,7 @@ body.haven-open {
 
 /* Static Toolbar */
 .static-editor-toolbar {
-  display: flex;
+  display: none;
   flex-wrap: wrap;
   gap: 8px;
   padding: 12px 24px;
