@@ -148,6 +148,10 @@ function showAppToast(message = '', options = {}) {
 
 // State
 let notes = JSON.parse(localStorage.getItem('opennotes_data')) || [];
+let trashItems = JSON.parse(localStorage.getItem('opennotes_trash') || '[]');
+function saveTrash() {
+  localStorage.setItem('opennotes_trash', JSON.stringify(trashItems));
+}
 let activeNoteId = null;
 let saveTimeout = null;
 
@@ -180,6 +184,7 @@ const appContainer = document.querySelector('.app-container');
 const viewGridBtn = document.getElementById('view-grid-btn');
 const viewGraphBtn = document.getElementById('view-graph-btn');
 const viewArchivedBtn = document.getElementById('view-archived-btn');
+const viewTrashBtn = document.getElementById('view-trash-btn');
 const dashboardTitle = document.getElementById('dashboard-title');
 const dashboardBanner = document.getElementById('dashboard-banner');
 const bannerUpload = document.getElementById('banner-upload');
@@ -936,6 +941,16 @@ function deleteProjectNote(noteId) {
   const note = notes.find(n => n.id === noteId);
   if (!note) return;
   if (!confirm(`Are you sure you want to delete the note "${noteDisplayTitle(note)}"?`)) return;
+  
+  trashItems.push({
+    id: 't-' + Date.now() + '-' + Math.random().toString(36).substr(2, 5),
+    type: 'note',
+    title: note.title,
+    data: note,
+    deletedAt: Date.now()
+  });
+  saveTrash();
+
   notes = notes.filter(n => n.id !== noteId);
   archivedNoteIds.delete(noteId);
   saveArchivedNoteIds();
@@ -948,6 +963,20 @@ function deleteProjectFolder(folderName) {
   const folderNotes = notesInProjectFolder(folderName);
   if (folderNotes.length === 0) return;
   if (!confirm(`Delete "${folderName}" and all ${folderNotes.length} note${folderNotes.length === 1 ? '' : 's'} inside it?`)) return;
+  
+  trashItems.push({
+    id: 't-' + Date.now() + '-' + Math.random().toString(36).substr(2, 5),
+    type: 'folder',
+    title: folderName,
+    data: {
+      folderName: folderName,
+      notes: folderNotes,
+      pinned: pinnedGroups.includes(folderName)
+    },
+    deletedAt: Date.now()
+  });
+  saveTrash();
+
   const ids = new Set(folderNotes.map(note => note.id));
   notes = notes.filter(note => !ids.has(note.id));
   ids.forEach(id => archivedNoteIds.delete(id));
@@ -1063,6 +1092,10 @@ function makeNoteCard(note, groupItems) {
 
 function renderHomeGrid(searchTerm = '') {
   if (!homeGrid) return;
+  if (currentHomeView === 'trash') {
+    renderTrashView(searchTerm);
+    return;
+  }
   homeGrid.innerHTML = '';
   const term = (searchTerm || '').toLowerCase();
   populateFolderFilter();
@@ -1183,6 +1216,19 @@ function createNote(title = '', body = '') {
 // Delete Note
 function deleteNote() {
   if (!activeNoteId) return;
+  const note = notes.find(n => n.id === activeNoteId);
+  if (!note) return;
+  if (!confirm(`Are you sure you want to delete the note "${noteDisplayTitle(note)}"?`)) return;
+
+  trashItems.push({
+    id: 't-' + Date.now() + '-' + Math.random().toString(36).substr(2, 5),
+    type: 'note',
+    title: note.title,
+    data: note,
+    deletedAt: Date.now()
+  });
+  saveTrash();
+
   notes = notes.filter(n => n.id !== activeNoteId);
   archivedNoteIds.delete(activeNoteId);
   saveArchivedNoteIds();
@@ -1223,24 +1269,50 @@ function showSaveIndicator() {
 }
 
 // Export Note
-function exportNote() {
+window.exportNote = function() {
   if (!activeNoteId) return;
   const note = notes.find(n => n.id === activeNoteId);
   if (!note) return;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'custom-dialog-overlay';
+  overlay.innerHTML = `
+    <div class="custom-dialog-card" style="max-width:400px; padding:24px;">
+      <h4 style="margin-top:0; font-size:1.15rem;">Export Note</h4>
+      <p style="font-size:0.9rem; color:var(--text-secondary); margin-bottom:20px;">Choose a format to export "${noteDisplayTitle(note)}"</p>
+      <div style="display:flex; flex-direction:column; gap:10px; margin-bottom:20px;">
+        <button class="export-opt-btn" data-type="pdf" style="text-align:left; padding:12px; border-radius:8px; border:1px solid var(--panel-border); background:var(--bg-color-alt); color:var(--text-primary); cursor:pointer; font-weight:600; font-family:inherit;">📄 PDF Document (A4 size)</button>
+        <button class="export-opt-btn" data-type="txt" style="text-align:left; padding:12px; border-radius:8px; border:1px solid var(--panel-border); background:var(--bg-color-alt); color:var(--text-primary); cursor:pointer; font-weight:600; font-family:inherit;">📝 Plain Text (.txt)</button>
+        <button class="export-opt-btn" data-type="md" style="text-align:left; padding:12px; border-radius:8px; border:1px solid var(--panel-border); background:var(--bg-color-alt); color:var(--text-primary); cursor:pointer; font-weight:600; font-family:inherit;">💻 Markdown (.md)</button>
+        <button class="export-opt-btn" data-type="image" style="text-align:left; padding:12px; border-radius:8px; border:1px solid var(--panel-border); background:var(--bg-color-alt); color:var(--text-primary); cursor:pointer; font-weight:600; font-family:inherit;">🖼️ Image (A4 PNG)</button>
+      </div>
+      <div style="display:flex; justify-content:flex-end;">
+        <button class="dialog-cancel-btn" style="background:none; border:none; color:var(--text-secondary); cursor:pointer; padding:6px 12px; font-family:inherit; font-size:0.9rem;">Cancel</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.querySelector('.dialog-cancel-btn').onclick = () => overlay.remove();
   
-  const plainText = note.body ? note.body.replace(/<[^>]*>?/gm, '') : '';
-  const content = `${note.title || 'Untitled Note'}\n\n${plainText}`;
-  const blob = new Blob([content], { type: 'text/plain' });
-  const url = URL.createObjectURL(blob);
-  
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${(note.title || 'Untitled').replace(/[^a-z0-9]/gi, '_').toLowerCase()}.txt`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
+  overlay.querySelectorAll('.export-opt-btn').forEach(btn => {
+    btn.onclick = () => {
+      const type = btn.getAttribute('data-type');
+      overlay.remove();
+      if (type === 'pdf') {
+        window.print();
+      } else if (type === 'txt') {
+        const plainText = note.body ? note.body.replace(/<[^>]*>?/gm, '') : '';
+        const content = `${note.title || 'Untitled Note'}\n\n${plainText}`;
+        downloadBlob(content, `${(note.title || 'Untitled').replace(/[^a-z0-9]/gi, '_').toLowerCase()}.txt`, 'text/plain');
+      } else if (type === 'md') {
+        const markdown = `# ${noteDisplayTitle(note)}\n\n${htmlToMarkdown(note.body || '')}`;
+        downloadBlob(markdown, `${(note.title || 'Untitled').replace(/[^a-z0-9]/gi, '_').toLowerCase()}.md`, 'text/markdown');
+      } else if (type === 'image') {
+        exportNoteAsImageA4(note);
+      }
+    };
+  });
+};
 
 // WYSIWYG Markdown Formatting
 function handleMarkdownShortcuts(e) {
@@ -1534,6 +1606,17 @@ if (searchInput) {
     });
   }
 
+  if (viewTrashBtn) {
+    viewTrashBtn.addEventListener('click', () => {
+      currentHomeView = 'trash';
+      homeArchiveMode = false;
+      showPanel('home-grid', 'nav-projects-btn');
+      viewTrashBtn.classList.add('active');
+      renderHomeGrid(homeSearchInput ? homeSearchInput.value : '');
+      if (graphAnimationFrame) cancelAnimationFrame(graphAnimationFrame);
+    });
+  }
+
 window.showPanel = function(panelId, btnId) {
   // Leaving the Session page? Stop the Safe Haven ambience so it doesn't play unseen.
   if (panelId !== 'home-session' && window.stopHaven) window.stopHaven();
@@ -1587,9 +1670,11 @@ window.showPanel = function(panelId, btnId) {
   const viewGridBtnEl = document.getElementById('view-grid-btn');
   const viewGraphBtnEl = document.getElementById('view-graph-btn');
   const viewArchivedBtnEl = document.getElementById('view-archived-btn');
+  const viewTrashBtnEl = document.getElementById('view-trash-btn');
   if (viewGridBtnEl) viewGridBtnEl.classList.remove('active');
   if (viewGraphBtnEl) viewGraphBtnEl.classList.remove('active');
   if (viewArchivedBtnEl) viewArchivedBtnEl.classList.remove('active');
+  if (viewTrashBtnEl) viewTrashBtnEl.classList.remove('active');
 
   if (btnId) {
     const btn = document.getElementById(btnId);
@@ -4355,7 +4440,20 @@ function renderBoard() {
     card.onclick = (ev) => ev.stopPropagation();
     const bodyEl = card.querySelector('.board-body');
     if (item.type === 'text') bodyEl.onblur = () => { item.text = bodyEl.innerText; saveBoard(); };
-    card.querySelector('.board-del').onclick = (ev) => { ev.stopPropagation(); boardItems = boardItems.filter(b => b.id !== item.id); saveBoard(); renderBoard(); };
+    card.querySelector('.board-del').onclick = (ev) => {
+      ev.stopPropagation();
+      trashItems.push({
+        id: 't-' + Date.now() + '-' + Math.random().toString(36).substr(2, 5),
+        type: 'board_item',
+        title: item.name || item.text || 'Board Card',
+        data: item,
+        deletedAt: Date.now()
+      });
+      saveTrash();
+      boardItems = boardItems.filter(b => b.id !== item.id);
+      saveBoard();
+      renderBoard();
+    };
     makeBoardCardInteractive(card, item);
     board.appendChild(card);
   });
@@ -4788,6 +4886,14 @@ window.deleteCollegeFolder = function(folderId) {
   if (!folder) return;
 
   if (confirm(`Are you sure you want to delete the folder "${folder.name}" and all its imported PDFs?`)) {
+    trashItems.push({
+      id: 't-' + Date.now() + '-' + Math.random().toString(36).substr(2, 5),
+      type: 'college_folder',
+      title: folder.name,
+      data: folder,
+      deletedAt: Date.now()
+    });
+    saveTrash();
     collegeFolders = collegeFolders.filter(f => f.id !== folderId);
     saveCollegeFolders();
     renderCollegeFolders();
@@ -4802,6 +4908,17 @@ window.deleteCollegePDF = function(pdfId) {
   if (!pdf) return;
 
   if (confirm(`Are you sure you want to delete "${pdf.name}"?`)) {
+    trashItems.push({
+      id: 't-' + Date.now() + '-' + Math.random().toString(36).substr(2, 5),
+      type: 'college_pdf',
+      title: pdf.name,
+      data: {
+        pdf: pdf,
+        folderId: activeCollegeFolderId
+      },
+      deletedAt: Date.now()
+    });
+    saveTrash();
     folder.pdfs = folder.pdfs.filter(p => p.id !== pdfId);
     saveCollegeFolders();
     renderCollegeSingleFolder(activeCollegeFolderId);
@@ -5560,3 +5677,439 @@ document.addEventListener('click', (e) => {
     }
   }
 })();
+
+// --- Rich Editor Formatting Functions ---
+window.insertHtmlAtCursor = function(html) {
+  let sel, range;
+  if (window.getSelection) {
+    sel = window.getSelection();
+    if (sel.getRangeAt && sel.rangeCount) {
+      range = sel.getRangeAt(0);
+      range.deleteContents();
+      
+      const el = document.createElement("div");
+      el.innerHTML = html;
+      const frag = document.createDocumentFragment();
+      let node, lastNode;
+      while ((node = el.firstChild)) {
+        lastNode = frag.appendChild(node);
+      }
+      range.insertNode(frag);
+      
+      if (lastNode) {
+        range = range.cloneRange();
+        range.setStartAfter(lastNode);
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    }
+  }
+};
+
+window.insertNoteHyperlink = function() {
+  const notesToLink = notes.filter(n => n.id !== activeNoteId);
+  if (notesToLink.length === 0) {
+    alert("No other notes available to link to.");
+    return;
+  }
+  const options = notesToLink.map(n => `<option value="${n.id}">${gsEscape(n.title || 'Untitled')}</option>`).join('');
+  
+  const overlay = document.createElement('div');
+  overlay.className = 'custom-dialog-overlay';
+  overlay.innerHTML = `
+    <div class="custom-dialog-card">
+      <h4>Link to another note</h4>
+      <select id="note-link-select" style="width:100%; padding:8px; border-radius:6px; background:var(--bg-color); color:var(--text-primary); border:1px solid var(--panel-border); margin:12px 0;">
+        ${options}
+      </select>
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button class="dialog-cancel-btn">Cancel</button>
+        <button class="dialog-ok-btn" style="background:var(--accent-color); color:#fff; border:none; padding:6px 12px; border-radius:6px; cursor:pointer;">Link</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.querySelector('.dialog-cancel-btn').onclick = () => overlay.remove();
+  overlay.querySelector('.dialog-ok-btn').onclick = () => {
+    const sel = document.getElementById('note-link-select');
+    const targetId = sel.value;
+    const title = sel.options[sel.selectedIndex].text;
+    overlay.remove();
+    noteBodyInput.focus();
+    
+    const linkHtml = `<span class="note-link" contenteditable="false" data-id="${targetId}">${title}</span>&nbsp;`;
+    window.insertHtmlAtCursor(linkHtml);
+    updateNoteContent();
+  };
+};
+
+window.insertTable = function() {
+  const rows = parseInt(prompt("Number of rows:", "3") || "0", 10);
+  const cols = parseInt(prompt("Number of columns:", "3") || "0", 10);
+  if (rows <= 0 || cols <= 0) return;
+  
+  let html = `<table style="width:100%; border-collapse:collapse; margin:12px 0; border:1px solid var(--panel-border);">`;
+  for (let r = 0; r < rows; r++) {
+    html += `<tr>`;
+    for (let c = 0; c < cols; c++) {
+      if (r === 0) {
+        html += `<th style="border:1px solid var(--panel-border); padding:8px; background:var(--bg-color-alt); font-weight:600; text-align:left;" contenteditable="true">Header</th>`;
+      } else {
+        html += `<td style="border:1px solid var(--panel-border); padding:8px;" contenteditable="true">Cell</td>`;
+      }
+    }
+    html += `</tr>`;
+  }
+  html += `</table><p><br></p>`;
+  window.insertHtmlAtCursor(html);
+  updateNoteContent();
+};
+
+window.insertCallout = function() {
+  const colors = [
+    { name: 'Orange', border: '#ea580c', bg: 'rgba(234,88,12,0.08)' },
+    { name: 'Blue', border: '#2563eb', bg: 'rgba(37,99,235,0.08)' },
+    { name: 'Green', border: '#16a34a', bg: 'rgba(22,163,74,0.08)' },
+    { name: 'Red', border: '#dc2626', bg: 'rgba(220,38,38,0.08)' }
+  ];
+  const options = colors.map((c, i) => `<option value="${i}">${c.name}</option>`).join('');
+  
+  const overlay = document.createElement('div');
+  overlay.className = 'custom-dialog-overlay';
+  overlay.innerHTML = `
+    <div class="custom-dialog-card">
+      <h4>Insert Callout Box</h4>
+      <select id="callout-color-select" style="width:100%; padding:8px; border-radius:6px; background:var(--bg-color); color:var(--text-primary); border:1px solid var(--panel-border); margin:12px 0;">
+        ${options}
+      </select>
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button class="dialog-cancel-btn">Cancel</button>
+        <button class="dialog-ok-btn" style="background:var(--accent-color); color:#fff; border:none; padding:6px 12px; border-radius:6px; cursor:pointer;">Insert</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.querySelector('.dialog-cancel-btn').onclick = () => overlay.remove();
+  overlay.querySelector('.dialog-ok-btn').onclick = () => {
+    const sel = document.getElementById('callout-color-select');
+    const color = colors[parseInt(sel.value, 10)];
+    overlay.remove();
+    noteBodyInput.focus();
+    
+    const html = `<div class="embedded-callout" style="border-left: 4px solid ${color.border}; background-color: ${color.bg}; padding: 12px 16px; margin: 12px 0; border-radius: 0 8px 8px 0;" contenteditable="true">💡 <strong>Note:</strong> Type your callout text here...</div><p><br></p>`;
+    window.insertHtmlAtCursor(html);
+    updateNoteContent();
+  };
+};
+
+window.triggerInsertPicture = function() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.onchange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const src = evt.target.result;
+      const html = `<div class="resizable-image-wrapper" style="position: relative; display: inline-block; resize: both; overflow: hidden; width: 300px; height: 200px; max-width: 100%; min-width: 50px; min-height: 50px; border: 1px dashed var(--panel-border); margin: 8px; vertical-align: bottom;">
+        <img src="${src}" style="width: 100%; height: 100%; object-fit: contain; pointer-events: none;" />
+      </div><p><br></p>`;
+      noteBodyInput.focus();
+      window.insertHtmlAtCursor(html);
+      updateNoteContent();
+    };
+    reader.readAsDataURL(file);
+  };
+  input.click();
+};
+
+window.insertCodeSnippet = function() {
+  const html = `<pre class="code-snippet-block" style="background:var(--bg-color-alt); border:1px solid var(--panel-border); border-radius:6px; padding:12px; font-family:'Courier New', Courier, monospace; font-size:0.9rem; margin:12px 0; overflow-x:auto; color:var(--text-primary);" contenteditable="true"><code>// Paste your code here\nconsole.log("Hello, World!");</code></pre><p><br></p>`;
+  window.insertHtmlAtCursor(html);
+  updateNoteContent();
+};
+
+window.insertQuoteBlock = function() {
+  const html = `<blockquote class="editor-blockquote" style="border-left:4px solid var(--accent-color); padding-left:16px; margin:12px 0 12px 8px; font-style:italic; color:var(--text-secondary);" contenteditable="true">"Type your quote here..."</blockquote><p><br></p>`;
+  window.insertHtmlAtCursor(html);
+  updateNoteContent();
+};
+
+window.insertCollapsible = function() {
+  const html = `<details class="editor-details" style="border:1px solid var(--panel-border); border-radius:6px; margin:12px 0; padding:10px 14px; background:var(--bg-color-alt);">
+    <summary style="font-weight:600; cursor:pointer; outline:none; color:var(--text-primary);" contenteditable="true">Click to expand section title</summary>
+    <div style="margin-top:8px; color:var(--text-secondary);" contenteditable="true">Type your hidden content here...</div>
+  </details><p><br></p>`;
+  window.insertHtmlAtCursor(html);
+  updateNoteContent();
+};
+
+window.insertMathEquation = function() {
+  const eq = prompt("Enter your math equation (e.g. E = mc² or a² + b² = c²):", "E = mc²");
+  if (!eq) return;
+  const html = `<div class="editor-math-block" style="text-align:center; font-family:'Cambria Math', 'Times New Roman', Times, serif; font-style:italic; font-size:1.3rem; padding:16px; margin:12px 0; background:var(--bg-color-alt); border-radius:6px; color:var(--text-primary);" contenteditable="true">${eq}</div><p><br></p>`;
+  window.insertHtmlAtCursor(html);
+  updateNoteContent();
+};
+
+window.insertHeadlineSeparated = function() {
+  const html = `<h3 class="separated-headline" style="border-bottom:1px solid var(--panel-border); padding-bottom:6px; margin-top:24px; margin-bottom:12px; color:var(--text-primary); font-size: 1.3rem; font-weight: 600;" contenteditable="true">Headline Title</h3><p><br></p>`;
+  window.insertHtmlAtCursor(html);
+  updateNoteContent();
+};
+
+window.insertBulletList = function() {
+  noteBodyInput.focus();
+  document.execCommand('insertUnorderedList');
+  updateNoteContent();
+};
+
+window.insertNumberedList = function() {
+  noteBodyInput.focus();
+  document.execCommand('insertOrderedList');
+  updateNoteContent();
+};
+
+// --- Trash Bin Functionality ---
+window.restoreTrashItem = function(itemId) {
+  const index = trashItems.findIndex(t => t.id === itemId);
+  if (index === -1) return;
+  const item = trashItems[index];
+  
+  if (item.type === 'note') {
+    notes.push(item.data);
+    saveNotes();
+  } else if (item.type === 'folder') {
+    const folderData = item.data;
+    notes.push(...folderData.notes);
+    if (folderData.pinned) {
+      pinnedGroups.push(folderData.folderName);
+      localStorage.setItem('opennotes_pinned_groups', JSON.stringify(pinnedGroups));
+    }
+    saveNotes();
+  } else if (item.type === 'college_folder') {
+    collegeFolders.push(item.data);
+    saveCollegeFolders();
+  } else if (item.type === 'college_pdf') {
+    const parentFolder = collegeFolders.find(f => f.id === item.data.folderId) || collegeFolders[0];
+    if (parentFolder) {
+      parentFolder.pdfs.push(item.data.pdf);
+      saveCollegeFolders();
+    } else {
+      collegeFolders.push({
+        id: item.data.folderId,
+        name: 'Restored Documents',
+        pdfs: [item.data.pdf],
+        category: 'College'
+      });
+      saveCollegeFolders();
+    }
+  } else if (item.type === 'board_item') {
+    boardItems.push(item.data);
+    saveBoard();
+  }
+  
+  trashItems.splice(index, 1);
+  saveTrash();
+  showAppToast(`Successfully restored "${item.title || 'item'}"`);
+  renderHomeGrid();
+};
+
+window.deleteTrashItemPermanently = function(itemId) {
+  const index = trashItems.findIndex(t => t.id === itemId);
+  if (index === -1) return;
+  const item = trashItems[index];
+  if (!confirm(`Are you sure you want to permanently delete "${item.title || 'this item'}"? This action cannot be undone.`)) return;
+  
+  trashItems.splice(index, 1);
+  saveTrash();
+  showAppToast('Item deleted permanently.');
+  renderHomeGrid();
+};
+
+window.clearAllTrash = function() {
+  if (trashItems.length === 0) return;
+  if (!confirm('Are you sure you want to permanently delete all items in the Trash Bin? This action cannot be undone.')) return;
+  
+  trashItems = [];
+  saveTrash();
+  showAppToast('Trash Bin cleared.');
+  renderHomeGrid();
+};
+
+function renderTrashView(searchTerm = '') {
+  if (!homeGrid) return;
+  homeGrid.innerHTML = '';
+  const term = (searchTerm || '').toLowerCase();
+  
+  const headerCard = document.createElement('div');
+  headerCard.style.cssText = 'grid-column: 1/-1; display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; background: var(--bg-color-alt); border-radius: 8px; margin-bottom: 12px; border: 1px solid var(--panel-border);';
+  headerCard.innerHTML = `
+    <div style="display:flex; flex-direction:column; gap:4px;">
+      <h3 style="margin:0; font-size:1.15rem; font-weight:600; color:var(--text-primary);">Trash Bin</h3>
+      <span style="font-size:0.85rem; color:var(--text-secondary);">${trashItems.length} item${trashItems.length === 1 ? '' : 's'} in trash</span>
+    </div>
+    <button onclick="clearAllTrash()" style="background:var(--accent-color); color:#fff; border:none; padding:8px 16px; border-radius:6px; font-weight:600; cursor:pointer; font-size:0.85rem; transition:opacity 0.2s;" ${trashItems.length === 0 ? 'disabled style="opacity:0.5; cursor:default;"' : ''}>🗑️ Empty Trash</button>
+  `;
+  homeGrid.appendChild(headerCard);
+  
+  const filtered = trashItems.filter(item => 
+    (item.title || '').toLowerCase().includes(term) || (item.type || '').toLowerCase().includes(term)
+  );
+  
+  if (filtered.length === 0) {
+    const empty = document.createElement('div');
+    empty.style.cssText = 'color: var(--text-secondary); grid-column: 1/-1; text-align: center; padding: 40px; font-size: 1.1rem;';
+    empty.textContent = 'Trash Bin is empty.';
+    homeGrid.appendChild(empty);
+    return;
+  }
+  
+  filtered.forEach(item => {
+    const card = document.createElement('div');
+    card.className = 'book-card';
+    card.style.cssText = 'border-top: 3px solid #dc2626; position: relative;';
+    
+    let typeLabel = '';
+    let icon = '';
+    if (item.type === 'note') { typeLabel = 'Note'; icon = '📝'; }
+    else if (item.type === 'folder') { typeLabel = 'Project Folder'; icon = '📁'; }
+    else if (item.type === 'college_folder') { typeLabel = 'College Folder'; icon = '🏫'; }
+    else if (item.type === 'college_pdf') { typeLabel = 'College PDF'; icon = '📄'; }
+    else if (item.type === 'board_item') { typeLabel = `Board Pin (${item.data.type})`; icon = '📌'; }
+    
+    const delDate = new Date(item.deletedAt).toLocaleDateString();
+    
+    card.innerHTML = `
+      <div style="font-size: 2rem; margin-bottom: 8px;">${icon}</div>
+      <h4 style="margin:0 0 6px 0; font-size:1.05rem; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; color:var(--text-primary);">${gsEscape(item.title || 'Untitled')}</h4>
+      <div style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:14px;">${typeLabel} • Deleted ${delDate}</div>
+      <div style="display:flex; gap:8px; margin-top:auto; width:100%;">
+        <button onclick="restoreTrashItem('${item.id}')" style="flex:1; background:var(--overlay-medium); border:1px solid var(--panel-border); color:var(--text-primary); padding:6px; border-radius:6px; cursor:pointer; font-size:0.8rem; font-weight:600; transition:all 0.2s;">Restore</button>
+        <button onclick="deleteTrashItemPermanently('${item.id}')" style="flex:1; background:rgba(220,38,38,0.1); border:1px solid rgba(220,38,38,0.2); color:#dc2626; padding:6px; border-radius:6px; cursor:pointer; font-size:0.8rem; font-weight:600; transition:all 0.2s;">Delete</button>
+      </div>
+    `;
+    homeGrid.appendChild(card);
+  });
+}
+
+function downloadBlob(content, filename, contentType) {
+  const blob = new Blob([content], { type: contentType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function htmlToMarkdown(html) {
+  let md = html;
+  md = md.replace(/<h1>(.*?)<\/h1>/gi, '# $1\n\n');
+  md = md.replace(/<h2>(.*?)<\/h2>/gi, '## $1\n\n');
+  md = md.replace(/<h3>(.*?)<\/h3>/gi, '### $1\n\n');
+  md = md.replace(/<b>(.*?)<\/b>/gi, '**$1**');
+  md = md.replace(/<strong>(.*?)<\/strong>/gi, '**$1**');
+  md = md.replace(/<i>(.*?)<\/i>/gi, '*$1*');
+  md = md.replace(/<em>(.*?)<\/em>/gi, '*$1*');
+  md = md.replace(/<span class="note-link" data-id="(.*?)">(.*?)<\/span>/gi, '[[$2]]');
+  md = md.replace(/<blockquote.*?>(.*?)<\/blockquote>/gi, '> $1\n\n');
+  md = md.replace(/<pre.*?><code.*?>(.*?)<\/code><\/pre>/gi, '```\n$1\n```\n\n');
+  md = md.replace(/<details.*?><summary.*?>(.*?)<\/summary>(.*?)<\/details>/gi, '<details>\n<summary>$1</summary>\n$2\n</details>\n\n');
+  md = md.replace(/<li.*?>(.*?)<\/li>/gi, '* $1\n');
+  md = md.replace(/<ul.*?>/gi, '\n');
+  md = md.replace(/<\/ul>/gi, '\n');
+  md = md.replace(/<ol.*?>/gi, '\n');
+  md = md.replace(/<\/ol>/gi, '\n');
+  md = md.replace(/<div.*?>/gi, '');
+  md = md.replace(/<\/div>/gi, '\n');
+  md = md.replace(/<p.*?>/gi, '');
+  md = md.replace(/<\/p>/gi, '\n\n');
+  md = md.replace(/<br\s*\/?>/gi, '\n');
+  md = md.replace(/<[^>]*>?/gm, '');
+  return md;
+}
+
+function exportNoteAsImageA4(note) {
+  const toast = showAppToast('Generating A4 image export...', { duration: 0 });
+  
+  const container = document.createElement('div');
+  container.className = 'a4-export-container';
+  container.style.cssText = `
+    position: fixed;
+    top: -9999px;
+    left: -9999px;
+    width: 794px;
+    min-height: 1123px;
+    padding: 60px;
+    box-sizing: border-box;
+    background: #fff;
+    color: #000;
+    font-family: Inter, -apple-system, sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+  `;
+  
+  const titleEl = document.createElement('h1');
+  titleEl.textContent = noteDisplayTitle(note);
+  titleEl.style.cssText = `
+    margin-top: 0;
+    margin-bottom: 24px;
+    font-size: 28px;
+    font-weight: bold;
+    border-bottom: 2px solid #eae6df;
+    padding-bottom: 12px;
+  `;
+  container.appendChild(titleEl);
+  
+  const bodyEl = document.createElement('div');
+  bodyEl.innerHTML = note.body || '';
+  bodyEl.querySelectorAll('table').forEach(t => {
+    t.style.border = '1px solid #ddd';
+    t.style.width = '100%';
+    t.style.borderCollapse = 'collapse';
+  });
+  bodyEl.querySelectorAll('td, th').forEach(c => {
+    c.style.border = '1px solid #ddd';
+    c.style.padding = '8px';
+  });
+  bodyEl.querySelectorAll('pre').forEach(p => {
+    p.style.background = '#f5f5f5';
+    p.style.border = '1px solid #ddd';
+    p.style.padding = '10px';
+    p.style.borderRadius = '4px';
+  });
+  container.appendChild(bodyEl);
+  document.body.appendChild(container);
+  
+  html2canvas(container, {
+    scale: 2,
+    useCORS: true,
+    logging: false
+  }).then(canvas => {
+    canvas.toBlob(blob => {
+      if (blob) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${(note.title || 'Untitled').replace(/[^a-z0-9]/gi, '_').toLowerCase()}.png`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+      container.remove();
+      if (toast) toast.remove();
+      showAppToast('A4 image exported successfully!');
+    }, 'image/png');
+  }).catch(err => {
+    console.error(err);
+    container.remove();
+    if (toast) toast.remove();
+    alert('Failed to generate A4 image export.');
+  });
+}

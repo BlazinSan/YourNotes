@@ -5437,3 +5437,230 @@ body.haven-open {
     width: 168px !important;
   }
 }
+
+/* ==========================================================================
+   Advanced Editor Components, Custom Modal Dialogs, and Print Layouts
+   ========================================================================== */
+
+/* Static Toolbar */
+.static-editor-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 24px;
+  background: var(--bg-color-alt);
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.static-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: var(--overlay-medium);
+  border: 1px solid var(--panel-border);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.static-toolbar-btn:hover {
+  background: var(--overlay-heavy);
+  border-color: var(--accent-color);
+  transform: translateY(-1px);
+}
+
+.static-toolbar-btn:active {
+  transform: translateY(0);
+}
+
+/* Custom Dialog Modal */
+.custom-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(4px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.custom-dialog-card {
+  width: 100%;
+  max-width: 440px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+  color: var(--text-primary);
+  animation: ynFadeInScale 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.custom-dialog-card h4 {
+  margin-top: 0;
+  margin-bottom: 12px;
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.custom-dialog-card button {
+  font-family: inherit;
+}
+
+.custom-dialog-card .dialog-cancel-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  transition: background 0.2s;
+}
+
+.custom-dialog-card .dialog-cancel-btn:hover {
+  background: var(--overlay-medium);
+}
+
+/* Resizable Image Handles */
+.resizable-image-wrapper {
+  transition: outline 0.15s ease;
+}
+
+.resizable-image-wrapper:hover {
+  outline: 2px dashed var(--accent-color);
+}
+
+/* Editor Element Overrides */
+#note-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 16px 0;
+  color: var(--text-primary);
+}
+
+#note-body th,
+#note-body td {
+  border: 1px solid var(--panel-border);
+  padding: 10px 12px;
+}
+
+#note-body th {
+  background-color: var(--bg-color-alt);
+  font-weight: 600;
+}
+
+#note-body blockquote {
+  border-left: 4px solid var(--accent-color);
+  padding-left: 16px;
+  margin: 16px 0 16px 8px;
+  font-style: italic;
+  color: var(--text-secondary);
+}
+
+#note-body pre {
+  margin: 16px 0;
+  overflow-x: auto;
+}
+
+#note-body details {
+  transition: all 0.2s ease;
+}
+
+/* Print CSS Stylesheet */
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+  
+  .editor-area,
+  .editor-area * {
+    visibility: visible !important;
+  }
+  
+  .editor-area {
+    position: absolute;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    box-shadow: none !important;
+  }
+  
+  /* Hide typical GUI elements */
+  .editor-header button,
+  .editor-actions,
+  .static-editor-toolbar,
+  .floating-toolbar,
+  #save-indicator,
+  .sidebar,
+  .app-alert-overlay,
+  .custom-dialog-overlay {
+    display: none !important;
+    visibility: hidden !important;
+  }
+  
+  #note-title {
+    border: none !important;
+    font-size: 26pt !important;
+    font-weight: bold !important;
+    margin-bottom: 24pt !important;
+    background: transparent !important;
+    color: #000000 !important;
+    box-sizing: border-box !important;
+    padding: 0 !important;
+  }
+  
+  #note-body {
+    border: none !important;
+    background: transparent !important;
+    color: #000000 !important;
+    font-size: 12pt !important;
+    line-height: 1.62 !important;
+    box-sizing: border-box !important;
+    padding: 0 !important;
+  }
+  
+  #note-body table {
+    border: 1px solid #333333 !important;
+  }
+  
+  #note-body th,
+  #note-body td {
+    border: 1px solid #555555 !important;
+    color: #000000 !important;
+    background: transparent !important;
+  }
+  
+  #note-body pre {
+    background: #f4f4f4 !important;
+    border: 1px solid #cccccc !important;
+    color: #000000 !important;
+  }
+  
+  #note-body blockquote {
+    border-left: 4px solid #000000 !important;
+    color: #333333 !important;
+  }
+  
+  @page {
+    size: A4;
+    margin: 20mm;
+  }
+}
+
+@keyframes ynFadeInScale {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
