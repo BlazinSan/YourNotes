@@ -4254,6 +4254,14 @@ function showBoardViewer(item, src, isBlob = false) {
   }
 }
 
+// Fullscreen pinch-zoom preview for any in-note image, reusing showBoardViewer's
+// image viewer overlay/CSS. isBlob stays false: the src belongs to the note's
+// own <img>, not a URL we created, so it must not be revoked on close.
+function openImageFullscreen(img) {
+  if (!img || !img.src) return;
+  showBoardViewer({ type: 'image', name: 'Image' }, img.src, false);
+}
+
 window.viewBoardPDF = function(name, src) {
   const modal = document.getElementById('college-pdf-viewer-modal');
   const titleEl = document.getElementById('college-pdf-viewer-title');
@@ -6491,10 +6499,18 @@ let selectedImageWrapper = null;
 document.addEventListener('click', (e) => {
   if (e.target.closest('.resizable-image-wrapper')) {
     const wrapper = e.target.closest('.resizable-image-wrapper');
+    const wasSelected = selectedImageWrapper === wrapper;
     if (selectedImageWrapper && selectedImageWrapper !== wrapper) {
       deselectImage();
     }
     selectImage(wrapper);
+    // Tapping an image that wasn't already selected also opens the fullscreen
+    // viewer (quick preview); once selected, the 🔍 button in the action bar
+    // re-opens it without needing to deselect/reselect.
+    if (!wasSelected) {
+      const tappedImg = wrapper.querySelector('img');
+      if (tappedImg) openImageFullscreen(tappedImg);
+    }
     return;
   }
   
@@ -6539,10 +6555,16 @@ function selectImage(wrapper) {
       <button class="img-action-btn preset-50">50%</button>
       <button class="img-action-btn preset-100">100%</button>
       <div class="img-action-divider"></div>
+      <button class="img-action-btn magnify-btn">🔍</button>
       <button class="img-action-btn crop-btn">✂️ Crop</button>
       <button class="img-action-btn delete-btn">🗑️ Delete</button>
     `;
-    
+
+    actionBar.querySelector('.magnify-btn').onclick = (e) => {
+      e.stopPropagation();
+      const wrapperImg = wrapper.querySelector('img');
+      if (wrapperImg) openImageFullscreen(wrapperImg);
+    };
     actionBar.querySelector('.preset-25').onclick = (e) => {
       e.stopPropagation();
       wrapper.style.width = '25%';
@@ -6628,20 +6650,16 @@ function startImageResize(e, wrapper, direction) {
 function startImageCrop(wrapper) {
   const img = wrapper.querySelector('img');
   if (!img) return;
-  
+
   deselectImage();
-  
+
+  // New model: the crop FRAME is fixed; the image pinch-zooms/pans inside it
+  // (reusing enablePinchToZoom). Apply renders whatever is frame-visible.
   const cropOverlay = document.createElement('div');
   cropOverlay.className = 'crop-overlay';
   cropOverlay.innerHTML = `
-    <div class="crop-container">
+    <div class="crop-frame">
       <img src="${img.src}" id="crop-source-img" />
-      <div class="crop-selection" id="crop-selector">
-        <div class="crop-handle ch-nw" data-handle="nw"></div>
-        <div class="crop-handle ch-ne" data-handle="ne"></div>
-        <div class="crop-handle ch-sw" data-handle="sw"></div>
-        <div class="crop-handle ch-se" data-handle="se"></div>
-      </div>
     </div>
     <div class="crop-toolbar">
       <button class="crop-btn-cancel">Cancel</button>
@@ -6649,168 +6667,56 @@ function startImageCrop(wrapper) {
     </div>
   `;
   document.body.appendChild(cropOverlay);
-  
+
+  const frame = cropOverlay.querySelector('.crop-frame');
   const sourceImg = cropOverlay.querySelector('#crop-source-img');
-  const selector = cropOverlay.querySelector('#crop-selector');
   const cancelBtn = cropOverlay.querySelector('.crop-btn-cancel');
   const applyBtn = cropOverlay.querySelector('.crop-btn-apply');
-  
+
   cancelBtn.onclick = () => cropOverlay.remove();
-  
-  sourceImg.onload = () => {
-    const imgWidth = sourceImg.clientWidth;
-    const imgHeight = sourceImg.clientHeight;
-    
-    let selWidth = imgWidth * 0.8;
-    let selHeight = imgHeight * 0.8;
-    let selLeft = (imgWidth - selWidth) / 2;
-    let selTop = (imgHeight - selHeight) / 2;
-    
-    updateSelectorDOM();
-    
-    function updateSelectorDOM() {
-      selector.style.left = `${selLeft}px`;
-      selector.style.top = `${selTop}px`;
-      selector.style.width = `${selWidth}px`;
-      selector.style.height = `${selHeight}px`;
-    }
-    
-    selector.onmousedown = (e) => {
-      if (e.target.classList.contains('crop-handle')) return;
-      e.preventDefault();
-      const startX = e.clientX;
-      const startY = e.clientY;
-      const initialLeft = selLeft;
-      const initialTop = selTop;
-      
-      function onMove(moveEvent) {
-        let dx = moveEvent.clientX - startX;
-        let dy = moveEvent.clientY - startY;
-        
-        selLeft = Math.max(0, Math.min(initialLeft + dx, imgWidth - selWidth));
-        selTop = Math.max(0, Math.min(initialTop + dy, imgHeight - selHeight));
-        updateSelectorDOM();
-      }
-      
-      function onMoveEnd() {
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onMoveEnd);
-      }
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onMoveEnd);
-    };
-    
-    selector.addEventListener('touchstart', (e) => {
-      if (e.target.classList.contains('crop-handle')) return;
-      e.preventDefault();
-      const touch = e.touches[0];
-      const startX = touch.clientX;
-      const startY = touch.clientY;
-      const initialLeft = selLeft;
-      const initialTop = selTop;
-      
-      function onTouchMove(moveEvent) {
-        const currentTouch = moveEvent.touches[0];
-        let dx = currentTouch.clientX - startX;
-        let dy = currentTouch.clientY - startY;
-        
-        selLeft = Math.max(0, Math.min(initialLeft + dx, imgWidth - selWidth));
-        selTop = Math.max(0, Math.min(initialTop + dy, imgHeight - selHeight));
-        updateSelectorDOM();
-      }
-      
-      function onTouchEnd() {
-        document.removeEventListener('touchmove', onTouchMove);
-        document.removeEventListener('touchend', onTouchEnd);
-      }
-      document.addEventListener('touchmove', onTouchMove, { passive: false });
-      document.addEventListener('touchend', onTouchEnd);
-    }, { passive: false });
-    
-    cropOverlay.querySelectorAll('.crop-handle').forEach(handle => {
-      const handleType = handle.dataset.handle;
-      
-      const onDragStart = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const clientX = e.clientX || e.touches[0].clientX;
-        const clientY = e.clientY || e.touches[0].clientY;
-        const initialLeft = selLeft;
-        const initialTop = selTop;
-        const initialWidth = selWidth;
-        const initialHeight = selHeight;
-        
-        function onDragMove(moveEvent) {
-          const curX = moveEvent.clientX || (moveEvent.touches && moveEvent.touches[0].clientX);
-          const curY = moveEvent.clientY || (moveEvent.touches && moveEvent.touches[0].clientY);
-          const dx = curX - clientX;
-          const dy = curY - clientY;
-          
-          if (handleType === 'se') {
-            selWidth = Math.max(30, Math.min(initialWidth + dx, imgWidth - initialLeft));
-            selHeight = Math.max(30, Math.min(initialHeight + dy, imgHeight - initialTop));
-          } else if (handleType === 'sw') {
-            const newLeft = Math.max(0, Math.min(initialLeft + dx, initialLeft + initialWidth - 30));
-            selWidth = initialWidth + (initialLeft - newLeft);
-            selLeft = newLeft;
-            selHeight = Math.max(30, Math.min(initialHeight + dy, imgHeight - initialTop));
-          } else if (handleType === 'ne') {
-            const newTop = Math.max(0, Math.min(initialTop + dy, initialTop + initialHeight - 30));
-            selHeight = initialHeight + (initialTop - newTop);
-            selTop = newTop;
-            selWidth = Math.max(30, Math.min(initialWidth + dx, imgWidth - initialLeft));
-          } else if (handleType === 'nw') {
-            const newLeft = Math.max(0, Math.min(initialLeft + dx, initialLeft + initialWidth - 30));
-            const newTop = Math.max(0, Math.min(initialTop + dy, initialTop + initialHeight - 30));
-            selWidth = initialWidth + (initialLeft - newLeft);
-            selLeft = newLeft;
-            selHeight = initialHeight + (initialTop - newTop);
-            selTop = newTop;
-          }
-          updateSelectorDOM();
-        }
-        
-        function onDragEnd() {
-          document.removeEventListener('mousemove', onDragMove);
-          document.removeEventListener('mouseup', onDragEnd);
-          document.removeEventListener('touchmove', onDragMove);
-          document.removeEventListener('touchend', onDragEnd);
-        }
-        
-        document.addEventListener('mousemove', onDragMove);
-        document.addEventListener('mouseup', onDragEnd);
-        document.addEventListener('touchmove', onDragMove, { passive: false });
-        document.addEventListener('touchend', onDragEnd);
-      };
-      
-      handle.addEventListener('mousedown', onDragStart);
-      handle.addEventListener('touchstart', onDragStart, { passive: false });
-    });
-    
-    applyBtn.onclick = () => {
-      const naturalWidth = img.naturalWidth;
-      const naturalHeight = img.naturalHeight;
-      
-      const scaleX = naturalWidth / imgWidth;
-      const scaleY = naturalHeight / imgHeight;
-      
-      const cropX = selLeft * scaleX;
-      const cropY = selTop * scaleY;
-      const cropW = selWidth * scaleX;
-      const cropH = selHeight * scaleY;
-      
-      const canvas = document.createElement('canvas');
-      canvas.width = cropW;
-      canvas.height = cropH;
-      const ctx = canvas.getContext('2d');
-      
-      ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
-      
-      img.src = canvas.toDataURL('image/png');
-      
-      cropOverlay.remove();
-      updateNoteContent();
-    };
+
+  let zoomCtl = null;
+  const initZoom = () => { zoomCtl = enablePinchToZoom(sourceImg); };
+  if (sourceImg.complete && sourceImg.naturalWidth) initZoom();
+  else sourceImg.onload = initZoom;
+
+  applyBtn.onclick = () => {
+    const nw = img.naturalWidth;
+    const nh = img.naturalHeight;
+    const fw = frame.clientWidth;
+    const fh = frame.clientHeight;
+    const ratio = Math.min(fw / nw, fh / nh) || 1;
+    const boxW = nw * ratio;
+    const boxH = nh * ratio;
+    const { scale: s, posX, posY } = zoomCtl ? zoomCtl.getState() : { scale: 1, posX: 0, posY: 0 };
+
+    // Map the frame's visible rectangle back into the unscaled "contain box"
+    // coordinate space (centered at 0,0), then into source-image pixels.
+    const ixMin = (-fw / 2 - posX) / s;
+    const ixMax = (fw / 2 - posX) / s;
+    const iyMin = (-fh / 2 - posY) / s;
+    const iyMax = (fh / 2 - posY) / s;
+
+    let cropX = (ixMin + boxW / 2) / ratio;
+    let cropY = (iyMin + boxH / 2) / ratio;
+    let cropW = (ixMax - ixMin) / ratio;
+    let cropH = (iyMax - iyMin) / ratio;
+
+    cropX = Math.max(0, Math.min(cropX, nw));
+    cropY = Math.max(0, Math.min(cropY, nh));
+    cropW = Math.max(1, Math.min(cropW, nw - cropX));
+    cropH = Math.max(1, Math.min(cropH, nh - cropY));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = cropW;
+    canvas.height = cropH;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+
+    img.src = canvas.toDataURL('image/png');
+
+    cropOverlay.remove();
+    updateNoteContent();
   };
 }
 
@@ -6951,4 +6857,8 @@ function enablePinchToZoom(img) {
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);
   });
+
+  return {
+    getState: () => ({ scale, posX, posY })
+  };
 }

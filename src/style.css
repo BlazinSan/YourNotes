@@ -5673,63 +5673,24 @@ body.haven-open {
   padding: 24px;
 }
 
-.crop-container {
+/* Fixed crop frame — the image pans/zooms inside it via enablePinchToZoom */
+.crop-frame {
   position: relative;
-  max-width: 90vw;
-  max-height: 70vh;
-  user-select: none;
-  -webkit-user-select: none;
-}
-
-.crop-container img {
-  display: block;
-  max-width: 90vw;
-  max-height: 70vh;
+  width: min(90vw, 520px);
+  height: min(60vh, 520px);
+  overflow: hidden;
   border-radius: 8px;
-}
-
-/* Dimmed areas outside crop region */
-.crop-shade {
-  position: absolute;
-  background: rgba(0, 0, 0, 0.55);
-  pointer-events: none;
-}
-
-/* The crop selection box */
-.crop-selection {
-  position: absolute;
-  border: 2px solid #fff;
+  background: #000;
   box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
-  cursor: move;
-  z-index: 2;
+  touch-action: none;
 }
 
-.crop-selection::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(to right, rgba(255,255,255,0.3) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255,255,255,0.3) 1px, transparent 1px);
-  background-size: 33.33% 33.33%;
-  pointer-events: none;
+.crop-frame img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
-
-/* Crop drag handles */
-.crop-handle {
-  position: absolute;
-  width: 14px;
-  height: 14px;
-  background: #fff;
-  border: 2px solid var(--accent-color);
-  border-radius: 50%;
-  z-index: 3;
-}
-
-.crop-handle.ch-nw { top: -7px; left: -7px; cursor: nwse-resize; }
-.crop-handle.ch-ne { top: -7px; right: -7px; cursor: nesw-resize; }
-.crop-handle.ch-sw { bottom: -7px; left: -7px; cursor: nesw-resize; }
-.crop-handle.ch-se { bottom: -7px; right: -7px; cursor: nwse-resize; }
 
 /* Crop toolbar */
 .crop-toolbar {
