@@ -652,7 +652,9 @@
                         <div id="sync-last" style="color: var(--text-secondary); font-size: 0.8rem; margin-top: 2px;"></div>
                       </div>
                       <div style="display: flex; gap: 8px;">
-                        <button onclick="syncNow()" style="padding: 10px 18px; background: var(--accent-color); color: #fff; border: none; border-radius: 10px; font-weight: 700; cursor: pointer; font-size: 0.9rem;">Sync now</button>
+                        <button onclick="syncNow()" style="padding: 10px 14px; background: var(--accent-color); color: #fff; border: none; border-radius: 10px; font-weight: 700; cursor: pointer; font-size: 0.9rem;">Sync</button>
+                        <button onclick="pushChanges()" style="padding: 10px 14px; background: var(--overlay-medium); color: var(--text-primary); border: none; border-radius: 10px; font-weight: 700; cursor: pointer; font-size: 0.9rem;">Push ↑</button>
+                        <button onclick="pullChanges()" style="padding: 10px 14px; background: var(--overlay-medium); color: var(--text-primary); border: none; border-radius: 10px; font-weight: 700; cursor: pointer; font-size: 0.9rem;">Pull ↓</button>
                         <button onclick="syncSignOut()" style="padding: 10px 18px; background: var(--overlay-medium); color: var(--text-primary); border: none; border-radius: 10px; font-weight: 600; cursor: pointer; font-size: 0.9rem;">Sign out</button>
                       </div>
                     </div>

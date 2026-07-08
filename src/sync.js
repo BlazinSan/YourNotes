@@ -217,19 +217,27 @@ async function uploadBoardBlobs(token) {
   }
 }
 
-window.syncNow = async function () {
+// ---------- Pull ----------
+// Downloads cloud rows newer than our meta timestamp and writes them into
+// localStorage, then refreshes the file map so this device can resolve
+// cloud-only files. Guards against clobbering a key that changed locally
+// since the last successful push (i.e. it's dirty/pending) — those are
+// skipped and counted so the caller can surface it instead of losing data.
+// opts.reload=false suppresses the auto-reload (used by syncNow, which
+// reloads itself only after the following push has also completed).
+window.pullChanges = async function (opts) {
+  const reloadOnChange = !opts || opts.reload !== false;
   const token = getToken();
-  if (!client || !token || pushing) return;
+  if (!client || !token || pushing) return { pulled: 0, skipped: 0 };
   pushing = true;
   try {
-    setStatus("Syncing…");
-    // 1) pull newer keys from the cloud (reassembling any chunked values)
+    setStatus("Pulling…");
     const meta = getMeta();
     const rows = await client.query(api.sync.getAll, { token });
     const chunkMap = {};
     const mainRows = [];
     for (const r of rows) { if (isChunkKey(r.key)) chunkMap[r.key] = r.value; else mainRows.push(r); }
-    let pulled = 0;
+    let pulled = 0, skipped = 0;
     for (const row of mainRows) {
       let value = row.value;
       if (typeof value === "string" && value.startsWith(KV_CHUNK_MARK)) {
@@ -240,19 +248,54 @@ window.syncNow = async function () {
       }
       const known = meta[row.key];
       if (!known || row.updatedAt > known.t) {
-        if (!known || strHash(localStorage.getItem(row.key) || "") !== strHash(value)) {
+        const localVal = localStorage.getItem(row.key) || "";
+        if (known && strHash(localVal) !== known.h) {
+          // Locally changed since the last synced hash but not yet pushed —
+          // pulling now would silently discard the local edit. Skip it; the
+          // next push will send it up and reconcile.
+          skipped++;
+          continue;
+        }
+        if (!known || strHash(localVal) !== strHash(value)) {
           localStorage.setItem(row.key, value);
           pulled++;
         }
         meta[row.key] = { h: strHash(value), t: row.updatedAt };
       }
     }
-    // 2) upload any files referenced in local storage that aren't marked as uploaded
+    setMeta(meta);
+    // refresh the filename→URL map (presigned R2 GET urls) so this device renders cloud files
+    try { localStorage.setItem("yn_file_map", JSON.stringify(await client.action(api.r2.presignDownloads, { token }))); } catch (_) {}
+    localStorage.setItem("yn_last_sync", String(Date.now()));
+    updateSyncUi();
+    const parts = [];
+    if (pulled) parts.push(`Pulled ${pulled} item${pulled > 1 ? "s" : ""}`);
+    if (skipped) parts.push(`skipped ${skipped} local edit${skipped > 1 ? "s" : ""}`);
+    setStatus(parts.length ? parts.join(", ") + "." : "Nothing new to pull.");
+    if (pulled > 0 && reloadOnChange) setTimeout(() => location.reload(), 900);
+    return { pulled, skipped };
+  } catch (e) {
+    setStatus(cleanErr(e), true);
+    return { pulled: 0, skipped: 0 };
+  } finally {
+    pushing = false;
+  }
+};
+
+// ---------- Push ----------
+// Uploads any referenced files/board blobs not yet in the cloud, then writes
+// locally-changed keys (chunking values over the 1 MiB cap) up to Convex.
+window.pushChanges = async function () {
+  const token = getToken();
+  if (!client || !token || pushing) return { pushed: 0 };
+  pushing = true;
+  try {
+    setStatus("Pushing…");
+    const meta = getMeta();
     const allSyncValues = SYNC_KEYS.map(k => localStorage.getItem(k)).filter(Boolean);
     await uploadReferencedFiles(token, allSyncValues);
     await uploadBoardBlobs(token);
 
-    // 3) push keys that changed locally (chunking values over the 1 MiB cap)
     const now = Date.now();
     const rowsToWrite = [];        // flat KV rows (incl. chunk rows)
     const changedMeta = {};        // main-key -> hash, applied after success
@@ -270,6 +313,7 @@ window.syncNow = async function () {
         for (let i = 0; i < n; i++) rowsToWrite.push({ key: k + KV_CHUNK_SEP + i, value: v.slice(i * KV_CHUNK, (i + 1) * KV_CHUNK), updatedAt: now });
       }
     }
+    const pushedCount = Object.keys(changedMeta).length;
     if (rowsToWrite.length) {
       // send in size-bounded batches so a single mutation call never exceeds arg limits
       let batch = [], size = 0;
@@ -281,25 +325,42 @@ window.syncNow = async function () {
       for (const k in changedMeta) meta[k] = { h: changedMeta[k], t: now };
     }
     setMeta(meta);
-    // 3) refresh the filename→URL map (presigned R2 GET urls) so this device renders cloud files
+    // refresh the filename→URL map (presigned R2 GET urls) so this device renders cloud files
     try { localStorage.setItem("yn_file_map", JSON.stringify(await client.action(api.r2.presignDownloads, { token }))); } catch (_) {}
     localStorage.setItem("yn_last_sync", String(Date.now()));
     updateSyncUi();
-    setStatus(pulled ? `Synced — ${pulled} item${pulled > 1 ? "s" : ""} updated from the cloud.` : "Synced ✓");
-    if (pulled > 0) setTimeout(() => location.reload(), 900);
+    setStatus(pushedCount ? `Pushed ${pushedCount} item${pushedCount > 1 ? "s" : ""}.` : "Nothing to push.");
+    return { pushed: pushedCount };
   } catch (e) {
     setStatus(cleanErr(e), true);
+    return { pushed: 0 };
   } finally {
     pushing = false;
   }
 };
 
+// Full sync: pull then push (used at startup / after sign-in). Kept as the
+// single entry point those callers rely on.
+window.syncNow = async function () {
+  if (!client || !getToken() || pushing) return;
+  setStatus("Syncing…");
+  const pullRes = (await window.pullChanges({ reload: false })) || { pulled: 0, skipped: 0 };
+  const pushRes = (await window.pushChanges()) || { pushed: 0 };
+  const parts = [];
+  if (pullRes.pulled) parts.push(`pulled ${pullRes.pulled}`);
+  if (pullRes.skipped) parts.push(`skipped ${pullRes.skipped} local edit${pullRes.skipped > 1 ? "s" : ""}`);
+  if (pushRes.pushed) parts.push(`pushed ${pushRes.pushed}`);
+  setStatus(parts.length ? "Synced — " + parts.join(", ") + "." : "Synced ✓");
+  if (pullRes.pulled > 0) setTimeout(() => location.reload(), 900);
+};
+
 // Called from the Storage override on every setItem — debounced auto-push
+// (a full sync isn't needed for a local edit; pushing keeps it lightweight)
 window.__syncNotifyChange = function (key) {
   if (!client || !getToken()) return;
   if (!SYNC_KEYS.includes(key)) return;
   clearTimeout(pushTimer);
-  pushTimer = setTimeout(() => window.syncNow(), 6000);
+  pushTimer = setTimeout(() => window.pushChanges(), 6000);
 };
 
 // ---------- UI ----------
