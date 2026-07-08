@@ -3086,17 +3086,9 @@ body {
   padding: 40px;
 }
 
-/* Desktop-only nag: on touch devices (phones/tablets — pointer: coarse) the
-   responsive layout applies instead, so the app is fully usable there. */
-@media (pointer: fine) and (max-width: 1000px), (pointer: fine) and (max-height: 650px) {
-  #app {
-    filter: blur(16px);
-    pointer-events: none;
-  }
-  #resize-overlay {
-    display: flex;
-  }
-}
+/* ponytail: the old "maximize your window" nag blurred and pointer-blocked the
+   whole app under 1000x650 — on 125-150% display scaling that bricked the app
+   even maximized. Removed; #resize-overlay stays in the DOM but never shows. */
 
 /* --- Project Tracker Calendar Styles --- */
 .project-calendar-grid {
