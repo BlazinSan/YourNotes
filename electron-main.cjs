@@ -107,8 +107,20 @@ function createWindow() {
   // made while the window was continuously focused.
   mainWindow.on('blur', flushStore);
 
+  // A locked store at startup used to trigger attemptLoad(15) — 15 rounds of a
+  // synchronous 100ms Atomics.wait sleep IN THE MAIN PROCESS — on every single
+  // getItem call while unresolved, freezing the whole app for ~1.5s per read.
+  // Rate-limit retries to at most once every 2s; between attempts just return
+  // whatever we've got (last known / empty) instead of blocking main.
+  let lastLoadAttempt = 0;
   ipcMain.on('load-data-sync', (event, key) => {
-    if (!loadOk) attemptLoad(15); // the lock may have cleared since startup
+    if (!loadOk) {
+      const now = Date.now();
+      if (now - lastLoadAttempt > 2000) {
+        lastLoadAttempt = now;
+        attemptLoad(1); // single quick try; the lock may have cleared since startup
+      }
+    }
     event.returnValue = (loadOk && store[key] !== undefined) ? store[key] : null;
   });
 
@@ -124,6 +136,14 @@ function createWindow() {
     else store[key] = value;
     scheduleWrite();
     event.returnValue = true;
+  });
+
+  // Async twin of save-data-sync (no returnValue — fire-and-forget from the
+  // renderer). Same debounced-write path; just skips the sendSync round-trip.
+  ipcMain.on('save-data', (event, key, value) => {
+    if (value === null || value === undefined) delete store[key]; // removeItem
+    else store[key] = value;
+    scheduleWrite();
   });
 
   // Factory reset: wipe the persistent store (localStorage.clear() alone would

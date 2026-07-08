@@ -13,9 +13,19 @@ import * as __havenEngine from './haven/engine3d.js'
 const _originalSetItem = Storage.prototype.setItem;
 const _originalGetItem = Storage.prototype.getItem;
 
+// Renderer-side read cache: without it, every single getItem() did a
+// sendSync IPC round-trip to main (and could hit main's locked-store retry
+// loop). Read-through once, then serve from memory; setItem/removeItem/clear
+// keep it in sync so it never goes stale.
+const _storageCache = new Map();
+
 Storage.prototype.setItem = function(key, value) {
-  if (window.electronAPI && window.electronAPI.saveDataSync) {
-    window.electronAPI.saveDataSync(key, value);
+  _storageCache.set(key, value);
+  if (window.electronAPI && window.electronAPI.saveData) {
+    // Fire-and-forget async save — main debounces the actual disk write.
+    window.electronAPI.saveData(key, value);
+  } else if (window.electronAPI && window.electronAPI.saveDataSync) {
+    window.electronAPI.saveDataSync(key, value); // fallback for an older preload
   }
   try {
     _originalSetItem.call(this, key, value);
@@ -27,17 +37,23 @@ Storage.prototype.setItem = function(key, value) {
 };
 
 Storage.prototype.getItem = function(key) {
+  if (_storageCache.has(key)) return _storageCache.get(key);
+  let value;
   if (window.electronAPI && window.electronAPI.loadDataSync) {
     const data = window.electronAPI.loadDataSync(key);
-    if (data !== null) return data;
+    value = data !== null ? data : _originalGetItem.call(this, key);
+  } else {
+    value = _originalGetItem.call(this, key);
   }
-  return _originalGetItem.call(this, key);
+  _storageCache.set(key, value);
+  return value;
 };
 
 // removeItem/clear must ALSO update the Electron store — otherwise removed keys
 // (and even a full factory reset) silently resurrect from the store file on restart.
 const _originalRemoveItem = Storage.prototype.removeItem;
 Storage.prototype.removeItem = function(key) {
+  _storageCache.delete(key);
   if (window.electronAPI && window.electronAPI.saveDataSync) {
     window.electronAPI.saveDataSync(key, null); // null = delete in the main process
   }
@@ -45,6 +61,7 @@ Storage.prototype.removeItem = function(key) {
 };
 const _originalClear = Storage.prototype.clear;
 Storage.prototype.clear = function() {
+  _storageCache.clear();
   if (window.electronAPI && window.electronAPI.clearDataSync) {
     window.electronAPI.clearDataSync();
   }

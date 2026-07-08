@@ -49,6 +49,19 @@ let client = CONVEX_URL ? new ConvexHttpClient(CONVEX_URL) : null;
 let pushTimer = null;
 let pushing = false;
 
+// Convex calls have no built-in timeout — a stalled fetch (bad wifi, dead
+// deployment) would otherwise leave "Pulling…/Pushing…" up forever with no
+// way out. Race every call against a timer so the existing catch/finally
+// paths (status + pushing-flag release) always run.
+function withTimeout(promise, ms, label) {
+  ms = ms || 30000;
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error("Sync timed out — check connection" + (label ? " (" + label + ")" : ""))), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 const getToken = () => { try { return localStorage.getItem("yn_sync_token") || ""; } catch (_) { return ""; } };
 const getMeta = () => { try { return JSON.parse(localStorage.getItem("yn_sync_meta") || "{}"); } catch (_) { return {}; } };
 const setMeta = (m) => { try { localStorage.setItem("yn_sync_meta", JSON.stringify(m)); } catch (_) {} };
@@ -70,6 +83,10 @@ const fieldVal = (id) => ((document.getElementById(id) || {}).value || "").trim(
 // ---------- File resolution (cross-device) ----------
 // Desktop stores app files as file:/// paths. Other devices resolve the same
 // filename through the cloud file map instead.
+// Memoized per pull: fileExists is a synchronous IPC round-trip to the main
+// process, and resolveFileUrl gets called once per rendered file reference —
+// caching avoids re-asking main about the same path over and over.
+const fileExistsCache = new Map();
 window.resolveFileUrl = function (path) {
   if (!path || !String(path).startsWith("file:")) return path;
   const m = String(path).match(/\/([A-Za-z0-9._-]+)$/);
@@ -77,8 +94,16 @@ window.resolveFileUrl = function (path) {
     // This desktop only "owns" the file if it's actually on disk here — a
     // path pinned on another machine won't exist locally, so fall through
     // to the cloud file map instead of returning a dead file:// URL.
-    if (window.electronAPI.fileExists && window.electronAPI.fileExists(path)) return path;
-    if (!window.electronAPI.fileExists) return path; // older preload without the check
+    if (window.electronAPI.fileExists) {
+      let exists = fileExistsCache.get(path);
+      if (exists === undefined) {
+        exists = window.electronAPI.fileExists(path);
+        fileExistsCache.set(path, exists);
+      }
+      if (exists) return path;
+    } else {
+      return path; // older preload without the check
+    }
   }
   const url = m && getFileMap()[m[1]];
   return url || path;
@@ -90,7 +115,9 @@ async function afterAuth(res) {
   localStorage.setItem("yn_sync_email", res.email);
   updateSyncUi();
   setStatus("Signed in. Syncing…");
-  await window.syncNow();
+  // Fire-and-forget: don't block the caller (onboarding overlay dismissal) on
+  // the network round-trip. syncNow() updates its own status label as it goes.
+  window.syncNow().catch((e) => setStatus(cleanErr(e), true));
 }
 
 async function doAuth(kind, email, pw, elId) {
@@ -98,7 +125,7 @@ async function doAuth(kind, email, pw, elId) {
   if (!client) { setStatus("Sync isn't configured in this build.", true); return false; }
   try {
     setStatus(kind === "up" ? "Creating your account…" : "Signing in…");
-    const res = await client.action(kind === "up" ? api.auth.signUp : api.auth.signIn, { email, password: pw });
+    const res = await withTimeout(client.action(kind === "up" ? api.auth.signUp : api.auth.signIn, { email, password: pw }), 30000, "auth");
     await afterAuth(res);
     return true;
   } catch (e) { setStatus(cleanErr(e), true); return false; }
@@ -110,7 +137,7 @@ window.onboardingAuth = (kind) => doAuth(kind, fieldVal("onboarding-sync-email")
 
 window.syncSignOut = async function () {
   const token = getToken();
-  if (client && token) { try { await client.mutation(api.sync.signOut, { token }); } catch (_) {} }
+  if (client && token) { try { await withTimeout(client.mutation(api.sync.signOut, { token }), 30000, "signOut"); } catch (_) {} }
   localStorage.removeItem("yn_sync_token");
   localStorage.removeItem("yn_sync_email");
   updateSyncUi();
@@ -149,10 +176,10 @@ async function uploadReferencedFiles(token, values) {
       if (!bytes) continue;
       const ct = guessType(r.name);
       // Presigned PUT straight to Cloudflare R2 (secret stays in Convex).
-      const { url: uploadUrl, r2Key } = await client.action(api.r2.presignUpload, { token, key: r.name });
+      const { url: uploadUrl, r2Key } = await withTimeout(client.action(api.r2.presignUpload, { token, key: r.name }), 30000, "presignUpload");
       const resp = await fetch(uploadUrl, { method: "PUT", body: new Blob([bytes]), headers: { "content-type": ct } });
       if (!resp.ok) throw new Error("R2 upload " + resp.status);
-      await client.mutation(api.sync.registerFile, { token, localKey: r.name, r2Key, name: r.name, size: bytes.length || bytes.byteLength || 0 });
+      await withTimeout(client.mutation(api.sync.registerFile, { token, localKey: r.name, r2Key, name: r.name, size: bytes.length || bytes.byteLength || 0 }), 30000, "registerFile");
       uploaded.add(r.name);
       localStorage.setItem("yn_synced_files", JSON.stringify([...uploaded]));
       done++;
@@ -205,10 +232,10 @@ async function uploadBoardBlobs(token) {
       const bytes = new Uint8Array(await blob.arrayBuffer());
       const name = 'blob_' + it.fileId;
       const ct = blob.type || guessType(it.name || '');
-      const { url: uploadUrl, r2Key } = await client.action(api.r2.presignUpload, { token, key: name });
+      const { url: uploadUrl, r2Key } = await withTimeout(client.action(api.r2.presignUpload, { token, key: name }), 30000, "presignUpload");
       const resp = await fetch(uploadUrl, { method: "PUT", body: new Blob([bytes]), headers: { "content-type": ct } });
       if (!resp.ok) throw new Error("R2 upload " + resp.status);
-      await client.mutation(api.sync.registerFile, { token, localKey: name, r2Key, name, size: bytes.length });
+      await withTimeout(client.mutation(api.sync.registerFile, { token, localKey: name, r2Key, name, size: bytes.length }), 30000, "registerFile");
       uploaded.add(name);
       localStorage.setItem("yn_synced_files", JSON.stringify([...uploaded]));
       done++;
@@ -232,8 +259,9 @@ window.pullChanges = async function (opts) {
   pushing = true;
   try {
     setStatus("Pulling…");
+    fileExistsCache.clear();
     const meta = getMeta();
-    const rows = await client.query(api.sync.getAll, { token });
+    const rows = await withTimeout(client.query(api.sync.getAll, { token }), 30000, "getAll");
     const chunkMap = {};
     const mainRows = [];
     for (const r of rows) { if (isChunkKey(r.key)) chunkMap[r.key] = r.value; else mainRows.push(r); }
@@ -265,7 +293,7 @@ window.pullChanges = async function (opts) {
     }
     setMeta(meta);
     // refresh the filename→URL map (presigned R2 GET urls) so this device renders cloud files
-    try { localStorage.setItem("yn_file_map", JSON.stringify(await client.action(api.r2.presignDownloads, { token }))); } catch (_) {}
+    try { localStorage.setItem("yn_file_map", JSON.stringify(await withTimeout(client.action(api.r2.presignDownloads, { token }), 30000, "presignDownloads"))); } catch (_) {}
     localStorage.setItem("yn_last_sync", String(Date.now()));
     updateSyncUi();
     const parts = [];
@@ -318,15 +346,15 @@ window.pushChanges = async function () {
       // send in size-bounded batches so a single mutation call never exceeds arg limits
       let batch = [], size = 0;
       for (const r of rowsToWrite) {
-        if (size + r.value.length > KV_BATCH_BYTES && batch.length) { await client.mutation(api.sync.setKVBatch, { token, entries: batch }); batch = []; size = 0; }
+        if (size + r.value.length > KV_BATCH_BYTES && batch.length) { await withTimeout(client.mutation(api.sync.setKVBatch, { token, entries: batch }), 30000, "setKVBatch"); batch = []; size = 0; }
         batch.push(r); size += r.value.length;
       }
-      if (batch.length) await client.mutation(api.sync.setKVBatch, { token, entries: batch });
+      if (batch.length) await withTimeout(client.mutation(api.sync.setKVBatch, { token, entries: batch }), 30000, "setKVBatch");
       for (const k in changedMeta) meta[k] = { h: changedMeta[k], t: now };
     }
     setMeta(meta);
     // refresh the filename→URL map (presigned R2 GET urls) so this device renders cloud files
-    try { localStorage.setItem("yn_file_map", JSON.stringify(await client.action(api.r2.presignDownloads, { token }))); } catch (_) {}
+    try { localStorage.setItem("yn_file_map", JSON.stringify(await withTimeout(client.action(api.r2.presignDownloads, { token }), 30000, "presignDownloads"))); } catch (_) {}
     localStorage.setItem("yn_last_sync", String(Date.now()));
     updateSyncUi();
     setStatus(pushedCount ? `Pushed ${pushedCount} item${pushedCount > 1 ? "s" : ""}.` : "Nothing to push.");
