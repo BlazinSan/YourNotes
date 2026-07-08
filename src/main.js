@@ -2,6 +2,10 @@ import './style.css'
 import './sync.js'
 import { Capacitor, SystemBars, SystemBarsStyle } from '@capacitor/core'
 import { ScreenOrientation } from '@capacitor/screen-orientation'
+import { Filesystem, Directory } from '@capacitor/filesystem'
+import { Share } from '@capacitor/share'
+import html2canvas from 'html2canvas'
+import { jsPDF } from 'jspdf'
 // Static import (not dynamic): Electron cannot fetch lazy chunks out of app.asar
 import * as __havenEngine from './haven/engine3d.js'
 
@@ -1326,14 +1330,16 @@ window.exportNote = function() {
       const type = btn.getAttribute('data-type');
       overlay.remove();
       if (type === 'pdf') {
-        window.print();
+        exportNoteAsPdfA4(note);
       } else if (type === 'txt') {
         const plainText = note.body ? note.body.replace(/<[^>]*>?/gm, '') : '';
         const content = `${note.title || 'Untitled Note'}\n\n${plainText}`;
-        downloadBlob(content, `${(note.title || 'Untitled').replace(/[^a-z0-9]/gi, '_').toLowerCase()}.txt`, 'text/plain');
+        const blob = new Blob([content], { type: 'text/plain' });
+        saveExportFile(`${(note.title || 'Untitled').replace(/[^a-z0-9]/gi, '_').toLowerCase()}.txt`, blob);
       } else if (type === 'md') {
         const markdown = `# ${noteDisplayTitle(note)}\n\n${htmlToMarkdown(note.body || '')}`;
-        downloadBlob(markdown, `${(note.title || 'Untitled').replace(/[^a-z0-9]/gi, '_').toLowerCase()}.md`, 'text/markdown');
+        const blob = new Blob([markdown], { type: 'text/markdown' });
+        saveExportFile(`${(note.title || 'Untitled').replace(/[^a-z0-9]/gi, '_').toLowerCase()}.md`, blob);
       } else if (type === 'image') {
         exportNoteAsImageA4(note);
       }
@@ -6276,8 +6282,25 @@ function renderTrashView(searchTerm = '') {
   });
 }
 
-function downloadBlob(content, filename, contentType) {
-  const blob = new Blob([content], { type: contentType });
+// Cross-platform save: Electron/web use an anchor download, Android (Capacitor
+// native) writes to the cache dir and hands off to the native share sheet since
+// anchor/blob downloads silently no-op in Android WebView.
+async function saveExportFile(filename, blob) {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const base64Data = await blobToBase64(blob);
+      const result = await Filesystem.writeFile({
+        path: filename,
+        data: base64Data,
+        directory: Directory.Cache,
+      });
+      await Share.share({ title: filename, url: result.uri });
+    } catch (err) {
+      console.error(err);
+      showAppToast('Failed to export file.');
+    }
+    return;
+  }
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -6288,7 +6311,19 @@ function downloadBlob(content, filename, contentType) {
   URL.revokeObjectURL(url);
 }
 
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
 function htmlToMarkdown(html) {
+  // ponytail: table cells get flattened to plain text (no markdown pipe-table
+  // syntax) since round-tripping arbitrary rowspan/colspan HTML tables into
+  // clean markdown tables is out of scope for this exporter.
   let md = html;
   md = md.replace(/<h1>(.*?)<\/h1>/gi, '# $1\n\n');
   md = md.replace(/<h2>(.*?)<\/h2>/gi, '## $1\n\n');
@@ -6315,9 +6350,10 @@ function htmlToMarkdown(html) {
   return md;
 }
 
-function exportNoteAsImageA4(note) {
-  const toast = showAppToast('Generating A4 image export...', { duration: 0 });
-  
+// Builds a clean, offscreen A4-sized DOM node (note title + a styled clone of
+// the note body on a white background) suitable for html2canvas rendering.
+// Caller is responsible for appending it to the body and removing it after use.
+function buildA4ExportContainer(note) {
   const container = document.createElement('div');
   container.className = 'a4-export-container';
   container.style.cssText = `
@@ -6334,7 +6370,7 @@ function exportNoteAsImageA4(note) {
     font-size: 14px;
     line-height: 1.6;
   `;
-  
+
   const titleEl = document.createElement('h1');
   titleEl.textContent = noteDisplayTitle(note);
   titleEl.style.cssText = `
@@ -6346,7 +6382,7 @@ function exportNoteAsImageA4(note) {
     padding-bottom: 12px;
   `;
   container.appendChild(titleEl);
-  
+
   const bodyEl = document.createElement('div');
   bodyEl.innerHTML = note.body || '';
   bodyEl.querySelectorAll('table').forEach(t => {
@@ -6366,32 +6402,83 @@ function exportNoteAsImageA4(note) {
   });
   container.appendChild(bodyEl);
   document.body.appendChild(container);
-  
+  return container;
+}
+
+function exportNoteAsImageA4(note) {
+  const toast = showAppToast('Generating A4 image export...', { duration: 0 });
+  const container = buildA4ExportContainer(note);
+
   html2canvas(container, {
     scale: 2,
     useCORS: true,
     logging: false
   }).then(canvas => {
-    canvas.toBlob(blob => {
-      if (blob) {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${(note.title || 'Untitled').replace(/[^a-z0-9]/gi, '_').toLowerCase()}.png`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }
+    canvas.toBlob(async blob => {
       container.remove();
       if (toast) toast.remove();
-      showAppToast('A4 image exported successfully!');
+      if (blob) {
+        await saveExportFile(`${(note.title || 'Untitled').replace(/[^a-z0-9]/gi, '_').toLowerCase()}.png`, blob);
+        showAppToast('A4 image exported successfully!');
+      }
     }, 'image/png');
   }).catch(err => {
     console.error(err);
     container.remove();
     if (toast) toast.remove();
-    alert('Failed to generate A4 image export.');
+    showAppToast('Failed to generate A4 image export.');
+  });
+}
+
+function exportNoteAsPdfA4(note) {
+  const toast = showAppToast('Generating PDF export...', { duration: 0 });
+  const container = buildA4ExportContainer(note);
+
+  html2canvas(container, {
+    scale: 2,
+    useCORS: true,
+    logging: false
+  }).then(canvas => {
+    container.remove();
+
+    const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const imgWidth = pageWidth;
+    const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+    if (imgHeight <= pageHeight) {
+      pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, imgWidth, imgHeight);
+    } else {
+      // Slice the tall canvas across multiple A4 pages, one page-height of
+      // source pixels at a time.
+      const pageCanvasHeightPx = Math.floor((pageHeight * canvas.width) / imgWidth);
+      let renderedPx = 0;
+      let pageIndex = 0;
+      while (renderedPx < canvas.height) {
+        const sliceHeightPx = Math.min(pageCanvasHeightPx, canvas.height - renderedPx);
+        const sliceCanvas = document.createElement('canvas');
+        sliceCanvas.width = canvas.width;
+        sliceCanvas.height = sliceHeightPx;
+        const ctx = sliceCanvas.getContext('2d');
+        ctx.drawImage(canvas, 0, renderedPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx);
+        const sliceImgHeight = (sliceHeightPx * imgWidth) / canvas.width;
+        if (pageIndex > 0) pdf.addPage();
+        pdf.addImage(sliceCanvas.toDataURL('image/png'), 'PNG', 0, 0, imgWidth, sliceImgHeight);
+        renderedPx += sliceHeightPx;
+        pageIndex++;
+      }
+    }
+
+    const blob = pdf.output('blob');
+    if (toast) toast.remove();
+    saveExportFile(`${(note.title || 'Untitled').replace(/[^a-z0-9]/gi, '_').toLowerCase()}.pdf`, blob)
+      .then(() => showAppToast('PDF exported successfully!'));
+  }).catch(err => {
+    console.error(err);
+    container.remove();
+    if (toast) toast.remove();
+    showAppToast('Failed to generate PDF export.');
   });
 }
 
