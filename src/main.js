@@ -4574,6 +4574,7 @@ function makeBoardCardInteractive(card, item) {
     if (e.target.closest('.board-resize') || e.target.closest('.board-del')) return;
     if (item.type === 'text' && e.target.closest('.board-text-content')) return; // let text editing work
     e.stopPropagation();
+    window.isDraggingBoardCard = true;
 
     const banner = document.getElementById('dashboard-banner');
     const boardWidth = banner ? banner.clientWidth : 1000;
@@ -4596,6 +4597,7 @@ function makeBoardCardInteractive(card, item) {
       card.style.top = (item.y * scale) + 'px';
     };
     const up = () => {
+      window.isDraggingBoardCard = false;
       card.removeEventListener('pointermove', move); card.removeEventListener('pointerup', up);
       if (moved) { card.classList.remove('dragging'); card.style.transform = 'rotate(' + rot + 'deg)'; saveBoard(); }
       else if (item.type !== 'text') { openBoardItem(item); } // clean click → open
@@ -4607,6 +4609,7 @@ function makeBoardCardInteractive(card, item) {
   if (handle) {
     handle.addEventListener('pointerdown', (e) => {
       e.stopPropagation(); e.preventDefault();
+      window.isDraggingBoardCard = true;
 
       const banner = document.getElementById('dashboard-banner');
       const boardWidth = banner ? banner.clientWidth : 1000;
@@ -4623,7 +4626,13 @@ function makeBoardCardInteractive(card, item) {
         card.style.width = (item.w * scale) + 'px'; 
         card.style.height = (item.h * scale) + 'px'; 
       };
-      const up = () => { card.classList.remove('dragging'); handle.removeEventListener('pointermove', move); handle.removeEventListener('pointerup', up); saveBoard(); };
+      const up = () => { 
+        window.isDraggingBoardCard = false;
+        card.classList.remove('dragging'); 
+        handle.removeEventListener('pointermove', move); 
+        handle.removeEventListener('pointerup', up); 
+        saveBoard(); 
+      };
       handle.addEventListener('pointermove', move); handle.addEventListener('pointerup', up);
     });
   }
@@ -5580,9 +5589,15 @@ function syncGlobalSearchPlaceholder() {
     : 'Search everything — notes, folders, PDFs, tasks, links...';
 }
 syncGlobalSearchPlaceholder();
+let resizeTimeout;
+window.isDraggingBoardCard = false;
 window.addEventListener('resize', () => {
   syncGlobalSearchPlaceholder();
-  renderBoard();
+  if (window.isDraggingBoardCard) return;
+  clearTimeout(resizeTimeout);
+  resizeTimeout = setTimeout(() => {
+    renderBoard();
+  }, 150);
 });
 
 // ============================================================
