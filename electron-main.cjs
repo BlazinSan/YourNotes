@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, shell, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -187,6 +187,30 @@ function createWindow() {
       if (!norm.startsWith(base)) return null;
       return fs.readFileSync(norm);
     } catch (_) { return null; }
+  });
+
+  // Remembered sync credentials: single-account, OS-encrypted (safeStorage),
+  // stored as an encrypted blob in userData — no Electron password manager exists.
+  const credsPath = path.join(app.getPath('userData'), 'creds.bin');
+  ipcMain.handle('cred-save', async (event, { email, password }) => {
+    try {
+      if (!safeStorage.isEncryptionAvailable()) return false;
+      const enc = safeStorage.encryptString(JSON.stringify({ email, password }));
+      fs.writeFileSync(credsPath, enc);
+      return true;
+    } catch (_) { return false; }
+  });
+  ipcMain.handle('cred-load', async () => {
+    try {
+      if (!safeStorage.isEncryptionAvailable()) return null;
+      if (!fs.existsSync(credsPath)) return null;
+      const enc = fs.readFileSync(credsPath);
+      return JSON.parse(safeStorage.decryptString(enc));
+    } catch (_) { return null; }
+  });
+  ipcMain.handle('cred-clear', async () => {
+    try { fs.unlinkSync(credsPath); } catch (_) {}
+    return true;
   });
 
   // Security: open external links in the OS browser, block in-app navigation away from the app

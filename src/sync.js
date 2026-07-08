@@ -110,9 +110,14 @@ window.resolveFileUrl = function (path) {
 };
 
 // ---------- Auth ----------
-async function afterAuth(res) {
+async function afterAuth(res, pw) {
   localStorage.setItem("yn_sync_token", res.token);
   localStorage.setItem("yn_sync_email", res.email);
+  // Electron has no built-in password manager — remember the credentials
+  // ourselves via OS-encrypted storage (safeStorage) in the main process.
+  if (window.electronAPI && window.electronAPI.saveCred && pw) {
+    try { window.electronAPI.saveCred(res.email, pw); } catch (_) {}
+  }
   updateSyncUi();
   setStatus("Signed in. Syncing…");
   // Fire-and-forget: don't block the caller (onboarding overlay dismissal) on
@@ -126,7 +131,7 @@ async function doAuth(kind, email, pw, elId) {
   try {
     setStatus(kind === "up" ? "Creating your account…" : "Signing in…");
     const res = await withTimeout(client.action(kind === "up" ? api.auth.signUp : api.auth.signIn, { email, password: pw }), 30000, "auth");
-    await afterAuth(res);
+    await afterAuth(res, pw);
     return true;
   } catch (e) { setStatus(cleanErr(e), true); return false; }
 }
@@ -140,6 +145,7 @@ window.syncSignOut = async function () {
   if (client && token) { try { await withTimeout(client.mutation(api.sync.signOut, { token }), 30000, "signOut"); } catch (_) {} }
   localStorage.removeItem("yn_sync_token");
   localStorage.removeItem("yn_sync_email");
+  if (window.electronAPI && window.electronAPI.clearCred) { try { window.electronAPI.clearCred(); } catch (_) {} }
   updateSyncUi();
   setStatus("Signed out. Your data stays on this device.");
 };
@@ -408,10 +414,39 @@ window.updateSyncUi = function () {
   }
   const badge = document.getElementById("sync-not-configured");
   if (badge) badge.style.display = client ? "none" : "";
+  // Prefill the email field on both the settings and onboarding sign-in UIs
+  // from the last successful auth, so returning users don't retype it.
+  if (email) {
+    const emailEl = document.getElementById("sync-email");
+    if (emailEl && !emailEl.value) emailEl.value = email;
+    const onbEmailEl = document.getElementById("onboarding-sync-email");
+    if (onbEmailEl && !onbEmailEl.value) onbEmailEl.value = email;
+  }
 };
+
+// Electron has no password-manager autofill, so pull the remembered
+// credentials (OS-encrypted via safeStorage in the main process) and fill
+// both email+password fields ourselves. Async — runs once at startup.
+async function prefillElectronCreds() {
+  if (!(window.electronAPI && window.electronAPI.loadCred)) return;
+  let creds;
+  try { creds = await window.electronAPI.loadCred(); } catch (_) { creds = null; }
+  if (!creds) return;
+  const fields = [
+    ["sync-email", "sync-password"],
+    ["onboarding-sync-email", "onboarding-sync-pass"]
+  ];
+  for (const [emailId, passId] of fields) {
+    const emailEl = document.getElementById(emailId);
+    const passEl = document.getElementById(passId);
+    if (emailEl && !emailEl.value && creds.email) emailEl.value = creds.email;
+    if (passEl && !passEl.value && creds.password) passEl.value = creds.password;
+  }
+}
 
 function initSync() {
   updateSyncUi();
+  prefillElectronCreds();
   // signed in → sync shortly after startup (pull newer data from other devices)
   if (client && getToken()) setTimeout(() => window.syncNow(), 2500);
 }

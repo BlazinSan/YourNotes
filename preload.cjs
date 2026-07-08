@@ -12,5 +12,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readFileBytes: (p) => ipcRenderer.invoke('read-file-bytes', p),
   openPath: (p) => ipcRenderer.send('open-path', p),
   fileExists: (p) => ipcRenderer.sendSync('file-exists-sync', p),
+  saveCred: (email, password) => ipcRenderer.invoke('cred-save', { email, password }),
+  loadCred: () => ipcRenderer.invoke('cred-load'),
+  clearCred: () => ipcRenderer.invoke('cred-clear'),
   onNewNote: (callback) => ipcRenderer.on('menu-new-note', () => callback())
 });
