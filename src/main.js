@@ -5862,6 +5862,32 @@ document.addEventListener('click', (e) => {
 })();
 
 // --- Rich Editor Formatting Functions ---
+
+// Saved-range mechanism: toolbar buttons/dialogs can steal focus/caret from the
+// contenteditable note body, so we snapshot the selection before that happens
+// and restore it right before inserting content.
+let savedEditorRange = null;
+function saveSelection() {
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount > 0 && noteBodyInput && noteBodyInput.contains(sel.anchorNode)) {
+    savedEditorRange = sel.getRangeAt(0).cloneRange();
+  }
+}
+function restoreSelection() {
+  const sel = window.getSelection();
+  if (!sel) return;
+  sel.removeAllRanges();
+  if (savedEditorRange) {
+    sel.addRange(savedEditorRange);
+  } else if (noteBodyInput) {
+    // No saved range (e.g. user never placed a caret) — fall back to the end of the note body.
+    const range = document.createRange();
+    range.selectNodeContents(noteBodyInput);
+    range.collapse(false);
+    sel.addRange(range);
+  }
+}
+
 window.insertHtmlAtCursor = function(html) {
   let sel, range;
   if (window.getSelection) {
@@ -5869,7 +5895,7 @@ window.insertHtmlAtCursor = function(html) {
     if (sel.getRangeAt && sel.rangeCount) {
       range = sel.getRangeAt(0);
       range.deleteContents();
-      
+
       const el = document.createElement("div");
       el.innerHTML = html;
       const frag = document.createDocumentFragment();
@@ -5878,11 +5904,18 @@ window.insertHtmlAtCursor = function(html) {
         lastNode = frag.appendChild(node);
       }
       range.insertNode(frag);
-      
+
       if (lastNode) {
         range = range.cloneRange();
-        range.setStartAfter(lastNode);
-        range.collapse(true);
+        if (lastNode.nodeType === 1 && lastNode.tagName === 'P') {
+          // Land the caret *inside* the trailing <p><br></p> instead of after it,
+          // otherwise the cursor sits outside any editable text node (caret-trap).
+          range.selectNodeContents(lastNode);
+          range.collapse(true);
+        } else {
+          range.setStartAfter(lastNode);
+          range.collapse(true);
+        }
         sel.removeAllRanges();
         sel.addRange(range);
       }
@@ -5891,13 +5924,14 @@ window.insertHtmlAtCursor = function(html) {
 };
 
 window.insertNoteHyperlink = function() {
+  saveSelection();
   const notesToLink = notes.filter(n => n.id !== activeNoteId);
   if (notesToLink.length === 0) {
     alert("No other notes available to link to.");
     return;
   }
   const options = notesToLink.map(n => `<option value="${n.id}">${gsEscape(n.title || 'Untitled')}</option>`).join('');
-  
+
   const overlay = document.createElement('div');
   overlay.className = 'custom-dialog-overlay';
   overlay.innerHTML = `
@@ -5920,7 +5954,8 @@ window.insertNoteHyperlink = function() {
     const title = sel.options[sel.selectedIndex].text;
     overlay.remove();
     noteBodyInput.focus();
-    
+    restoreSelection();
+
     const linkHtml = `<span class="note-link" contenteditable="false" data-id="${targetId}">${title}</span>&nbsp;`;
     window.insertHtmlAtCursor(linkHtml);
     updateNoteContent();
@@ -5928,28 +5963,54 @@ window.insertNoteHyperlink = function() {
 };
 
 window.insertTable = function() {
-  const rows = parseInt(prompt("Number of rows:", "3") || "0", 10);
-  const cols = parseInt(prompt("Number of columns:", "3") || "0", 10);
-  if (rows <= 0 || cols <= 0) return;
-  
-  let html = `<table style="width:100%; border-collapse:collapse; margin:12px 0; border:1px solid var(--panel-border);">`;
-  for (let r = 0; r < rows; r++) {
-    html += `<tr>`;
-    for (let c = 0; c < cols; c++) {
-      if (r === 0) {
-        html += `<th style="border:1px solid var(--panel-border); padding:8px; background:var(--bg-color-alt); font-weight:600; text-align:left;" contenteditable="true">Header</th>`;
-      } else {
-        html += `<td style="border:1px solid var(--panel-border); padding:8px;" contenteditable="true">Cell</td>`;
+  saveSelection();
+  const overlay = document.createElement('div');
+  overlay.className = 'custom-dialog-overlay';
+  overlay.innerHTML = `
+    <div class="custom-dialog-card">
+      <h4>Insert Table</h4>
+      <label style="display:block; margin:12px 0 4px; color:var(--text-secondary); font-size:0.85rem;">Rows</label>
+      <input type="number" id="table-rows-input" value="3" min="1" max="50" style="width:100%; padding:8px; border-radius:6px; background:var(--bg-color); color:var(--text-primary); border:1px solid var(--panel-border);" />
+      <label style="display:block; margin:12px 0 4px; color:var(--text-secondary); font-size:0.85rem;">Columns</label>
+      <input type="number" id="table-cols-input" value="3" min="1" max="20" style="width:100%; padding:8px; border-radius:6px; background:var(--bg-color); color:var(--text-primary); border:1px solid var(--panel-border); margin-bottom:12px;" />
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button class="dialog-cancel-btn">Cancel</button>
+        <button class="dialog-ok-btn" style="background:var(--accent-color); color:#fff; border:none; padding:6px 12px; border-radius:6px; cursor:pointer;">Insert</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.querySelector('.dialog-cancel-btn').onclick = () => overlay.remove();
+  overlay.querySelector('.dialog-ok-btn').onclick = () => {
+    const rows = parseInt(document.getElementById('table-rows-input').value || "0", 10);
+    const cols = parseInt(document.getElementById('table-cols-input').value || "0", 10);
+    overlay.remove();
+    if (rows <= 0 || cols <= 0) return;
+    noteBodyInput.focus();
+    restoreSelection();
+
+    // Note: table cells are not individually contenteditable — the note body
+    // itself is already editable, and nested contenteditable causes focus/caret issues.
+    let html = `<table style="width:100%; border-collapse:collapse; margin:12px 0; border:1px solid var(--panel-border);">`;
+    for (let r = 0; r < rows; r++) {
+      html += `<tr>`;
+      for (let c = 0; c < cols; c++) {
+        if (r === 0) {
+          html += `<th style="border:1px solid var(--panel-border); padding:8px; background:var(--bg-color-alt); font-weight:600; text-align:left;">Header</th>`;
+        } else {
+          html += `<td style="border:1px solid var(--panel-border); padding:8px;">Cell</td>`;
+        }
       }
+      html += `</tr>`;
     }
-    html += `</tr>`;
-  }
-  html += `</table><p><br></p>`;
-  window.insertHtmlAtCursor(html);
-  updateNoteContent();
+    html += `</table><p><br></p>`;
+    window.insertHtmlAtCursor(html);
+    updateNoteContent();
+  };
 };
 
 window.insertCallout = function() {
+  saveSelection();
   const colors = [
     { name: 'Orange', border: '#ea580c', bg: 'rgba(234,88,12,0.08)' },
     { name: 'Blue', border: '#2563eb', bg: 'rgba(37,99,235,0.08)' },
@@ -5957,7 +6018,7 @@ window.insertCallout = function() {
     { name: 'Red', border: '#dc2626', bg: 'rgba(220,38,38,0.08)' }
   ];
   const options = colors.map((c, i) => `<option value="${i}">${c.name}</option>`).join('');
-  
+
   const overlay = document.createElement('div');
   overlay.className = 'custom-dialog-overlay';
   overlay.innerHTML = `
@@ -5979,7 +6040,8 @@ window.insertCallout = function() {
     const color = colors[parseInt(sel.value, 10)];
     overlay.remove();
     noteBodyInput.focus();
-    
+    restoreSelection();
+
     const html = `<div class="embedded-callout" style="border-left: 4px solid ${color.border}; background-color: ${color.bg}; padding: 12px 16px; margin: 12px 0; border-radius: 0 8px 8px 0;" contenteditable="true">💡 <strong>Note:</strong> Type your callout text here...</div><p><br></p>`;
     window.insertHtmlAtCursor(html);
     updateNoteContent();
@@ -5987,6 +6049,7 @@ window.insertCallout = function() {
 };
 
 window.triggerInsertPicture = function() {
+  saveSelection();
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = 'image/*';
@@ -5998,6 +6061,7 @@ window.triggerInsertPicture = function() {
       const src = evt.target.result;
       const html = `<div class="resizable-image-wrapper" contenteditable="false" style="width:300px;"><img src="${src}" /></div><p><br></p>`;
       noteBodyInput.focus();
+      restoreSelection();
       window.insertHtmlAtCursor(html);
       updateNoteContent();
     };
@@ -6007,18 +6071,27 @@ window.triggerInsertPicture = function() {
 };
 
 window.insertCodeSnippet = function() {
+  saveSelection();
+  noteBodyInput.focus();
+  restoreSelection();
   const html = `<pre class="code-snippet-block" style="background:var(--bg-color-alt); border:1px solid var(--panel-border); border-radius:6px; padding:12px; font-family:'Courier New', Courier, monospace; font-size:0.9rem; margin:12px 0; overflow-x:auto; color:var(--text-primary);" contenteditable="true"><code>// Paste your code here\nconsole.log("Hello, World!");</code></pre><p><br></p>`;
   window.insertHtmlAtCursor(html);
   updateNoteContent();
 };
 
 window.insertQuoteBlock = function() {
+  saveSelection();
+  noteBodyInput.focus();
+  restoreSelection();
   const html = `<blockquote class="editor-blockquote" style="border-left:4px solid var(--accent-color); padding-left:16px; margin:12px 0 12px 8px; font-style:italic; color:var(--text-secondary);" contenteditable="true">"Type your quote here..."</blockquote><p><br></p>`;
   window.insertHtmlAtCursor(html);
   updateNoteContent();
 };
 
 window.insertCollapsible = function() {
+  saveSelection();
+  noteBodyInput.focus();
+  restoreSelection();
   const html = `<details class="editor-details" style="border:1px solid var(--panel-border); border-radius:6px; margin:12px 0; padding:10px 14px; background:var(--bg-color-alt);">
     <summary style="font-weight:600; cursor:pointer; outline:none; color:var(--text-primary);" contenteditable="true">Click to expand section title</summary>
     <div style="margin-top:8px; color:var(--text-secondary);" contenteditable="true">Type your hidden content here...</div>
@@ -6028,14 +6101,41 @@ window.insertCollapsible = function() {
 };
 
 window.insertMathEquation = function() {
-  const eq = prompt("Enter your math equation (e.g. E = mc² or a² + b² = c²):", "E = mc²");
-  if (!eq) return;
-  const html = `<div class="editor-math-block" style="text-align:center; font-family:'Cambria Math', 'Times New Roman', Times, serif; font-style:italic; font-size:1.3rem; padding:16px; margin:12px 0; background:var(--bg-color-alt); border-radius:6px; color:var(--text-primary);" contenteditable="true">${eq}</div><p><br></p>`;
-  window.insertHtmlAtCursor(html);
-  updateNoteContent();
+  saveSelection();
+  // ponytail: no LaTeX engine wired up — this is a plain styled-text math block.
+  // Future upgrade path: swap this for a KaTeX-rendered block if real equation
+  // rendering is ever needed.
+  const overlay = document.createElement('div');
+  overlay.className = 'custom-dialog-overlay';
+  overlay.innerHTML = `
+    <div class="custom-dialog-card">
+      <h4>Insert Math Equation</h4>
+      <input type="text" id="math-eq-input" value="E = mc²" placeholder="e.g. E = mc² or a² + b² = c²" style="width:100%; padding:8px; border-radius:6px; background:var(--bg-color); color:var(--text-primary); border:1px solid var(--panel-border); margin:12px 0;" />
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button class="dialog-cancel-btn">Cancel</button>
+        <button class="dialog-ok-btn" style="background:var(--accent-color); color:#fff; border:none; padding:6px 12px; border-radius:6px; cursor:pointer;">Insert</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.querySelector('.dialog-cancel-btn').onclick = () => overlay.remove();
+  overlay.querySelector('.dialog-ok-btn').onclick = () => {
+    const eq = document.getElementById('math-eq-input').value;
+    overlay.remove();
+    if (!eq) return;
+    noteBodyInput.focus();
+    restoreSelection();
+
+    const html = `<div class="editor-math-block" style="text-align:center; font-family:'Cambria Math', 'Times New Roman', Times, serif; font-style:italic; font-size:1.3rem; padding:16px; margin:12px 0; background:var(--bg-color-alt); border-radius:6px; color:var(--text-primary);" contenteditable="true">${gsEscape(eq)}</div><p><br></p>`;
+    window.insertHtmlAtCursor(html);
+    updateNoteContent();
+  };
 };
 
 window.insertHeadlineSeparated = function() {
+  saveSelection();
+  noteBodyInput.focus();
+  restoreSelection();
   const html = `<h3 class="separated-headline" style="border-bottom:1px solid var(--panel-border); padding-bottom:6px; margin-top:24px; margin-bottom:12px; color:var(--text-primary); font-size: 1.3rem; font-weight: 600;" contenteditable="true">Headline Title</h3><p><br></p>`;
   window.insertHtmlAtCursor(html);
   updateNoteContent();

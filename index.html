@@ -155,17 +155,17 @@
           </div>
           <!-- Static Formatting Toolbar -->
           <div class="static-editor-toolbar">
-            <button class="static-toolbar-btn" onclick="insertNoteHyperlink()" title="Hyperlink to another note">🔗 Note Link</button>
-            <button class="static-toolbar-btn" onclick="insertTable()" title="Insert Table">📊 Table</button>
-            <button class="static-toolbar-btn" onclick="insertCallout()" title="Insert Callout with Colored Side">💡 Callout</button>
-            <button class="static-toolbar-btn" onclick="triggerInsertPicture()" title="Insert Picture">🖼️ Picture</button>
-            <button class="static-toolbar-btn" onclick="insertCodeSnippet()" title="Insert Code Snippet">💻 Code</button>
-            <button class="static-toolbar-btn" onclick="insertQuoteBlock()" title="Insert Quote">💬 Quote</button>
-            <button class="static-toolbar-btn" onclick="insertCollapsible()" title="Insert Collapsible Section">📁 Accordion</button>
-            <button class="static-toolbar-btn" onclick="insertMathEquation()" title="Insert Math Equation">🧮 Math</button>
-            <button class="static-toolbar-btn" onclick="insertHeadlineSeparated()" title="Insert Headline with Line">➖ Headline</button>
-            <button class="static-toolbar-btn" onclick="insertBulletList()" title="Bulletpoints">⚫ Bullet</button>
-            <button class="static-toolbar-btn" onclick="insertNumberedList()" title="Numbered List">1️⃣ Numbered</button>
+            <button class="static-toolbar-btn" onmousedown="event.preventDefault()" onclick="insertNoteHyperlink()" title="Hyperlink to another note">🔗 Note Link</button>
+            <button class="static-toolbar-btn" onmousedown="event.preventDefault()" onclick="insertTable()" title="Insert Table">📊 Table</button>
+            <button class="static-toolbar-btn" onmousedown="event.preventDefault()" onclick="insertCallout()" title="Insert Callout with Colored Side">💡 Callout</button>
+            <button class="static-toolbar-btn" onmousedown="event.preventDefault()" onclick="triggerInsertPicture()" title="Insert Picture">🖼️ Picture</button>
+            <button class="static-toolbar-btn" onmousedown="event.preventDefault()" onclick="insertCodeSnippet()" title="Insert Code Snippet">💻 Code</button>
+            <button class="static-toolbar-btn" onmousedown="event.preventDefault()" onclick="insertQuoteBlock()" title="Insert Quote">💬 Quote</button>
+            <button class="static-toolbar-btn" onmousedown="event.preventDefault()" onclick="insertCollapsible()" title="Insert Collapsible Section">📁 Accordion</button>
+            <button class="static-toolbar-btn" onmousedown="event.preventDefault()" onclick="insertMathEquation()" title="Insert Math Equation">🧮 Math</button>
+            <button class="static-toolbar-btn" onmousedown="event.preventDefault()" onclick="insertHeadlineSeparated()" title="Insert Headline with Line">➖ Headline</button>
+            <button class="static-toolbar-btn" onmousedown="event.preventDefault()" onclick="insertBulletList()" title="Bulletpoints">⚫ Bullet</button>
+            <button class="static-toolbar-btn" onmousedown="event.preventDefault()" onclick="insertNumberedList()" title="Numbered List">1️⃣ Numbered</button>
           </div>
           <div class="editor-content">
             <div id="note-body" contenteditable="true" data-placeholder="Start typing your note here..."></div>
