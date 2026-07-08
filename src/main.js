@@ -717,6 +717,14 @@ function renderNotesList(filterText = '') {
 
 // Set Active Note
 function setActiveNote(id) {
+  // Auto-close the mobile drawer whenever a note is opened from it
+  // (covers note-items, project cards, calendar, and search hits in one place).
+  // Guarded inline (rather than calling isTouchLayout/toggleMobileSidebar by name)
+  // because setActiveNote(null) runs during init(), before those are defined.
+  if (window.matchMedia('(pointer: coarse), (max-width: 820px)').matches && typeof window.toggleMobileSidebar === 'function') {
+    window.toggleMobileSidebar(false);
+  }
+
   // Flush any pending debounced save before switching context
   if (_saveDebounceTimer) {
     clearTimeout(_saveDebounceTimer);
