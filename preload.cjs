@@ -8,5 +8,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveBoardFile: (name, buffer) => ipcRenderer.invoke('save-board-file', name, buffer),
   readFileBytes: (p) => ipcRenderer.invoke('read-file-bytes', p),
   openPath: (p) => ipcRenderer.send('open-path', p),
+  fileExists: (p) => ipcRenderer.sendSync('file-exists-sync', p),
   onNewNote: (callback) => ipcRenderer.on('menu-new-note', () => callback())
 });

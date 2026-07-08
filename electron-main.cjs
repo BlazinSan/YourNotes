@@ -147,6 +147,17 @@ function createWindow() {
   });
   ipcMain.on('open-path', (event, p) => { try { if (p) shell.openPath(p); } catch (_) {} });
 
+  // Board items store an OS path from whichever device pinned them. A path
+  // that came from a *different* machine won't exist here — check before
+  // trying to open it (or resolve it as a file:// URL) so we can fall back
+  // to the cloud copy instead of silently doing nothing. Sync (like the
+  // load/save-data-sync handlers above) so callers like resolveFileUrl can
+  // stay synchronous.
+  ipcMain.on('file-exists-sync', (event, p) => {
+    try { event.returnValue = fs.existsSync(String(p).replace(/^file:\/\/\//, '')); }
+    catch (_) { event.returnValue = false; }
+  });
+
   // Cloud sync reads app-managed files (college PDFs, banner, board, profile pic)
   // to upload them. Restricted to the app's own data directory.
   ipcMain.handle('read-file-bytes', async (event, p) => {

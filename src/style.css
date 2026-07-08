@@ -1384,13 +1384,22 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: auto;
+  overflow: hidden;
   background: color-mix(in srgb, var(--panel-bg) 54%, var(--bg-color));
+}
+
+.board-viewer-img-wrap {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
 }
 
 .board-viewer-body img {
   max-width: 100%;
-  max-height: 72dvh;
+  max-height: 100%;
   object-fit: contain;
 }
 
@@ -1452,10 +1461,10 @@ body {
 
 .board-card {
   position: absolute; pointer-events: auto; overflow: visible;
-  background: var(--panel-bg); border: 1px solid var(--panel-border);
+  background: color-mix(in srgb, var(--panel-bg) 85%, var(--bg-color)); border: 1px solid var(--panel-border);
   border-radius: 14px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
-  backdrop-filter: blur(6px); cursor: grab;
-  will-change: transform, left, top, width, height;
+  cursor: grab;
+  will-change: transform;
   transition: box-shadow 0.22s cubic-bezier(0.16, 1, 0.3, 1);
   touch-action: none;
 }
@@ -1463,11 +1472,9 @@ body {
 .board-card.dragging {
   transition: box-shadow 0.15s; cursor: grabbing;
   box-shadow: 0 22px 48px rgba(0, 0, 0, 0.34); z-index: 20;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
 }
 .board-pin {
-  position: absolute; top: -13px; left: 50%; margin-left: -13px; z-index: 6;
+  position: absolute; top: -13px; left: 50%; margin-left: -13px; z-index: 7;
   pointer-events: none; filter: drop-shadow(0 3px 2px rgba(0, 0, 0, 0.3));
 }
 .board-body { width: 100%; height: 100%; border-radius: 14px; overflow: hidden; }
@@ -3810,20 +3817,19 @@ body.haven-open {
     pointer-events: auto;
   }
 
-  .board-card {
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-  }
-
   .board-del,
   .board-card:hover .board-del {
     display: flex;
-    width: 26px;
-    height: 26px;
+    top: 2px;
+    right: 2px;
+    width: 22px;
+    height: 22px;
   }
 
   .board-resize {
-    display: none !important;
+    opacity: 0.7;
+    width: 28px;
+    height: 28px;
   }
 
   .dashboard-banner.expanded .banner-controls {
@@ -5389,7 +5395,6 @@ body.haven-open {
     width: auto !important;
     height: auto !important;
     object-fit: contain !important;
-    margin: auto !important;
     border-radius: 12px;
   }
 

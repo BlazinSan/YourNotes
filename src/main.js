@@ -4220,7 +4220,7 @@ function showBoardViewer(item, src, isBlob = false) {
         <button type="button" aria-label="Close pinned item">&times;</button>
       </div>
       <div class="board-viewer-body">
-        ${isImage ? `<div class="board-viewer-img-wrap" style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; overflow:hidden;"><img src="${src}" alt="${gsEscape(item.name || 'Pinned image')}"></div>` : ''}
+        ${isImage ? `<div class="board-viewer-img-wrap"><img src="${src}" alt="${gsEscape(item.name || 'Pinned image')}"></div>` : ''}
         ${!isImage && isPdf ? `<iframe src="${iframeSrc}" title="${gsEscape(item.name || 'Pinned file')}"></iframe>` : ''}
         ${!isImage && !isPdf ? `<div class="board-viewer-file"><svg viewBox="0 0 24 24" width="42" height="42" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg><span>${gsEscape(item.name || 'Pinned file')}</span></div>` : ''}
       </div>
@@ -4260,20 +4260,31 @@ window.viewBoardPDF = function(name, src) {
   }
 };
 
+function openBoardResolved(item, src) {
+  if (item.type === 'file' && /\.pdf$/i.test(item.name || '')) {
+    window.viewBoardPDF(item.name, src);
+  } else {
+    showBoardViewer(item, src);
+  }
+}
+
 async function openBoardItem(item) {
   if (!item || item.type === 'text') return false;
+  // 1) local OS path (Electron) — only if it actually exists on THIS machine;
+  // a path pinned on another device won't be here.
   if (item.path && window.electronAPI && window.electronAPI.openPath) {
-    window.electronAPI.openPath(item.path);
-    return true;
-  }
-  if (item.dataUrl) {
-    if (item.type === 'file' && /\.pdf$/i.test(item.name || '')) {
-      window.viewBoardPDF(item.name, item.dataUrl);
-    } else {
-      showBoardViewer(item, item.dataUrl);
+    const exists = window.electronAPI.fileExists ? window.electronAPI.fileExists(item.path) : true;
+    if (exists) {
+      window.electronAPI.openPath(item.path);
+      return true;
     }
+  }
+  // 2) inline data URL (small images pinned on mobile/web)
+  if (item.dataUrl) {
+    openBoardResolved(item, item.dataUrl);
     return true;
   }
+  // 3) local IndexedDB blob (files pinned on this device without an OS path)
   if (item.fileId) {
     const url = await boardBlobUrl(item.fileId);
     if (url) {
@@ -4285,16 +4296,25 @@ async function openBoardItem(item) {
       return true;
     }
   }
-  const resolved = item.path && window.resolveFileUrl ? window.resolveFileUrl(fileUrlOf(item.path)) : '';
-  if (resolved && !String(resolved).startsWith('file:///')) {
-    if (item.type === 'file' && /\.pdf$/i.test(item.name || '')) {
-      window.viewBoardPDF(item.name, resolved);
-    } else {
-      showBoardViewer(item, resolved);
-    }
+  // 4) cloud file map — by basename (desktop-uploaded files) or blob_<fileId>
+  // (IndexedDB blobs uploaded from another device via uploadBoardBlobs)
+  let fileMap = {};
+  try { fileMap = JSON.parse(localStorage.getItem('yn_file_map') || '{}'); } catch (_) {}
+  let cloudUrl = '';
+  if (item.fileId && fileMap['blob_' + item.fileId]) cloudUrl = fileMap['blob_' + item.fileId];
+  if (!cloudUrl && item.path) {
+    const base = String(item.path).split(/[\\/]/).pop();
+    if (base && fileMap[base]) cloudUrl = fileMap[base];
+  }
+  if (!cloudUrl) {
+    const resolved = item.path && window.resolveFileUrl ? window.resolveFileUrl(fileUrlOf(item.path)) : '';
+    if (resolved && !String(resolved).startsWith('file:///')) cloudUrl = resolved;
+  }
+  if (cloudUrl) {
+    openBoardResolved(item, cloudUrl);
     return true;
   }
-  showAppToast('This pinned file is not available on this phone. Re-pin it here to open it.', { duration: 6200 });
+  showAppToast('This pinned file is not available on this device yet. Re-pin it here, or sync to fetch it from the cloud.', { duration: 6200 });
   return false;
 }
 
@@ -6599,6 +6619,9 @@ function startImageCrop(wrapper) {
   };
 }
 
+// Reusable pinch/pan/wheel zoom util for an <img> shown with object-fit:contain
+// inside a container. Clamps pan against the actual RENDERED image box (not the
+// element's full box, which is wrong whenever the image is letterboxed).
 function enablePinchToZoom(img) {
   let scale = 1;
   let startScale = 1;
@@ -6607,11 +6630,46 @@ function enablePinchToZoom(img) {
   let startX = 0, startY = 0;
   let isDragging = false;
   let isPinching = false;
-  
+  let lastTapTime = 0;
+
   img.style.transformOrigin = "center center";
   img.style.transition = "none";
   img.style.cursor = "grab";
-  
+  img.style.touchAction = "none";
+  // Reset any stale transform from a previous open of this element.
+  scale = 1; posX = 0; posY = 0;
+  img.style.transform = "translate(0px, 0px) scale(1)";
+
+  function renderedBox() {
+    const container = img.parentElement;
+    const cw = (container ? container.clientWidth : img.clientWidth) || img.clientWidth || 1;
+    const ch = (container ? container.clientHeight : img.clientHeight) || img.clientHeight || 1;
+    const nw = img.naturalWidth || cw;
+    const nh = img.naturalHeight || ch;
+    const ratio = Math.min(cw / nw, ch / nh) || 1;
+    return { w: nw * ratio, h: nh * ratio };
+  }
+
+  function clampPan() {
+    const box = renderedBox();
+    const maxDragX = Math.max(0, (scale - 1) * (box.w / 2));
+    const maxDragY = Math.max(0, (scale - 1) * (box.h / 2));
+    posX = Math.max(-maxDragX, Math.min(maxDragX, posX));
+    posY = Math.max(-maxDragY, Math.min(maxDragY, posY));
+  }
+
+  function apply(withTransition) {
+    img.style.transition = withTransition ? "transform 0.2s ease" : "none";
+    img.style.transform = `translate(${posX}px, ${posY}px) scale(${scale})`;
+    if (withTransition) setTimeout(() => { img.style.transition = "none"; }, 200);
+  }
+
+  function setScale(next) {
+    scale = Math.max(1, Math.min(5, next));
+    if (scale === 1) { posX = 0; posY = 0; }
+    else clampPan();
+  }
+
   img.addEventListener('touchstart', (e) => {
     if (e.touches.length === 2) {
       isPinching = true;
@@ -6621,13 +6679,23 @@ function enablePinchToZoom(img) {
         e.touches[0].clientY - e.touches[1].clientY
       );
       startScale = scale;
-    } else if (e.touches.length === 1 && scale > 1) {
-      isDragging = true;
-      startX = e.touches[0].clientX - posX;
-      startY = e.touches[0].clientY - posY;
+    } else if (e.touches.length === 1) {
+      const now = Date.now();
+      if (now - lastTapTime < 320) {
+        setScale(scale > 1 ? 1 : 2.5);
+        apply(true);
+        lastTapTime = 0;
+        return;
+      }
+      lastTapTime = now;
+      if (scale > 1) {
+        isDragging = true;
+        startX = e.touches[0].clientX - posX;
+        startY = e.touches[0].clientY - posY;
+      }
     }
   });
-  
+
   img.addEventListener('touchmove', (e) => {
     if (isPinching && e.touches.length === 2) {
       e.preventDefault();
@@ -6635,41 +6703,57 @@ function enablePinchToZoom(img) {
         e.touches[0].clientX - e.touches[1].clientX,
         e.touches[0].clientY - e.touches[1].clientY
       );
-      scale = Math.max(1, Math.min(4, startScale * (dist / startDistance)));
-      
-      if (scale === 1) {
-        posX = 0;
-        posY = 0;
-      }
-      img.style.transform = `translate(${posX}px, ${posY}px) scale(${scale})`;
+      setScale(startScale * (dist / startDistance));
+      apply(false);
     } else if (isDragging && e.touches.length === 1 && scale > 1) {
       e.preventDefault();
       posX = e.touches[0].clientX - startX;
       posY = e.touches[0].clientY - startY;
-      
-      const maxDragX = (scale - 1) * (img.clientWidth / 2);
-      const maxDragY = (scale - 1) * (img.clientHeight / 2);
-      posX = Math.max(-maxDragX, Math.min(maxDragX, posX));
-      posY = Math.max(-maxDragY, Math.min(maxDragY, posY));
-      
-      img.style.transform = `translate(${posX}px, ${posY}px) scale(${scale})`;
+      clampPan();
+      apply(false);
     }
   });
-  
+
   img.addEventListener('touchend', (e) => {
-    if (e.touches.length < 2) {
-      isPinching = false;
-    }
-    if (e.touches.length === 0) {
+    if (e.touches.length < 2) isPinching = false;
+    if (e.touches.length === 0) isDragging = false;
+    if (scale <= 1.05) { setScale(1); apply(true); }
+  });
+
+  // Desktop: mouse wheel to zoom, drag to pan.
+  img.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    setScale(scale - e.deltaY * 0.0018 * scale);
+    apply(false);
+  }, { passive: false });
+
+  img.addEventListener('dblclick', (e) => {
+    e.preventDefault();
+    setScale(scale > 1 ? 1 : 2.5);
+    apply(true);
+  });
+
+  img.addEventListener('mousedown', (e) => {
+    if (scale <= 1) return;
+    e.preventDefault();
+    isDragging = true;
+    img.style.cursor = "grabbing";
+    startX = e.clientX - posX;
+    startY = e.clientY - posY;
+    const move = (ev) => {
+      if (!isDragging) return;
+      posX = ev.clientX - startX;
+      posY = ev.clientY - startY;
+      clampPan();
+      apply(false);
+    };
+    const up = () => {
       isDragging = false;
-    }
-    if (scale <= 1.05) {
-      scale = 1;
-      posX = 0;
-      posY = 0;
-      img.style.transition = "transform 0.2s ease";
-      img.style.transform = `translate(0px, 0px) scale(1)`;
-      setTimeout(() => { img.style.transition = "none"; }, 200);
-    }
+      img.style.cursor = "grab";
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
   });
 }

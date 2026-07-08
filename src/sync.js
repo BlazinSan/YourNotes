@@ -72,8 +72,14 @@ const fieldVal = (id) => ((document.getElementById(id) || {}).value || "").trim(
 // filename through the cloud file map instead.
 window.resolveFileUrl = function (path) {
   if (!path || !String(path).startsWith("file:")) return path;
-  if (window.electronAPI) return path; // this desktop owns the file
   const m = String(path).match(/\/([A-Za-z0-9._-]+)$/);
+  if (window.electronAPI) {
+    // This desktop only "owns" the file if it's actually on disk here — a
+    // path pinned on another machine won't exist locally, so fall through
+    // to the cloud file map instead of returning a dead file:// URL.
+    if (window.electronAPI.fileExists && window.electronAPI.fileExists(path)) return path;
+    if (!window.electronAPI.fileExists) return path; // older preload without the check
+  }
   const url = m && getFileMap()[m[1]];
   return url || path;
 };
@@ -155,6 +161,62 @@ async function uploadReferencedFiles(token, values) {
   }
 }
 
+// ---------- Board item blobs (IndexedDB, no OS path) ----------
+// Board items dropped as generic files (not images) on a device without
+// window.electronAPI.saveBoardFile are stored as a Blob in the browser's
+// IndexedDB (see boardDb/saveBoardBlob in main.js) and only carry a fileId —
+// no path, no dataUrl. That blob otherwise never leaves the originating
+// device. Mirrors uploadReferencedFiles above but reads from IndexedDB and
+// runs on every platform (Electron and mobile/web alike).
+function boardFilesDb() {
+  if (!('indexedDB' in window)) return Promise.resolve(null);
+  if (boardFilesDb._promise) return boardFilesDb._promise;
+  boardFilesDb._promise = new Promise((resolve) => {
+    const req = indexedDB.open('yn-board-files', 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('files');
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => resolve(null);
+  });
+  return boardFilesDb._promise;
+}
+function getBoardBlob(fileId) {
+  return boardFilesDb().then((db) => {
+    if (!db) return null;
+    return new Promise((resolve) => {
+      const tx = db.transaction('files', 'readonly');
+      const req = tx.objectStore('files').get(fileId);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => resolve(null);
+    });
+  });
+}
+async function uploadBoardBlobs(token) {
+  let items;
+  try { items = JSON.parse(localStorage.getItem('opennotes_board') || '[]'); } catch (_) { items = []; }
+  const withBlobs = (items || []).filter((it) => it && it.fileId);
+  if (!withBlobs.length) return;
+  const uploaded = new Set(JSON.parse(localStorage.getItem('yn_synced_files') || '[]'));
+  const todo = withBlobs.filter((it) => !uploaded.has('blob_' + it.fileId));
+  let done = 0;
+  for (const it of todo) {
+    try {
+      const blob = await getBoardBlob(it.fileId);
+      if (!blob) continue;
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      const name = 'blob_' + it.fileId;
+      const ct = blob.type || guessType(it.name || '');
+      const { url: uploadUrl, r2Key } = await client.action(api.r2.presignUpload, { token, key: name });
+      const resp = await fetch(uploadUrl, { method: "PUT", body: new Blob([bytes]), headers: { "content-type": ct } });
+      if (!resp.ok) throw new Error("R2 upload " + resp.status);
+      await client.mutation(api.sync.registerFile, { token, localKey: name, r2Key, name, size: bytes.length });
+      uploaded.add(name);
+      localStorage.setItem("yn_synced_files", JSON.stringify([...uploaded]));
+      done++;
+      setStatus(`Uploading pinned files… ${done}/${todo.length}`);
+    } catch (e) { console.warn("board blob upload failed", it.fileId, e); }
+  }
+}
+
 window.syncNow = async function () {
   const token = getToken();
   if (!client || !token || pushing) return;
@@ -188,6 +250,7 @@ window.syncNow = async function () {
     // 2) upload any files referenced in local storage that aren't marked as uploaded
     const allSyncValues = SYNC_KEYS.map(k => localStorage.getItem(k)).filter(Boolean);
     await uploadReferencedFiles(token, allSyncValues);
+    await uploadBoardBlobs(token);
 
     // 3) push keys that changed locally (chunking values over the 1 MiB cap)
     const now = Date.now();
