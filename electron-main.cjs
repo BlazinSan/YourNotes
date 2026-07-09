@@ -157,6 +157,21 @@ function createWindow() {
   // made while the window was continuously focused.
   mainWindow.on('blur', () => flushStore());
 
+  // Windows/Chromium sometimes fails to regrow the compositor surface when the
+  // window is maximized/restored, leaving a blank, unclickable region beyond the
+  // original bounds. A 1px bounds nudge forces the surface + layout to reflow.
+  const nudgeReflow = () => {
+    try {
+      const b = mainWindow.getBounds();
+      mainWindow.setBounds({ ...b, width: b.width + 1 });
+      setTimeout(() => { try { mainWindow.setBounds(b); } catch (_) {} }, 0);
+    } catch (_) {}
+  };
+  mainWindow.on('maximize', nudgeReflow);
+  mainWindow.on('unmaximize', nudgeReflow);
+  mainWindow.on('enter-full-screen', nudgeReflow);
+  mainWindow.on('leave-full-screen', nudgeReflow);
+
   // A locked store at startup used to trigger attemptLoad(15) — 15 rounds of a
   // synchronous 100ms Atomics.wait sleep IN THE MAIN PROCESS — on every single
   // getItem call while unresolved, freezing the whole app for ~1.5s per read.

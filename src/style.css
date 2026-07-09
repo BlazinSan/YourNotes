@@ -304,8 +304,7 @@ body {
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  background: var(--bg-color);
 }
 
 /* Ambient Background Glows */
@@ -3247,10 +3246,6 @@ body {
 }
 
 /* --- Resize Overlay Logic --- */
-#app {
-  transition: filter 0.4s ease;
-}
-
 #resize-overlay {
   display: none;
   position: fixed;
