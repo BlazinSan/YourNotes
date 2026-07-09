@@ -6,8 +6,6 @@ import { Filesystem, Directory } from '@capacitor/filesystem'
 import { Share } from '@capacitor/share'
 import html2canvas from 'html2canvas'
 import { jsPDF } from 'jspdf'
-// Static import (not dynamic): Electron cannot fetch lazy chunks out of app.asar
-import * as __havenEngine from './haven/engine3d.js'
 
 // Global drop/dragover safety net: without this, dropping a file anywhere the
 // app doesn't have its own handler falls through to the OS default, which in
@@ -856,6 +854,8 @@ function setActiveNote(id) {
   if (_saveDebounceTimer) {
     clearTimeout(_saveDebounceTimer);
     _saveDebounceTimer = null;
+    const _prev = notes.find(n => n.id === activeNoteId);
+    if (_prev) _prev.preview = computeNotePreview(_prev.body);
     saveNotes();
   }
   activeNoteId = id;
@@ -1275,7 +1275,7 @@ function renderHomeGrid(searchTerm = '') {
 
   const filtered = modeNotes.filter(n => {
     const title = (n.title || '').toLowerCase();
-    const plainBody = (n.body || '').replace(/<[^>]*>?/gm, '').toLowerCase();
+    const plainBody = getNotePreview(n).toLowerCase();
     const group = noteGroup(n).toLowerCase();
     const matchSearch = !term || title.includes(term) || plainBody.includes(term) || group.includes(term);
     const matchFolder = homeFolderFilter === 'all' || noteGroup(n) === homeFolderFilter;
@@ -1773,6 +1773,7 @@ if (searchInput) {
   if (homeSearchInput) {
     homeSearchInput.addEventListener('input', (e) => {
       renderHomeGrid(e.target.value);
+      if (wakeGraphExternal) wakeGraphExternal();
     });
   }
   
@@ -3062,6 +3063,7 @@ init();
 // Interactive Graph View Physics Engine
 // -----------------------------------------
 let graphAnimationFrame;
+let wakeGraphExternal = null; // set by initGraph so search/etc. can restart the RAF loop
 function initGraph() {
   if (!graphCanvas) return;
   const ctx = graphCanvas.getContext('2d');
@@ -3169,6 +3171,7 @@ function initGraph() {
     graphCanvas.style.width = cssW + 'px';
     graphCanvas.style.height = cssH + 'px';
     lastEnergy = Infinity; // let the auto-fit reframe for the new size
+    wakeGraph();
   });
   window.__graphRO.observe(homeGraph);
   const screenXY = (e) => { const r = graphCanvas.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
@@ -3187,6 +3190,7 @@ function initGraph() {
   let lastTap = { time: 0, x: 0, y: 0, node: null };
 
   function beginGraphInteraction(e) {
+    wakeGraph();
     e.preventDefault();
     activePointerId = e.pointerId;
     try { graphCanvas.setPointerCapture(e.pointerId); } catch (_) {}
@@ -3199,6 +3203,7 @@ function initGraph() {
 
   function moveGraphInteraction(e) {
     if (activePointerId !== null && e.pointerId !== activePointerId) return;
+    wakeGraph();
     e.preventDefault();
     const [sx, sy] = screenXY(e);
     if (draggedNode) {
@@ -3214,6 +3219,7 @@ function initGraph() {
 
   function endGraphInteraction(e) {
     if (activePointerId !== null && e.pointerId !== activePointerId) return;
+    wakeGraph();
     const [sx, sy] = screenXY(e);
     const hit = nodeAt(...toWorld(sx, sy));
     const now = Date.now();
@@ -3254,6 +3260,7 @@ function initGraph() {
     };
   };
   graphCanvas.ontouchstart = (e) => {
+    wakeGraph();
     if (e.touches.length === 1) {
       e.preventDefault();
       return;
@@ -3268,6 +3275,7 @@ function initGraph() {
     }
   };
   graphCanvas.ontouchmove = (e) => {
+    wakeGraph();
     if (e.touches.length < 2 || !pinchStart) {
       e.preventDefault();
       return;
@@ -3290,6 +3298,7 @@ function initGraph() {
 
   // Wheel to zoom toward the cursor
   graphCanvas.onwheel = (e) => {
+    wakeGraph();
     e.preventDefault();
     const [sx, sy] = screenXY(e);
     userAdjusted = true;
@@ -3302,6 +3311,7 @@ function initGraph() {
   };
 
   graphCanvas.ondblclick = (e) => {
+    wakeGraph();
     const [sx, sy] = screenXY(e);
     const hit = nodeAt(...toWorld(sx, sy));
     if (hit) setActiveNote(hit.id);
@@ -3424,6 +3434,7 @@ function initGraph() {
       });
     }
     
+    let maxAlphaDelta = 0;
     ctx.lineWidth = 2;
     gEdges.forEach(edge => {
       if (edge.currentAlpha === undefined) edge.currentAlpha = 0.4;
@@ -3440,7 +3451,8 @@ function initGraph() {
       }
       
       edge.currentAlpha += (targetAlpha - edge.currentAlpha) * 0.15; // Smooth interpolation
-      
+      maxAlphaDelta = Math.max(maxAlphaDelta, Math.abs(targetAlpha - edge.currentAlpha));
+
       ctx.strokeStyle = `rgba(${edgeRgb}, ${edge.currentAlpha})`;
       
       ctx.beginPath();
@@ -3461,7 +3473,8 @@ function initGraph() {
       
       let targetAlpha = isFaded ? 0.15 : 1;
       n.currentAlpha += (targetAlpha - n.currentAlpha) * 0.15; // Smooth interpolation
-      
+      maxAlphaDelta = Math.max(maxAlphaDelta, Math.abs(targetAlpha - n.currentAlpha));
+
       // Solid background mask to hide edges passing behind
       ctx.beginPath();
       ctx.arc(n.x, n.y, n.radius + 1, 0, Math.PI * 2);
@@ -3507,10 +3520,25 @@ function initGraph() {
     // advance the shared label fade once per frame (hysteresis band 0.70–0.78)
     if (scale > 0.78) labelsOn = true; else if (scale < 0.70) labelsOn = false;
     labelFade += ((labelsOn ? 1 : 0) - labelFade) * 0.12;
-    
-    graphAnimationFrame = requestAnimationFrame(draw);
+    const labelDelta = Math.abs((labelsOn ? 1 : 0) - labelFade);
+
+    // Once physics is frozen and all alpha/label interpolation has visually
+    // settled, stop rescheduling — wakeGraph() restarts the loop on interaction.
+    const stillAnimating = !frozen || maxAlphaDelta > 0.01 || labelDelta > 0.01;
+    if (stillAnimating) {
+      graphAnimationFrame = requestAnimationFrame(draw);
+    } else {
+      graphAnimationFrame = null;
+    }
   }
-  
+
+  function wakeGraph() {
+    if (!graphAnimationFrame && homePage && homePage.style.display !== 'none' && homeGraph.style.display !== 'none') {
+      graphAnimationFrame = requestAnimationFrame(draw);
+    }
+  }
+  wakeGraphExternal = wakeGraph;
+
   draw();
 }
 
@@ -5910,7 +5938,7 @@ document.addEventListener('click', (e) => {
     document.addEventListener('pointerdown', pokeUi);
     document.addEventListener('keydown', onKey);
     try {
-      eng = eng || __havenEngine;
+      eng = eng || await import('./haven/engine3d.js');
       await eng.openHaven3D(viewport, theme, spot);
     } catch (e) { console.error('Safe Haven engine failed to start', e); }
   };

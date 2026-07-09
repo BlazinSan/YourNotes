@@ -355,7 +355,8 @@ window.pushChanges = async function () {
   try {
     setStatus("Pushing…");
     const meta = getMeta();
-    const allSyncValues = SYNC_KEYS.map(k => localStorage.getItem(k)).filter(Boolean);
+    const forceFullRefScan = !everPushedThisSession;
+    const allSyncValues = SYNC_KEYS.filter(k => forceFullRefScan || dirtyKeys.has(k)).map(k => localStorage.getItem(k)).filter(Boolean);
     await uploadReferencedFiles(token, allSyncValues);
     await uploadBoardBlobs(token);
 

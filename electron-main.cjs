@@ -91,34 +91,59 @@ function createWindow() {
 
   // Atomic, debounced writes: write to a temp file then rename, so a crash/kill
   // mid-write can never leave a half-written (corrupt) store on disk.
-  let writeTimer = null, dirty = false;
-  function flushStore() {
+  let writeTimer = null, dirty = false, lastBackup = 0, flushChain = Promise.resolve();
+  function flushStore(sync) {
     if (!dirty) return;
     // Safety: if we failed to read an existing store this session, never write —
     // that would overwrite the user's good data with our empty memory.
     if (!loadOk) { dirty = false; return; }
     dirty = false;
     const json = JSON.stringify(store);
-    // Write the backup FIRST and independently, so it always holds the latest good data
-    // even if the primary store is locked and the atomic rename below fails.
-    try { fs.writeFileSync(backupPath, json); } catch (_) {}
-    try {
-      fs.writeFileSync(tmpPath, json);
-      fs.renameSync(tmpPath, storePath);
-    } catch (e) {
-      console.error('Failed to persist store (locked?) — backup holds the latest', e && e.code);
+    if (sync === true) {
+      // before-quit: the process may exit before an async write settles, so this
+      // path stays fully synchronous. Write the backup FIRST and independently,
+      // so it always holds the latest good data even if the primary store is
+      // locked and the atomic rename below fails.
+      try { fs.writeFileSync(backupPath, json); } catch (_) {}
+      try {
+        fs.writeFileSync(tmpPath, json);
+        fs.renameSync(tmpPath, storePath);
+      } catch (e) {
+        console.error('Failed to persist store (locked?) — backup holds the latest', e && e.code);
+      }
+      return;
     }
+    // Serialize async flushes onto a single chain. blur + the 400ms timer can
+    // both fire a flush; two concurrent writers sharing tmpPath would interleave
+    // bytes and race the rename (ENOENT / corrupt store). Chaining keeps each
+    // snapshot atomic while preserving the fixed tmpPath the startup recovery
+    // path expects. json is snapshotted synchronously above, so a save that
+    // arrives mid-write just re-marks dirty and schedules the next flush.
+    flushChain = flushChain.then(async () => {
+      // Backup is throttled — every flush doesn't need a fresh copy, just a
+      // recent-enough one to rescue from a locked/failed primary write.
+      if (Date.now() - lastBackup > 30000) {
+        lastBackup = Date.now();
+        try { await fs.promises.writeFile(backupPath, json); } catch (_) {}
+      }
+      try {
+        await fs.promises.writeFile(tmpPath, json);
+        await fs.promises.rename(tmpPath, storePath);
+      } catch (e) {
+        console.error('Failed to persist store (locked?) — backup holds the latest', e && e.code);
+      }
+    });
   }
   function scheduleWrite() {
     dirty = true;
     clearTimeout(writeTimer);
-    writeTimer = setTimeout(flushStore, 400);
+    writeTimer = setTimeout(() => flushStore(), 400);
   }
-  app.on('before-quit', flushStore);
+  app.on('before-quit', () => flushStore(true));
   // Extra safety: flush whenever the window loses focus, so even a hard kill
   // (crash, force-close, power loss) can lose at most the last 400ms of edits
   // made while the window was continuously focused.
-  mainWindow.on('blur', flushStore);
+  mainWindow.on('blur', () => flushStore());
 
   // A locked store at startup used to trigger attemptLoad(15) — 15 rounds of a
   // synchronous 100ms Atomics.wait sleep IN THE MAIN PROCESS — on every single
