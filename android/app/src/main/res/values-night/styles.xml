@@ -6,18 +6,23 @@
         <item name="windowNoTitle">true</item>
         <item name="android:windowNoTitle">true</item>
         <item name="android:fontFamily">sans</item>
-        <item name="android:windowBackground">@color/yn_surface</item>
+        <item name="android:windowBackground">@color/yn_surface_dark</item>
         <item name="android:colorAccent">@color/colorAccent</item>
-        <item name="android:statusBarColor">@color/yn_surface</item>
-        <item name="android:navigationBarColor">@color/yn_surface</item>
-        <item name="android:windowLightStatusBar">true</item>
-        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:statusBarColor">@color/yn_surface_dark</item>
+        <item name="android:navigationBarColor">@color/yn_surface_dark</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
         <item name="android:forceDarkAllowed">false</item>
+        <item name="android:textColorHighlight">@color/yn_text_highlight</item>
+        <item name="android:colorControlActivated">@color/colorAccent</item>
+        <item name="android:textSelectHandle">@drawable/yn_text_select_handle_middle</item>
+        <item name="android:textSelectHandleLeft">@drawable/yn_text_select_handle_left</item>
+        <item name="android:textSelectHandleRight">@drawable/yn_text_select_handle_right</item>
     </style>
 
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="android:background">@drawable/splash</item>
-        <item name="windowSplashScreenBackground">@color/yn_surface</item>
+        <item name="windowSplashScreenBackground">@color/yn_surface_dark</item>
         <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
     </style>
 </resources>

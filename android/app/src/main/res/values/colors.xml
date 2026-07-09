@@ -5,4 +5,6 @@
     <color name="colorAccent">#A87B51</color>
     <color name="yn_surface">#FDFBF7</color>
     <color name="yn_surface_dark">#12100E</color>
+    <color name="yn_select_handle">#A87B51</color>
+    <color name="yn_text_highlight">#40A87B51</color>
 </resources>
