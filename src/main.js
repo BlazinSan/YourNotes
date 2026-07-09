@@ -4575,10 +4575,47 @@ async function openBoardItem(item) {
   return false;
 }
 
-function boardDefaultPoint(offset = 0) {
+// --- Board coordinate helpers (board is always 1000 base units wide) ---
+function boardMetrics() {
   const banner = document.getElementById('dashboard-banner');
-  const w = banner ? banner.clientWidth : 320;
-  const h = banner ? banner.clientHeight : 220;
+  const boardWidth = banner ? banner.clientWidth : 1000;
+  const boardHeight = banner ? banner.clientHeight : 700;
+  const scale = boardWidth / 1000 || 1;
+  const heightBase = Math.round(boardHeight / scale) || 700;
+  // Scale-aware minimum: guarantee >=120x92 RENDERED px so the 28px handle +
+  // 22px delete + grab strip stay usable on phone AND desktop.
+  const minWbase = Math.round(120 / scale);
+  const minHbase = Math.round(92 / scale);
+  return { scale, heightBase, minWbase, minHbase };
+}
+function clampNum(min, max, v) { return Math.min(Math.max(v, min), Math.max(min, max)); }
+// Clamp an item's position given its size (used on drag + migration).
+function clampBoardPos(item, m) {
+  m = m || boardMetrics();
+  item.x = clampNum(0, 1000 - item.w, Math.round(item.x));
+  item.y = clampNum(0, m.heightBase - item.h, Math.round(item.y));
+}
+function boardRectsOverlap(a, b) {
+  return !(a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y);
+}
+// Find a non-overlapping in-bounds base position for a new w x h pin, starting near (x,y).
+function boardFreeSlot(x, y, w, h) {
+  const m = boardMetrics();
+  const maxX = Math.max(0, 1000 - w), maxY = Math.max(0, m.heightBase - h);
+  const step = 30;
+  for (let ring = 0; ring < 40; ring++) {
+    const cx = clampNum(0, maxX, x + ring * step);
+    const cy = clampNum(0, maxY, y + ring * step);
+    const cand = { x: cx, y: cy, w, h };
+    if (!boardItems.some(it => boardRectsOverlap(cand, it))) return { x: cx, y: cy };
+    if (cx === maxX && cy === maxY) break; // ran out of room — accept staggered fallback
+  }
+  return { x: clampNum(0, maxX, x), y: clampNum(0, maxY, y) };
+}
+
+function boardDefaultPoint(offset = 0) {
+  const m = boardMetrics();
+  const w = 1000, h = m.heightBase;
   return {
     x: Math.max(12, Math.min(w - 190, Math.round(w * 0.5 - 95 + offset))),
     y: Math.max(22, Math.min(h - 120, Math.round(h * 0.45 - 65 + offset)))
@@ -4589,10 +4626,10 @@ function boardPointFromEvent(e, offset = 0) {
   const banner = document.getElementById('dashboard-banner');
   if (!banner || !e) return boardDefaultPoint(offset);
   const rect = banner.getBoundingClientRect();
-  return {
-    x: Math.max(8, e.clientX - rect.left - 90 + offset),
-    y: Math.max(12, e.clientY - rect.top - 60 + offset)
-  };
+  const m = boardMetrics();
+  const bx = (e.clientX - rect.left) / m.scale - 90 + offset;
+  const by = (e.clientY - rect.top) / m.scale - 60 + offset;
+  return { x: Math.max(8, Math.round(bx)), y: Math.max(12, Math.round(by)) };
 }
 
 function ensureBoardExpanded() {
@@ -4685,7 +4722,8 @@ async function addBoardFiles(files, origin = null) {
   for (let i = 0; i < files.length; i++) {
     const f = files[i];
     const isImg = /^image\//.test(f.type) || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(f.name);
-    const pos = { x: origin.x + i * 26, y: origin.y + i * 26 };
+    const iw = isImg ? 220 : 190, ih = isImg ? 160 : 90;
+    const pos = boardFreeSlot(origin.x + i * 26, origin.y + i * 26, iw, ih);
     if (window.electronAPI && window.electronAPI.saveBoardFile) {
       try {
         const buf = await f.arrayBuffer();
@@ -4714,7 +4752,8 @@ function addBoardTextPin(text, origin = null) {
   ensureBoardExpanded();
   origin = origin || boardDefaultPoint();
   const id = 'b' + Date.now();
-  boardItems.push({ id, type: 'text', text, x: origin.x, y: origin.y, w: 210, h: 130 });
+  const pos = boardFreeSlot(origin.x, origin.y, 210, 130);
+  boardItems.push({ id, type: 'text', text, x: pos.x, y: pos.y, w: 210, h: 130 });
   saveBoard();
   renderBoard();
   setTimeout(() => {
@@ -4774,6 +4813,13 @@ function renderBoard() {
   boardItems.forEach(item => {
     // Give each pinned item a stable slight tilt + pin colour once (never upside-down/90°).
     if (item.rot === undefined) { item.rot = Math.round((Math.random() * 20 - 10) * 10) / 10; item.pin = Math.floor(Math.random() * BOARD_PIN_COLORS.length); assigned = true; }
+    // One-time (idempotent) migration: snap any escaped / over-scaled item back in bounds.
+    const m = boardMetrics();
+    const ox2 = item.x, oy2 = item.y, ow2 = item.w, oh2 = item.h;
+    item.w = Math.min(item.w, 1000);
+    item.h = Math.min(item.h, m.heightBase);
+    clampBoardPos(item, m);
+    if (item.x !== ox2 || item.y !== oy2 || item.w !== ow2 || item.h !== oh2) assigned = true;
     const card = document.createElement('div');
     card.className = 'board-card board-' + item.type;
     card.dataset.boardId = item.id;
@@ -4841,9 +4887,8 @@ function makeBoardCardInteractive(card, item) {
     e.stopPropagation();
     window.isDraggingBoardCard = true;
 
-    const banner = document.getElementById('dashboard-banner');
-    const boardWidth = banner ? banner.clientWidth : 1000;
-    const scale = boardWidth / 1000;
+    const m = boardMetrics();
+    const scale = m.scale;
 
     const sx = e.clientX, sy = e.clientY, ox = item.x, oy = item.y;
     const rot = item.rot || 0;
@@ -4856,9 +4901,9 @@ function makeBoardCardInteractive(card, item) {
       }
       const dx = (ev.clientX - sx) / scale;
       const dy = (ev.clientY - sy) / scale;
-      item.x = Math.max(0, Math.round(ox + dx)); 
-      item.y = Math.max(0, Math.round(oy + dy));
-      card.style.left = (item.x * scale) + 'px'; 
+      item.x = clampNum(0, 1000 - item.w, Math.round(ox + dx));
+      item.y = clampNum(0, m.heightBase - item.h, Math.round(oy + dy));
+      card.style.left = (item.x * scale) + 'px';
       card.style.top = (item.y * scale) + 'px';
     };
     const up = () => {
@@ -4876,20 +4921,19 @@ function makeBoardCardInteractive(card, item) {
       e.stopPropagation(); e.preventDefault();
       window.isDraggingBoardCard = true;
 
-      const banner = document.getElementById('dashboard-banner');
-      const boardWidth = banner ? banner.clientWidth : 1000;
-      const scale = boardWidth / 1000;
+      const m = boardMetrics();
+      const scale = m.scale;
 
       const sx = e.clientX, sy = e.clientY, ow = item.w, oh = item.h;
       try { handle.setPointerCapture(e.pointerId); } catch (_) {}
       card.classList.add('dragging');
-      const move = (ev) => { 
+      const move = (ev) => {
         const dx = (ev.clientX - sx) / scale;
         const dy = (ev.clientY - sy) / scale;
-        item.w = Math.max(90, Math.round(ow + dx)); 
-        item.h = Math.max(60, Math.round(oh + dy)); 
-        card.style.width = (item.w * scale) + 'px'; 
-        card.style.height = (item.h * scale) + 'px'; 
+        item.w = clampNum(m.minWbase, 1000 - item.x, Math.round(ow + dx));
+        item.h = clampNum(m.minHbase, m.heightBase - item.y, Math.round(oh + dy));
+        card.style.width = (item.w * scale) + 'px';
+        card.style.height = (item.h * scale) + 'px';
       };
       const up = () => { 
         window.isDraggingBoardCard = false;
