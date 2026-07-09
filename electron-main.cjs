@@ -213,21 +213,37 @@ function createWindow() {
     return true;
   });
 
-  // Security: open external links in the OS browser, block in-app navigation away from the app
+  const devUrl = process.env.VITE_DEV_SERVER_URL || (app.isPackaged ? null : 'http://localhost:5173');
+  const appUrl = devUrl || `file://${path.join(__dirname, 'dist', 'index.html')}`;
+
+  // Security: open external links in the OS browser, block in-app navigation away from the app.
+  // ONLY the app's own URL (appUrl, e.g. the loaded dist/index.html or the Vite dev
+  // server) may be navigated to — everything else is blocked. Dropping an arbitrary
+  // file onto the window used to navigate the whole window to it (white-screen crash);
+  // now that's blocked too since it isn't appUrl.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('http://') || url.startsWith('https://')) shell.openExternal(url);
     return { action: 'deny' };
   });
+  // Robust allow-list: the current page (normalized), the dev-server origin, and any
+  // file:// URL whose path is our own index.html (tolerates file://C:\ vs file:///C:/).
+  const isOwnUrl = (url) => {
+    if (url === appUrl || url === mainWindow.webContents.getURL()) return true;
+    if (devUrl && url.startsWith(devUrl)) return true;
+    if (url.startsWith('file://')) {
+      try { return decodeURIComponent(new URL(url).pathname).replace(/\\/g, '/').endsWith('/dist/index.html'); }
+      catch { return false; }
+    }
+    return false;
+  };
   mainWindow.webContents.on('will-navigate', (e, url) => {
-    if (!url.startsWith('file://') && url !== mainWindow.webContents.getURL()) {
+    if (!isOwnUrl(url)) {
       e.preventDefault();
-      if (url.startsWith('http')) shell.openExternal(url);
+      if (url.startsWith('http://') || url.startsWith('https://')) shell.openExternal(url);
     }
   });
 
-  const devUrl = process.env.VITE_DEV_SERVER_URL || (app.isPackaged ? null : 'http://localhost:5173');
-  const url = devUrl || `file://${path.join(__dirname, 'dist', 'index.html')}`;
-  mainWindow.loadURL(url);
+  mainWindow.loadURL(appUrl);
 }
 
 // Single-instance lock: a second launch focuses the existing window instead of

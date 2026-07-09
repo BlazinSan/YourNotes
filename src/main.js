@@ -9,6 +9,15 @@ import { jsPDF } from 'jspdf'
 // Static import (not dynamic): Electron cannot fetch lazy chunks out of app.asar
 import * as __havenEngine from './haven/engine3d.js'
 
+// Global drop/dragover safety net: without this, dropping a file anywhere the
+// app doesn't have its own handler falls through to the OS default, which in
+// Electron navigates the whole window to the dropped file:// URL (white-screen
+// crash). Capture phase so it runs before any element's own listeners, but it
+// only calls preventDefault (never stopPropagation) so existing drop handlers
+// (dashboard banner, note body, etc.) still fire normally afterward.
+document.addEventListener('dragover', e => e.preventDefault(), true);
+document.addEventListener('drop', e => e.preventDefault(), true);
+
 // --- Data Persistence Override ---
 const _originalSetItem = Storage.prototype.setItem;
 const _originalGetItem = Storage.prototype.getItem;
@@ -1615,6 +1624,21 @@ function reattachNoteBodyListeners() {
           break;
         }
       }
+    });
+
+    // Drop Image Intercept (mirrors the paste handler above)
+    noteBodyInput.addEventListener('dragover', (e) => { e.preventDefault(); });
+    noteBodyInput.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const files = Array.from(e.dataTransfer?.files || []);
+      const imageFile = files.find(f => f.type.indexOf('image') === 0);
+      if (!imageFile) return;
+      window.downscaleImageFile(imageFile).then((src) => {
+        const html = `<div class="resizable-image-wrapper" contenteditable="false" style="width:300px;"><img src="${src}" /></div><p><br></p>`;
+        noteBodyInput.focus();
+        window.insertHtmlAtCursor(html);
+        updateNoteContent();
+      });
     });
   }
 }
