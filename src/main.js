@@ -592,6 +592,27 @@ function saveNotes() {
   localStorage.setItem('opennotes_data', JSON.stringify(notes));
 }
 
+// Cheap plain-text preview for the sidebar list. Strips <img> tags FIRST
+// (they can carry multi-MB base64 payloads) before slicing to ~4000 chars,
+// so a huge inline image never dominates the slice; remaining tags are then
+// stripped off the small slice instead of the full (possibly multi-MB) body.
+function computeNotePreview(body) {
+  if (!body) return '';
+  const noImgs = body.replace(/<img\b[^>]*>/gi, '');
+  const sliced = noImgs.length > 4000 ? noImgs.slice(0, 4000) : noImgs;
+  return sliced.replace(/<[^>]*>?/gm, '').trim();
+}
+
+// Returns note.preview, computing + caching it once for notes that predate
+// this field (e.g. notes merged in from sync) so we never regex-strip the
+// full body on every render.
+function getNotePreview(note) {
+  if (typeof note.preview !== 'string') {
+    note.preview = computeNotePreview(note.body);
+  }
+  return note.preview;
+}
+
 function loadStringSet(key) {
   try {
     return new Set(JSON.parse(localStorage.getItem(key) || '[]'));
@@ -663,7 +684,7 @@ function renderNotesList(filterText = '') {
   const term = (filterText || '').toLowerCase();
 
   const filteredNotes = visibleSidebarNotes().filter(note => {
-    const plainText = note.body ? note.body.replace(/<[^>]*>?/gm, '') : '';
+    const plainText = getNotePreview(note);
     return (note.title || '').toLowerCase().includes(term) ||
            (plainText || '').toLowerCase().includes(term) ||
            noteGroup(note).toLowerCase().includes(term);
@@ -723,10 +744,11 @@ function renderNotesList(filterText = '') {
     items.forEach(note => {
       const date = new Date(note.updatedAt);
       const dateString = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-      const plainText = note.body ? note.body.replace(/<[^>]*>?/gm, '') : 'No content...';
+      const plainText = note.body ? getNotePreview(note) : 'No content...';
 
       const div = document.createElement('div');
       div.className = `note-item ${note.id === activeNoteId ? 'active' : ''}`;
+      div.dataset.id = note.id;
       div.onclick = () => setActiveNote(note.id);
       div.oncontextmenu = (e) => {
         e.preventDefault();
@@ -741,8 +763,39 @@ function renderNotesList(filterText = '') {
       `;
 
       notesListEl.appendChild(div);
+      noteRowGroupCache.set(note.id, group);
     });
   });
+}
+
+// Tracks which folder-group header each note's sidebar row currently sits
+// under, so a title-only edit can be detected as "would this move the row to
+// a different group?" without re-deriving it from the (flat, unwrapped) DOM.
+// Populated by renderNotesList; consulted by patchActiveNoteListRow.
+const noteRowGroupCache = new Map();
+
+// Updates a single sidebar row in place (title/preview/date) instead of
+// rebuilding the whole list. Used by the debounced typing path so a keypress
+// doesn't force renderNotesList to regex-strip every note's body again.
+// Falls back to `false` (caller should do a full renderNotesList) whenever an
+// in-place patch isn't safe: the row isn't currently rendered (its group is
+// collapsed, or the note is filtered out / archived), or the edit moved the
+// note into a different folder group (which requires re-parenting under a
+// different header — a full render handles that correctly).
+function patchActiveNoteListRow(note) {
+  const row = notesListEl.querySelector(`.note-item[data-id="${note.id}"]`);
+  if (!row) return false;
+  if (noteRowGroupCache.get(note.id) !== noteGroup(note)) return false;
+
+  const titleEl = row.querySelector('.note-item-title');
+  const previewEl = row.querySelector('.note-item-preview');
+  const dateEl = row.querySelector('.note-item-date');
+  if (titleEl) titleEl.textContent = noteDisplayTitle(note);
+  if (previewEl) previewEl.textContent = note.body ? getNotePreview(note) : 'No content...';
+  if (dateEl) {
+    dateEl.textContent = new Date(note.updatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  }
+  return true;
 }
 
 // Set Active Note
@@ -1308,8 +1361,17 @@ function updateNoteContent() {
     if (_saveDebounceTimer) clearTimeout(_saveDebounceTimer);
     _saveDebounceTimer = setTimeout(() => {
       _saveDebounceTimer = null;
+      note.preview = computeNotePreview(note.body);
       saveNotes();
-      renderNotesList(searchInput.value);
+      // Patch just this note's sidebar row instead of a full renderNotesList
+      // (which regex-strips every note's body) when it's safe to do so — no
+      // active search filter, and the row can be updated without moving it
+      // to a different folder group. Otherwise fall back to a full render.
+      if (!searchInput.value && patchActiveNoteListRow(note)) {
+        // patched in place
+      } else {
+        renderNotesList(searchInput.value);
+      }
       showSaveIndicator();
     }, 400);
   }
@@ -3410,8 +3472,14 @@ function initGraph() {
 // Ambient Time Logic
 // -----------------------------------------
 function updateAmbientTime() {
-  const now = new Date();
   const timeEl = document.getElementById('ambient-time');
+  // Skip the work (and the DOM writes below) while the ambient clock isn't
+  // visible — e.g. a note is open instead of the home page. The interval
+  // itself keeps running (cheap); offsetParent is null whenever the element
+  // or an ancestor is display:none, which is how the home/editor views are
+  // toggled here.
+  if (!timeEl || timeEl.offsetParent === null) return;
+  const now = new Date();
   const dateEl = document.getElementById('ambient-date');
   if (timeEl) {
     timeEl.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });

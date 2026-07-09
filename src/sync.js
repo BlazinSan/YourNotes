@@ -49,6 +49,18 @@ let client = CONVEX_URL ? new ConvexHttpClient(CONVEX_URL) : null;
 let pushTimer = null;
 let pushing = false;
 
+// Keys written since the last successful push (fed by __syncNotifyChange,
+// which the Storage.setItem override in main.js calls on every localStorage
+// write — so this covers every write path in the app). pushChanges only
+// re-hashes dirty keys (plus anything missing from meta) instead of hashing
+// every SYNC_KEYS value — the expensive part when opennotes_data holds
+// megabytes of inline base64 images. dirtyKeys lives in memory only, so a
+// reload loses it; `everPushedThisSession` forces one full hash scan on the
+// first push after each load to re-catch any edit whose push never
+// completed before the reload (meta would still show the pre-edit hash).
+let dirtyKeys = new Set();
+let everPushedThisSession = false;
+
 // Convex calls have no built-in timeout — a stalled fetch (bad wifi, dead
 // deployment) would otherwise leave "Pulling…/Pushing…" up forever with no
 // way out. Race every call against a timer so the existing catch/finally
@@ -330,14 +342,28 @@ window.pushChanges = async function () {
     await uploadReferencedFiles(token, allSyncValues);
     await uploadBoardBlobs(token);
 
+    // Snapshot + force-full flag captured up front: a key can be marked dirty
+    // again (by a live edit) while the awaits above/below are in flight, and
+    // that dirty mark must survive past this push, not get wiped by the
+    // success handler below.
+    const dirtyAtStart = new Set(dirtyKeys);
+    const forceFullScan = !everPushedThisSession;
+
     const now = Date.now();
     const rowsToWrite = [];        // flat KV rows (incl. chunk rows)
     const changedMeta = {};        // main-key -> hash, applied after success
     for (const k of SYNC_KEYS) {
       const v = localStorage.getItem(k);
       if (v === null || v === undefined) continue;
+      const known = meta[k];
+      // Skip the (potentially expensive, e.g. multi-MB opennotes_data) hash
+      // entirely when we already have a meta hash for this key AND nothing
+      // has told us it changed: not dirty, and not the first push of the
+      // session (which does one full scan to re-catch any edit whose push
+      // never completed before a reload wiped the in-memory dirty set).
+      if (known && !forceFullScan && !dirtyAtStart.has(k)) continue;
       const h = strHash(v);
-      if (meta[k] && meta[k].h === h) continue;
+      if (known && known.h === h) continue;
       changedMeta[k] = h;
       if (v.length <= KV_CHUNK) {
         rowsToWrite.push({ key: k, value: v, updatedAt: now });
@@ -359,6 +385,12 @@ window.pushChanges = async function () {
       for (const k in changedMeta) meta[k] = { h: changedMeta[k], t: now };
     }
     setMeta(meta);
+    // Push succeeded: the keys we accounted for above are no longer dirty.
+    // Only remove what we snapshotted at the start — a key re-dirtied by a
+    // live edit during this push (added to `dirtyKeys` but not in
+    // `dirtyAtStart`) must stay dirty for the next push.
+    for (const k of dirtyAtStart) dirtyKeys.delete(k);
+    everPushedThisSession = true;
     // refresh the filename→URL map (presigned R2 GET urls) so this device renders cloud files
     try { localStorage.setItem("yn_file_map", JSON.stringify(await withTimeout(client.action(api.r2.presignDownloads, { token }), 30000, "presignDownloads"))); } catch (_) {}
     localStorage.setItem("yn_last_sync", String(Date.now()));
@@ -391,8 +423,11 @@ window.syncNow = async function () {
 // Called from the Storage override on every setItem — debounced auto-push
 // (a full sync isn't needed for a local edit; pushing keeps it lightweight)
 window.__syncNotifyChange = function (key) {
-  if (!client || !getToken()) return;
   if (!SYNC_KEYS.includes(key)) return;
+  // Track dirtiness regardless of sign-in state — cheap, and means a push
+  // right after a later sign-in already knows what changed.
+  dirtyKeys.add(key);
+  if (!client || !getToken()) return;
   clearTimeout(pushTimer);
   pushTimer = setTimeout(() => window.pushChanges(), 6000);
 };
