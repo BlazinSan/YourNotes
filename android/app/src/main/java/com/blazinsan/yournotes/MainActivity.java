@@ -1,5 +1,6 @@
 package com.blazinsan.yournotes;
 
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
@@ -51,15 +52,19 @@ public class MainActivity extends BridgeActivity {
 
     private void applyInitialSystemBarStyle() {
         Window window = getWindow();
-        int surface = Color.parseColor("#FDFBF7");
+        // Match the launch bars to the active theme. Hardcoding light cream stomped
+        // the values-night theme at runtime (light bars + dark icons on a dark app).
+        boolean night = (getResources().getConfiguration().uiMode
+                & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+        int surface = Color.parseColor(night ? "#12100E" : "#FDFBF7");
 
         window.setStatusBarColor(surface);
         window.setNavigationBarColor(surface);
 
         WindowInsetsControllerCompat controller =
                 WindowCompat.getInsetsController(window, window.getDecorView());
-        controller.setAppearanceLightStatusBars(true);
-        controller.setAppearanceLightNavigationBars(true);
+        controller.setAppearanceLightStatusBars(!night);
+        controller.setAppearanceLightNavigationBars(!night);
     }
 
     private void installWebBackHandler() {

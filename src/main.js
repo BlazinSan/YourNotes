@@ -4612,7 +4612,16 @@ function boardMetrics() {
   const minHbase = Math.round(92 / scale);
   return { scale, heightBase, minWbase, minHbase };
 }
-function clampNum(min, max, v) { return Math.min(Math.max(v, min), Math.max(min, max)); }
+// Clamp v into [min,max]. If the available range is inverted (max < min — e.g. a
+// card cornered with less room than the minimum size), the AVAILABLE SPACE wins
+// (return max, floored at 0) rather than snapping to min and overshooting the board.
+function clampNum(min, max, v) { if (max < min) return Math.max(0, max); return Math.min(Math.max(v, min), max); }
+// The banner's live height is only the board's real canvas when it's expanded (not
+// the collapsed 80px .thin state used on non-dashboard panels). Gate size migration.
+function boardExpandedForMigration() {
+  const b = document.getElementById('dashboard-banner');
+  return !!(b && b.classList.contains('expanded') && b.clientHeight > 160);
+}
 // Clamp an item's position given its size (used on drag + migration).
 function clampBoardPos(item, m) {
   m = m || boardMetrics();
@@ -4837,13 +4846,20 @@ function renderBoard() {
   boardItems.forEach(item => {
     // Give each pinned item a stable slight tilt + pin colour once (never upside-down/90°).
     if (item.rot === undefined) { item.rot = Math.round((Math.random() * 20 - 10) * 10) / 10; item.pin = Math.floor(Math.random() * BOARD_PIN_COLORS.length); assigned = true; }
-    // One-time (idempotent) migration: snap any escaped / over-scaled item back in bounds.
+    // Idempotent migration: snap escaped/over-scaled items back in bounds and raise
+    // legacy under-min items up to the new minimum. CRITICAL: only when the banner is
+    // truly expanded with a real height — on a collapsed/.thin (80px) banner the live
+    // clientHeight is not the board's logical canvas, and clamping h/y to it would
+    // permanently squash every card (silent data loss on any window resize while off
+    // the dashboard). When not expanded, render at stored coords and never save.
     const m = boardMetrics();
-    const ox2 = item.x, oy2 = item.y, ow2 = item.w, oh2 = item.h;
-    item.w = Math.min(item.w, 1000);
-    item.h = Math.min(item.h, m.heightBase);
-    clampBoardPos(item, m);
-    if (item.x !== ox2 || item.y !== oy2 || item.w !== ow2 || item.h !== oh2) assigned = true;
+    if (boardExpandedForMigration()) {
+      const ox2 = item.x, oy2 = item.y, ow2 = item.w, oh2 = item.h;
+      item.w = Math.min(Math.max(item.w, m.minWbase), 1000);
+      item.h = Math.min(Math.max(item.h, m.minHbase), m.heightBase);
+      clampBoardPos(item, m);
+      if (item.x !== ox2 || item.y !== oy2 || item.w !== ow2 || item.h !== oh2) assigned = true;
+    }
     const card = document.createElement('div');
     card.className = 'board-card board-' + item.type;
     card.dataset.boardId = item.id;
