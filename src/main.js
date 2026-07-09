@@ -839,16 +839,18 @@ function setActiveNote(id) {
     document.querySelector('.editor-content').style.display = 'flex';
     const toolbar = document.querySelector('.static-editor-toolbar');
     if (toolbar) toolbar.style.display = 'flex';
+    closeStaticToolbarPanel();
     if (homePage) homePage.style.display = 'none';
     if (appContainer) appContainer.classList.remove('home-active');
-    
+
   } else {
     noteTitleInput.value = '';
-    
+
     editorHeader.style.display = 'none';
     document.querySelector('.editor-content').style.display = 'none';
     const toolbar = document.querySelector('.static-editor-toolbar');
     if (toolbar) toolbar.style.display = 'none';
+    closeStaticToolbarPanel();
     if (appContainer) appContainer.classList.add('home-active');
     
     if (homePage) {
@@ -6083,6 +6085,35 @@ window.insertHtmlAtCursor = function(html) {
     }
   }
 };
+
+// --- Static toolbar trigger + floating panel ---
+function closeStaticToolbarPanel() {
+  const panel = document.getElementById('static-toolbar-panel');
+  const trigger = document.getElementById('static-toolbar-trigger');
+  if (panel) panel.classList.remove('show');
+  if (trigger) trigger.setAttribute('aria-expanded', 'false');
+}
+
+window.toggleStaticToolbarPanel = function() {
+  const panel = document.getElementById('static-toolbar-panel');
+  const trigger = document.getElementById('static-toolbar-trigger');
+  if (!panel || !trigger) return;
+  const willShow = !panel.classList.contains('show');
+  panel.classList.toggle('show', willShow);
+  trigger.setAttribute('aria-expanded', String(willShow));
+};
+
+document.addEventListener('mousedown', (e) => {
+  const panel = document.getElementById('static-toolbar-panel');
+  const trigger = document.getElementById('static-toolbar-trigger');
+  if (!panel || !panel.classList.contains('show')) return;
+  if (panel.contains(e.target) || (trigger && trigger.contains(e.target))) return;
+  closeStaticToolbarPanel();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeStaticToolbarPanel();
+});
 
 window.insertNoteHyperlink = function() {
   saveSelection();
