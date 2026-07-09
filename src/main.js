@@ -6694,6 +6694,22 @@ function selectImage(wrapper) {
     
     wrapper.appendChild(actionBar);
   }
+
+  // Clamp bar horizontally so it never overflows the editor bounds
+  // (mirrors the floating-toolbar clamp at ~line 2876)
+  const bar = wrapper.querySelector('.img-action-bar');
+  const container = document.querySelector('.editor-area');
+  if (bar && container) {
+    const barRect = bar.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+    let shift = 0;
+    if (barRect.left < containerRect.left) {
+      shift = containerRect.left - barRect.left;
+    } else if (barRect.right > containerRect.right) {
+      shift = containerRect.right - barRect.right;
+    }
+    bar.style.transform = shift !== 0 ? `translateX(calc(-50% + ${shift}px))` : '';
+  }
 }
 
 function startImageResize(e, wrapper, direction) {

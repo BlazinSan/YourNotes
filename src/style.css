@@ -5555,6 +5555,9 @@ body.haven-open {
   vertical-align: bottom;
   margin: 8px 0;
   cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .resizable-image-wrapper img {
@@ -5616,7 +5619,6 @@ body.haven-open {
   border: 1px solid var(--panel-border);
   border-radius: 8px;
   box-shadow: 0 4px 16px var(--shadow-color);
-  z-index: 20;
   white-space: nowrap;
 }
 
