@@ -1760,10 +1760,18 @@ body {
   border: 1px solid var(--panel-border);
   box-shadow: 0 30px 70px var(--shadow-color);
 }
+/* Desktop (≥720px, fine pointer): wide landscape hero, not a phone card. */
+@media (min-width: 720px) and (pointer: fine) {
+  .onb-scene {
+    width: min(940px, 94vw);
+    height: min(600px, 92vh);
+    border-radius: 28px;
+  }
+}
 /* Full-bleed only on actual phones/tablets. The old `max-height: 880px` fired on
    any laptop shorter than 880px (1280x800, 1366x768…), making the desktop overlay
    a sparse edge-to-edge slab instead of the centered phone-shaped card. */
-@media (max-width: 480px), (pointer: coarse) {
+@media (max-width: 719px), (pointer: coarse) {
   .onb-scene { width: 100vw; height: 100vh; height: 100dvh; border-radius: 0; border: none; }
 }
 
@@ -1803,7 +1811,7 @@ body {
   .onb-glow, .onb-logo { animation: none; }
 }
 
-/* Bottom sheet */
+/* Bottom sheet (phone) */
 .onb-sheet {
   position: absolute;
   left: 0;
@@ -1835,22 +1843,24 @@ body {
   padding: 0 8px;
   min-height: 0;
 }
+.onb-emoji { font-size: 2.4rem; line-height: 1; margin-bottom: 6px; }
 .onb-slide h2, .onb-h {
   font-size: 1.7rem;
   font-weight: 800;
   line-height: 1.2;
   letter-spacing: -0.03em;
   color: var(--text-primary);
-  margin: 4px 0 20px;
+  margin: 4px 0 6px;
 }
+.onb-sub { font-size: 0.88rem; color: var(--text-secondary); margin: 0 0 16px; max-width: 30ch; }
 .onb-h { text-align: center; }
 
 /* Mini phone mockups (pure CSS skeletons) */
 .onb-mock {
   width: 150px;
   flex: 1;
-  min-height: 150px;
-  max-height: 250px;
+  min-height: 120px;
+  max-height: 220px;
   border: 4px solid var(--text-primary);
   border-radius: 24px;
   background: var(--bg-color);
@@ -1864,34 +1874,97 @@ body {
 }
 .onb-mock i { display: block; border-radius: 6px; background: var(--overlay-heavy); height: 10px; }
 .onb-mock.m-editor i:nth-child(1) { height: 16px; width: 68%; background: var(--accent-color); opacity: 0.55; }
-.onb-mock.m-editor i:nth-child(3) { width: 86%; }
-.onb-mock.m-editor i:nth-child(5) { width: 58%; }
-.onb-mock.m-grid { flex-direction: row; flex-wrap: wrap; align-content: flex-start; }
-.onb-mock.m-grid b { width: calc(50% - 4px); height: 54px; border-radius: 10px; background: var(--overlay-medium); border: 1px solid var(--panel-border); }
-.onb-mock.m-grid b:nth-child(1) { background: var(--glow-1); }
-.onb-mock.m-grid b:nth-child(4) { background: var(--glow-2); }
-.onb-mock.m-search .bar { display: block; height: 26px; border-radius: 13px; background: var(--overlay-medium); border: 1.5px solid var(--accent-color); }
-.onb-mock.m-search i { width: 90%; }
-.onb-mock.m-search i:nth-child(3) { width: 70%; background: var(--glow-1); }
-.onb-mock.m-search i:nth-child(5) { width: 78%; }
-.onb-mock.m-sync { align-items: center; justify-content: center; }
-.onb-mock.m-sync b { border-radius: 8px; border: 2.5px solid var(--text-secondary); background: var(--overlay-light); }
-.onb-mock.m-sync .dev-a { width: 44px; height: 74px; transform: rotate(-8deg); }
-.onb-mock.m-sync .dev-b { width: 82px; height: 56px; transform: rotate(4deg); margin-top: -18px; margin-left: 36px; }
-.onb-mock.m-sync .tick {
+.onb-mock.m-editor i:nth-child(2) { width: 86%; }
+.onb-mock.m-editor i:nth-child(3) { width: 58%; }
+.onb-mock.m-editor .grid2x2 {
+  margin-top: auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+}
+.onb-mock.m-editor .grid2x2 em { display: block; height: 18px; border-radius: 5px; background: var(--overlay-medium); border: 1px solid var(--panel-border); font-style: normal; }
+
+/* Safe Haven mock: gradient horizon + sun/moon */
+.onb-mock.m-haven { padding: 0; border-radius: 20px; justify-content: flex-end; }
+.onb-mock.m-haven .sky {
   position: absolute;
-  bottom: 16px;
+  inset: 0;
+  background: linear-gradient(180deg, var(--glow-2) 0%, var(--glow-1) 65%, var(--bg-color) 100%);
+  opacity: 0.85;
+}
+.onb-mock.m-haven .sun {
+  position: absolute;
+  top: 28%;
   left: 50%;
-  transform: translateX(-50%);
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
+  margin-left: -17px;
   border-radius: 50%;
   background: var(--accent-color);
+  opacity: 0.9;
+  box-shadow: 0 0 26px 8px var(--overlay-medium);
+}
+
+/* Graph map mock: dotted nodes + connecting lines */
+.onb-mock.m-graph { align-items: center; justify-content: center; }
+.onb-mock.m-graph svg { position: absolute; inset: 18px 12px 12px; width: calc(100% - 24px); height: calc(100% - 30px); }
+.onb-mock.m-graph svg line { stroke: var(--overlay-heavy); stroke-width: 2; }
+.onb-mock.m-graph .node { position: absolute; width: 16px; height: 16px; border-radius: 50%; background: var(--accent-color); box-shadow: 0 0 0 3px var(--bg-color); }
+.onb-mock.m-graph .n1 { left: 12%; bottom: 16%; }
+.onb-mock.m-graph .n2 { left: 46%; top: 16%; background: var(--glow-1); }
+.onb-mock.m-graph .n3 { right: 12%; bottom: 32%; background: var(--glow-2); }
+
+/* Pinboard mock: tilted cards with a pin dot */
+.onb-mock.m-board { align-items: center; justify-content: center; }
+.onb-mock.m-board .card {
+  position: absolute;
+  width: 62px;
+  height: 44px;
+  border-radius: 8px;
+  background: var(--overlay-medium);
+  border: 1px solid var(--panel-border);
+  box-shadow: 0 8px 16px var(--shadow-color);
+}
+.onb-mock.m-board .card::before {
+  content: '';
+  position: absolute;
+  top: -4px;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  margin-left: -4px;
+  border-radius: 50%;
+  background: var(--accent-color);
+}
+.onb-mock.m-board .c1 { transform: rotate(-6deg); left: 18%; top: 30%; background: var(--glow-1); }
+.onb-mock.m-board .c2 { transform: rotate(3deg); left: 44%; top: 18%; }
+.onb-mock.m-board .c3 { transform: rotate(-2deg); left: 34%; top: 48%; background: var(--glow-2); }
+
+/* College notes mock: stacked pages with a PDF tag */
+.onb-mock.m-college { align-items: center; justify-content: center; }
+.onb-mock.m-college .page {
+  position: absolute;
+  width: 78px;
+  height: 96px;
+  border-radius: 6px;
+  background: var(--overlay-light);
+  border: 1px solid var(--panel-border);
+  box-shadow: 0 6px 14px var(--shadow-color);
+}
+.onb-mock.m-college .p1 { top: 14px; left: 50%; margin-left: -39px; transform: translate(-8px, 8px); }
+.onb-mock.m-college .p2 { top: 14px; left: 50%; margin-left: -39px; transform: translate(4px, 2px); }
+.onb-mock.m-college .p3 { top: 14px; left: 50%; margin-left: -39px; background: var(--bg-color); }
+.onb-mock.m-college .tag {
+  position: absolute;
+  top: 0;
+  right: 0;
+  background: #c0392b;
   color: #fff;
+  font-size: 0.5rem;
   font-weight: 800;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  letter-spacing: 0.04em;
+  padding: 2px 5px;
+  border-radius: 0 6px 0 6px;
 }
 
 /* Dots */
@@ -1940,6 +2013,18 @@ body {
 .onb-terms { text-align: center; font-size: 0.72rem; color: var(--text-secondary); margin-top: 12px; }
 .onb-terms b { color: var(--text-primary); font-weight: 600; }
 
+/* Right-pane welcome column (desktop) / lives below carousel (phone) */
+.onb-welcome-logo {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  box-shadow: 0 10px 22px var(--shadow-color), 0 0 0 1px var(--panel-border);
+  display: none;
+}
+.onb-welcome-h { margin: 0 0 6px; }
+.onb-welcome-sub { font-size: 0.9rem; color: var(--text-secondary); margin: 0 0 22px; }
+.onb-welcome-actions { display: flex; flex-direction: column; gap: 10px; }
+
 /* Sub-views (sign-in / guest) */
 .onb-back {
   width: 38px;
@@ -1974,6 +2059,64 @@ body {
   box-shadow: 0 0 0 3px var(--shadow-color-focus);
 }
 .onb-status { min-height: 1.2em; font-size: 0.85rem; color: var(--text-secondary); text-align: center; margin: 0; }
+
+/* ============ DESKTOP: two-pane hero (≥720px, fine pointer) ============ */
+@media (min-width: 720px) and (pointer: fine) {
+  .onb-ambient { display: none; }
+  .onb-sheet {
+    position: static;
+    inset: auto;
+    height: 100%;
+    border-radius: 0;
+    border-top: none;
+    box-shadow: none;
+    padding: 0;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  #onb-view-carousel {
+    flex-direction: row;
+    align-items: stretch;
+  }
+  .onb-showcase {
+    flex: 1 1 52%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    background: var(--panel-bg);
+    background-image: radial-gradient(circle at 20% 15%, var(--glow-1) 0%, transparent 45%),
+                       radial-gradient(circle at 85% 85%, var(--glow-2) 0%, transparent 45%);
+    padding: 40px 36px;
+    min-width: 0;
+  }
+  .onb-carousel { flex: 1; }
+  .onb-mock { width: 210px; max-height: 280px; }
+  .onb-welcome {
+    flex: 1 1 48%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: flex-start;
+    text-align: left;
+    padding: 40px 56px;
+    min-width: 0;
+    overflow-y: auto;
+  }
+  .onb-welcome-logo { display: block; margin-bottom: 18px; }
+  .onb-welcome-h, .onb-welcome-sub { text-align: left; }
+  .onb-welcome-h { font-size: 2.1rem; }
+  .onb-welcome-actions { width: min(320px, 100%); }
+  .onb-terms { text-align: left; }
+
+  /* Sign-in / guest-name sub-views: centered narrow column within the wide card */
+  #onb-view-email, #onb-view-name {
+    align-items: center;
+    justify-content: center;
+    padding: 40px 24px;
+  }
+  #onb-view-email > *:not(.onb-back), #onb-view-name > *:not(.onb-back) { width: min(420px, 100%); }
+  #onb-view-email .onb-back, #onb-view-name .onb-back { align-self: center; margin-left: 0; }
+}
 
 /* Dashboard Banner Typography Overlay */
 .dashboard-banner.expanded {

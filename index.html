@@ -30,35 +30,69 @@
 
           <!-- View: feature carousel -->
           <div class="onb-view" id="onb-view-carousel">
-            <div class="onb-carousel" dir="ltr">
-              <div class="onb-slides" id="onb-slides">
-                <div class="onb-slide">
-                  <h2>Capture anything<br>in seconds</h2>
-                  <div class="onb-mock m-editor"><i></i><i></i><i></i><i></i><i></i></div>
-                </div>
-                <div class="onb-slide">
-                  <h2>Organize<br>into notebooks</h2>
-                  <div class="onb-mock m-grid"><b></b><b></b><b></b><b></b></div>
-                </div>
-                <div class="onb-slide">
-                  <h2>Search<br>that just works</h2>
-                  <div class="onb-mock m-search"><span class="bar"></span><i></i><i></i><i></i><i></i></div>
-                </div>
-                <div class="onb-slide">
-                  <h2>Sync across<br>your devices</h2>
-                  <div class="onb-mock m-sync"><b class="dev-a"></b><b class="dev-b"></b><span class="tick">✓</span></div>
+            <div class="onb-showcase">
+              <div class="onb-carousel" dir="ltr">
+                <div class="onb-slides" id="onb-slides">
+                  <div class="onb-slide">
+                    <span class="onb-emoji" aria-hidden="true">🧘</span>
+                    <h2>Unwind in a<br>3D space</h2>
+                    <p class="onb-sub">Relax in a 3D cabin, beach or high-rise.</p>
+                    <div class="onb-mock m-haven"><span class="sky"></span><span class="sun"></span></div>
+                  </div>
+                  <div class="onb-slide">
+                    <span class="onb-emoji" aria-hidden="true">🔗</span>
+                    <h2>See how notes<br>connect</h2>
+                    <p class="onb-sub">Your ideas, mapped as a living graph.</p>
+                    <div class="onb-mock m-graph">
+                      <svg viewBox="0 0 120 100" aria-hidden="true">
+                        <line x1="20" y1="76" x2="60" y2="24"></line>
+                        <line x1="60" y1="24" x2="100" y2="60"></line>
+                        <line x1="20" y1="76" x2="100" y2="60"></line>
+                      </svg>
+                      <b class="node n1"></b><b class="node n2"></b><b class="node n3"></b>
+                    </div>
+                  </div>
+                  <div class="onb-slide">
+                    <span class="onb-emoji" aria-hidden="true">🏠</span>
+                    <h2>Pin to your<br>board</h2>
+                    <p class="onb-sub">Notes, images &amp; PDFs on one corkboard.</p>
+                    <div class="onb-mock m-board"><b class="card c1"></b><b class="card c2"></b><b class="card c3"></b></div>
+                  </div>
+                  <div class="onb-slide">
+                    <span class="onb-emoji" aria-hidden="true">🎓</span>
+                    <h2>Lecture PDFs,<br>organized</h2>
+                    <p class="onb-sub">Every course, every PDF, in order.</p>
+                    <div class="onb-mock m-college"><b class="page p1"></b><b class="page p2"></b><b class="page p3"><span class="tag">PDF</span></b></div>
+                  </div>
+                  <div class="onb-slide">
+                    <span class="onb-emoji" aria-hidden="true">✏️</span>
+                    <h2>Write with<br>everything</h2>
+                    <p class="onb-sub">Tables, callouts, code, math &amp; images.</p>
+                    <div class="onb-mock m-editor">
+                      <i></i><i></i><i></i>
+                      <div class="grid2x2"><em></em><em></em><em></em><em></em></div>
+                    </div>
+                  </div>
                 </div>
               </div>
+              <div class="onb-dots" id="onb-dots">
+                <button type="button" class="active" aria-label="Slide 1"></button>
+                <button type="button" aria-label="Slide 2"></button>
+                <button type="button" aria-label="Slide 3"></button>
+                <button type="button" aria-label="Slide 4"></button>
+                <button type="button" aria-label="Slide 5"></button>
+              </div>
             </div>
-            <div class="onb-dots" id="onb-dots">
-              <button type="button" class="active" aria-label="Slide 1"></button>
-              <button type="button" aria-label="Slide 2"></button>
-              <button type="button" aria-label="Slide 3"></button>
-              <button type="button" aria-label="Slide 4"></button>
+            <div class="onb-welcome">
+              <img class="onb-welcome-logo" src="/icon.png" alt="" />
+              <h2 class="onb-welcome-h" data-i18n="onboarding.welcome">Welcome to YourNotes</h2>
+              <p class="onb-welcome-sub" data-i18n="onboarding.subtitle">Let's set up your personal workspace.</p>
+              <div class="onb-welcome-actions">
+                <button type="button" class="onb-pill" id="onb-email-btn">Continue with email</button>
+                <button type="button" class="onb-link" id="onb-guest-btn">Continue without an account</button>
+              </div>
+              <p class="onb-terms">Your notes stay on this device unless you <b>sign in to sync</b></p>
             </div>
-            <button type="button" class="onb-link" id="onb-guest-btn">Continue without an account</button>
-            <button type="button" class="onb-pill" id="onb-email-btn">Continue with email</button>
-            <p class="onb-terms">Your notes stay on this device unless you <b>sign in to sync</b></p>
           </div>
 
           <!-- View: sign in / create account (sync) -->
