@@ -74,7 +74,24 @@ function withTimeout(promise, ms, label) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-const getToken = () => { try { return localStorage.getItem("yn_sync_token") || ""; } catch (_) { return ""; } };
+// Electron: token lives in an OS-keychain-backed safeStorage file (main process),
+// never plaintext on disk. Other platforms (browser/Capacitor) fall back to localStorage.
+const getToken = () => {
+  try {
+    if (window.electronAPI && window.electronAPI.tokenGet) {
+      let t = window.electronAPI.tokenGet() || "";
+      // One-time migration: an existing plaintext localStorage token gets moved
+      // into safeStorage the first time we run, then wiped from localStorage.
+      if (!t) {
+        const legacy = localStorage.getItem("yn_sync_token") || "";
+        if (legacy) { try { window.electronAPI.tokenSet(legacy); } catch (_) {} localStorage.removeItem("yn_sync_token"); t = legacy; }
+      }
+      return t;
+    }
+    return localStorage.getItem("yn_sync_token") || "";
+  } catch (_) { return ""; }
+};
+const setToken = (t) => { try { if (window.electronAPI && window.electronAPI.tokenSet) { window.electronAPI.tokenSet(t || ""); localStorage.removeItem("yn_sync_token"); } else if (t) { localStorage.setItem("yn_sync_token", t); } else { localStorage.removeItem("yn_sync_token"); } } catch (_) {} };
 const getMeta = () => { try { return JSON.parse(localStorage.getItem("yn_sync_meta") || "{}"); } catch (_) { return {}; } };
 const setMeta = (m) => { try { localStorage.setItem("yn_sync_meta", JSON.stringify(m)); } catch (_) {} };
 const getFileMap = () => { try { return JSON.parse(localStorage.getItem("yn_file_map") || "{}"); } catch (_) { return {}; } };
@@ -123,7 +140,7 @@ window.resolveFileUrl = function (path) {
 
 // ---------- Auth ----------
 async function afterAuth(res, pw) {
-  localStorage.setItem("yn_sync_token", res.token);
+  setToken(res.token);
   localStorage.setItem("yn_sync_email", res.email);
   // Electron has no built-in password manager — remember the credentials
   // ourselves via OS-encrypted storage (safeStorage) in the main process.
@@ -155,7 +172,7 @@ window.onboardingAuth = (kind) => doAuth(kind, fieldVal("onboarding-sync-email")
 window.syncSignOut = async function () {
   const token = getToken();
   if (client && token) { try { await withTimeout(client.mutation(api.sync.signOut, { token }), 30000, "signOut"); } catch (_) {} }
-  localStorage.removeItem("yn_sync_token");
+  setToken("");
   localStorage.removeItem("yn_sync_email");
   if (window.electronAPI && window.electronAPI.clearCred) { try { window.electronAPI.clearCred(); } catch (_) {} }
   updateSyncUi();

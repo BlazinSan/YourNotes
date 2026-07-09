@@ -4,8 +4,10 @@
     <meta charset="UTF-8" />
     <!-- CSP: blocks remote/injected scripts & framing. 'unsafe-inline' is required because the
          app uses inline event handlers/styles throughout (ponytail: rewriting all of them is out of
-         scope; the meta CSP + Electron contextIsolation are the defense-in-depth ceiling here). -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https: file:; media-src 'self' data: blob: https:; connect-src 'self' https: wss:; object-src 'none'; base-uri 'none'; frame-src 'self' data: blob: file: https:" />
+         scope; the meta CSP + Electron contextIsolation are the defense-in-depth ceiling here).
+         connect-src is an explicit allow-list (Convex + R2 + Google Docs viewer) instead of a
+         blanket https:/wss: so a compromised script can't exfiltrate to an arbitrary host. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https: file:; media-src 'self' data: blob: https:; connect-src 'self' https://quiet-jaguar-986.convex.cloud https://quiet-jaguar-986.convex.site https://*.convex.cloud wss://*.convex.cloud https://*.r2.cloudflarestorage.com https://docs.google.com; object-src 'none'; base-uri 'none'; frame-src 'self' data: blob: file: https:" />
     <link rel="icon" type="image/png" href="/icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>YourNotes</title>

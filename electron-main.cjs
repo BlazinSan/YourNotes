@@ -2,6 +2,19 @@ const { app, BrowserWindow, ipcMain, Menu, shell, safeStorage } = require('elect
 const path = require('path');
 const fs = require('fs');
 
+// Blocklist for shell.openPath / saved board files: refuse launching executables
+// or scripts that arrived via synced/cloud data (poisoned board items, dropped files).
+const BLOCKED_EXT = new Set(['.exe','.bat','.cmd','.com','.msi','.lnk','.ps1','.vbs','.js','.scr','.jar','.hta','.mjs','.cjs','.reg','.wsf','.wsh','.pif','.cpl','.msc','.gadget','.application','.ws']);
+function isBlockedTarget(p) {
+  const s = String(p || '');
+  if (!s) return true;
+  if (s.startsWith('\\\\') || s.startsWith('//')) return true; // UNC
+  // strip trailing dots/spaces (Windows ignores them when resolving) before ext check
+  const cleaned = s.replace(/[\s.]+$/,'');
+  const ext = path.extname(cleaned).toLowerCase();
+  return BLOCKED_EXT.has(ext);
+}
+
 // No application menu bar (File/Edit/View/Window/Help). Set before any window
 // is created so the bar never flashes.
 Menu.setApplicationMenu(null);
@@ -161,11 +174,17 @@ function createWindow() {
     const dir = path.join(app.getPath('userData'), 'board_files');
     try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
     const ext = path.extname(name || '') || '';
+    if (BLOCKED_EXT.has(String(ext).toLowerCase())) throw new Error('blocked file type');
     const dest = path.join(dir, Date.now().toString(36) + Math.random().toString(36).slice(2, 8) + ext);
     fs.writeFileSync(dest, Buffer.from(buffer));
     return dest;
   });
-  ipcMain.on('open-path', (event, p) => { try { if (p) shell.openPath(p); } catch (_) {} });
+  ipcMain.on('open-path', (event, p) => {
+    try {
+      if (isBlockedTarget(p)) { console.warn('[security] refused open-path:', p); try { event.sender.send('open-path-refused', String(p)); } catch(_){} return; }
+      if (p) shell.openPath(p);
+    } catch (_) {}
+  });
 
   // Board items store an OS path from whichever device pinned them. A path
   // that came from a *different* machine won't exist here — check before
@@ -177,6 +196,12 @@ function createWindow() {
     try { event.returnValue = fs.existsSync(String(p).replace(/^file:\/\/\//, '')); }
     catch (_) { event.returnValue = false; }
   });
+
+  // Sync-token storage: OS-keychain-backed via safeStorage instead of plaintext
+  // localStorage, so a stolen sync session token can't be lifted from disk.
+  const tokenPath = path.join(app.getPath('userData'), 'token.bin');
+  ipcMain.on('token-get-sync', (e) => { try { if (safeStorage.isEncryptionAvailable() && fs.existsSync(tokenPath)) { e.returnValue = safeStorage.decryptString(fs.readFileSync(tokenPath)); } else e.returnValue = ''; } catch(_) { e.returnValue = ''; } });
+  ipcMain.on('token-set-sync', (e, t) => { try { if (safeStorage.isEncryptionAvailable()) { if (t) fs.writeFileSync(tokenPath, safeStorage.encryptString(String(t))); else { try{fs.unlinkSync(tokenPath);}catch(_){} } e.returnValue = true; } else e.returnValue = false; } catch(_) { e.returnValue = false; } });
 
   // Cloud sync reads app-managed files (college PDFs, banner, board, profile pic)
   // to upload them. Restricted to the app's own data directory.

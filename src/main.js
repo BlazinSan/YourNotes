@@ -2100,10 +2100,10 @@ function renderProjectCalendar() {
         const preview = plainText.length > 25 ? plainText.substring(0, 25) + '...' : plainText;
         
         projectsHtml += `
-          <div class="project-calendar-item" onclick="event.stopPropagation(); window.openProjectNote('${note.id}')" title="${note.title || 'Untitled Note'}">
+          <div class="project-calendar-item" onclick="event.stopPropagation(); window.openProjectNote('${note.id}')" title="${gsEscape(note.title || 'Untitled Note')}">
             <div class="project-calendar-item-header">
               <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2" fill="none" style="flex-shrink: 0;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
-              <span class="project-item-title" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600;">${note.title || 'Untitled'}</span>
+              <span class="project-item-title" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600;">${gsEscape(note.title || 'Untitled')}</span>
             </div>
             <div class="project-calendar-item-date">${dateStr}</div>
             ${preview ? `<div class="project-calendar-item-preview">${preview}</div>` : ''}
@@ -2166,7 +2166,7 @@ function openProjectDayModal(dayNotes, dateStr) {
     item.innerHTML = `
       <div class="project-calendar-item-header" style="font-size: 0.95rem; margin-bottom: 4px;">
         <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" style="flex-shrink: 0;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
-        <span class="project-item-title" style="font-weight: 700; color: var(--text-primary);">${note.title || 'Untitled'}</span>
+        <span class="project-item-title" style="font-weight: 700; color: var(--text-primary);">${gsEscape(note.title || 'Untitled')}</span>
       </div>
       <div class="project-calendar-item-date" style="font-size: 0.75rem; margin-bottom: 6px;">Created: ${dateStrFormatted}</div>
       ${preview ? `<div class="project-calendar-item-preview" style="font-size: 0.75rem; line-height: 1.3;">${preview}</div>` : ''}
@@ -2412,7 +2412,7 @@ function renderTasks() {
       <div class="task-checkbox ${task.completed ? 'checked' : ''}" onclick="toggleTask(${index})">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
       </div>
-      <div class="task-text ${task.completed ? 'completed' : ''}">${task.text}</div>
+      <div class="task-text ${task.completed ? 'completed' : ''}">${gsEscape(task.text)}</div>
       <button class="task-delete" onclick="deleteTask(${index})">
         <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
       </button>
@@ -2478,7 +2478,7 @@ function renderHabits() {
       <div class="habit-checkbox ${habit.completed ? 'checked' : ''}" onclick="toggleHabit(${index})">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><polyline points="20 6 9 17 4 12"></polyline></svg>
       </div>
-      <div class="habit-text" onclick="toggleHabit(${index})">${habit.text}</div>
+      <div class="habit-text" onclick="toggleHabit(${index})">${gsEscape(habit.text)}</div>
       <button class="habit-delete" onclick="deleteHabit(${index})">
         <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
       </button>
@@ -2607,17 +2607,17 @@ function renderGoals() {
           <div class="goal-checkbox" onclick="toggleGoal(${catIndex}, ${itemIndex})">
             <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="3" fill="none"><polyline points="20 6 9 17 4 12"></polyline></svg>
           </div>
-          <span class="goal-text" contenteditable="true" onblur="updateGoalText(${catIndex}, ${itemIndex}, this.innerText)" onkeydown="if(event.key==='Enter'){this.blur(); event.preventDefault();}">${item.text}</span>
+          <span class="goal-text" contenteditable="true" onblur="updateGoalText(${catIndex}, ${itemIndex}, this.innerText)" onkeydown="if(event.key==='Enter'){this.blur(); event.preventDefault();}">${gsEscape(item.text)}</span>
         </div>
       `;
     });
     
     catDiv.innerHTML = `
-      <h4 class="goal-category-title">${category.title}</h4>
+      <h4 class="goal-category-title">${gsEscape(category.title)}</h4>
       <div class="goal-card ${category.className}">
         <div class="goal-quote">
           <span>${category.icon}</span>
-          <span class="editable-quote" contenteditable="true" onblur="updateGoalQuote(${catIndex}, this.innerText)" onkeydown="if(event.key==='Enter'){this.blur(); event.preventDefault();}">${category.quote}</span>
+          <span class="editable-quote" contenteditable="true" onblur="updateGoalQuote(${catIndex}, this.innerText)" onkeydown="if(event.key==='Enter'){this.blur(); event.preventDefault();}">${gsEscape(category.quote)}</span>
         </div>
         <div class="goal-items">
           ${itemsHtml}
@@ -2683,11 +2683,11 @@ function renderBooks() {
     
     card.innerHTML = `
       <div class="book-cover">
-        <img src="${book.cover || 'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?q=80&w=300&auto=format&fit=crop'}" alt="${book.title}" />
+        <img src="${gsEscape(book.cover || 'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?q=80&w=300&auto=format&fit=crop')}" alt="${gsEscape(book.title)}" />
       </div>
       <div class="book-details">
-        <h4 class="book-title">${book.title}</h4>
-        <p class="book-author">${book.author}</p>
+        <h4 class="book-title">${gsEscape(book.title)}</h4>
+        <p class="book-author">${gsEscape(book.author)}</p>
         ${starsHtml}
         <div class="book-progress-container">
           <span class="book-progress-text">${book.pagesRead || 0} / ${book.totalPages || 0}</span>
@@ -3884,7 +3884,7 @@ function renderQuicklinks() {
     a.innerHTML = `
       <span style="display: flex; align-items: center; gap: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
         <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
-        ${q.title}
+        ${gsEscape(q.title)}
       </span>
       <span class="quicklink-actions" style="display: flex; align-items: center; gap: 6px; opacity: ${q.pinned ? '1' : '0'}; transition: opacity 0.2s;">
         <button onclick="togglePinQuicklink(event, ${q.id})" title="${q.pinned ? 'Unpin' : 'Pin'}" style="background: none; border: none; color: ${q.pinned ? 'var(--accent-color)' : 'var(--text-secondary)'}; cursor: pointer; display: flex; align-items: center;">
@@ -4739,9 +4739,10 @@ function renderBoard() {
     card.style.width = (item.w * scale) + 'px'; card.style.height = (item.h * scale) + 'px';
     card.style.transform = 'rotate(' + (item.rot || 0) + 'deg)';
     let inner = '';
+    let imgUrl = '';
     if (item.type === 'image') {
-      const imgUrl = item.dataUrl || (window.resolveFileUrl ? window.resolveFileUrl(fileUrlOf(item.path)) : fileUrlOf(item.path));
-      inner = `<div class="board-body board-img" style="background-image:url('${imgUrl}')"></div>`;
+      imgUrl = item.dataUrl || (window.resolveFileUrl ? window.resolveFileUrl(fileUrlOf(item.path)) : fileUrlOf(item.path));
+      inner = `<div class="board-body board-img"></div>`;
     }
     else if (item.type === 'file') inner = `<div class="board-body board-file"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg><span>${gsEscape(item.name || 'File')}</span></div>`;
     else {
@@ -4749,6 +4750,7 @@ function renderBoard() {
       inner = `<div class="board-body board-text"><div class="board-text-header" style="height:14px; margin-bottom:4px; cursor:grab;"></div><div class="board-text-content" contenteditable="true" style="outline:none; height:calc(100% - 18px); overflow:auto;">${linkifyText(item.text || '')}</div></div>`;
     }
     card.innerHTML = `<div class="board-pin">${boardPinSvg(BOARD_PIN_COLORS[item.pin || 0])}</div>` + inner + `<button class="board-del" title="Remove">&times;</button><div class="board-resize"></div>`;
+    const boardImgEl = card.querySelector('.board-img'); if (boardImgEl && imgUrl) boardImgEl.style.backgroundImage = "url('" + imgUrl + "')";
     card.onclick = (ev) => ev.stopPropagation();
     const bodyContentEl = card.querySelector('.board-text-content');
     if (item.type === 'text' && bodyContentEl) {
@@ -5155,7 +5157,7 @@ window.renderCollegeFolders = function() {
       <div class="college-folder-icon">
         <svg viewBox="0 0 24 24" width="40" height="40" stroke="currentColor" stroke-width="2" fill="none"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
       </div>
-      <h4 class="college-folder-title" title="${folder.name}">${folder.name}</h4>
+      <h4 class="college-folder-title" title="${gsEscape(folder.name)}">${gsEscape(folder.name)}</h4>
       ${folder.category ? `<span class="college-folder-category-badge">${folder.category}</span>` : '<span class="college-folder-category-badge" style="opacity:0.3">Uncategorized</span>'}
       <div class="college-folder-meta">
         <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
@@ -5236,7 +5238,7 @@ function renderCollegeSingleFolder(folderId) {
         <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
       </div>
       <div class="college-pdf-info">
-        <h5 class="college-pdf-name" title="${pdf.name}">${pdf.name}</h5>
+        <h5 class="college-pdf-name" title="${gsEscape(pdf.name)}">${gsEscape(pdf.name)}</h5>
         <div class="college-pdf-meta">${pdf.size} • Imported ${uploadDate}</div>
       </div>
     `;

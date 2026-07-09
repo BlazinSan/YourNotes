@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readFileBytes: (p) => ipcRenderer.invoke('read-file-bytes', p),
   openPath: (p) => ipcRenderer.send('open-path', p),
   fileExists: (p) => ipcRenderer.sendSync('file-exists-sync', p),
+  tokenGet: () => ipcRenderer.sendSync('token-get-sync'),
+  tokenSet: (t) => ipcRenderer.sendSync('token-set-sync', t),
   saveCred: (email, password) => ipcRenderer.invoke('cred-save', { email, password }),
   loadCred: () => ipcRenderer.invoke('cred-load'),
   clearCred: () => ipcRenderer.invoke('cred-clear'),
