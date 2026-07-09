@@ -10,7 +10,12 @@ import androidx.activity.OnBackPressedCallback;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 
+import android.webkit.RenderProcessGoneDetail;
+import android.webkit.WebView;
+
+import com.getcapacitor.Bridge;
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.BridgeWebViewClient;
 
 public class MainActivity extends BridgeActivity {
     @Override
@@ -19,6 +24,29 @@ public class MainActivity extends BridgeActivity {
         applyInitialSystemBarStyle();
         preferHighestRefreshRate();
         installWebBackHandler();
+        installRenderCrashRecovery();
+    }
+
+    // The WebView renderer occasionally dies (OOM on huge images, autofill CHECK
+    // crashes on some OEM WebView builds). Without this handler Android kills the
+    // whole app — with it we reload the page and the user just sees the UI
+    // restart, data intact (everything persists in localStorage/native store).
+    private void installRenderCrashRecovery() {
+        Bridge bridge = getBridge();
+        if (bridge == null || bridge.getWebView() == null) return;
+        bridge.getWebView().setWebViewClient(new BridgeWebViewClient(bridge) {
+            @Override
+            public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+                view.post(() -> {
+                    try {
+                        view.reload();
+                    } catch (Throwable t) {
+                        recreate();
+                    }
+                });
+                return true; // handled — do NOT kill the app process
+            }
+        });
     }
 
     private void applyInitialSystemBarStyle() {

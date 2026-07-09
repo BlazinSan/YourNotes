@@ -5600,9 +5600,10 @@ body.haven-open {
 /* Image action bar — floats above selected image */
 .img-action-bar {
   position: absolute;
-  top: -44px;
+  top: 8px; /* inside the image: -44px put it under the editor toolbar (clipped + untappable) for images at the top of a note */
   left: 50%;
   transform: translateX(-50%);
+  z-index: 30;
   display: none;
   align-items: center;
   gap: 4px;

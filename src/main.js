@@ -1606,15 +1606,12 @@ function reattachNoteBodyListeners() {
           e.preventDefault();
           const file = item.getAsFile();
           if (!file) continue;
-          const reader = new FileReader();
-          reader.onload = (evt) => {
-            const src = evt.target.result;
+          window.downscaleImageFile(file).then((src) => {
             const html = `<div class="resizable-image-wrapper" contenteditable="false" style="width:300px;"><img src="${src}" /></div><p><br></p>`;
             noteBodyInput.focus();
             window.insertHtmlAtCursor(html);
             updateNoteContent();
-          };
-          reader.readAsDataURL(file);
+          });
           break;
         }
       }
@@ -6087,18 +6084,45 @@ window.triggerInsertPicture = function() {
   input.onchange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      const src = evt.target.result;
+    window.downscaleImageFile(file).then((src) => {
       const html = `<div class="resizable-image-wrapper" contenteditable="false" style="width:300px;"><img src="${src}" /></div><p><br></p>`;
       noteBodyInput.focus();
       restoreSelection();
       window.insertHtmlAtCursor(html);
       updateNoteContent();
-    };
-    reader.readAsDataURL(file);
+    });
   };
   input.click();
+};
+
+// Downscale an image file before embedding as a base64 data URL. Camera photos
+// (12MP+) stored raw make the note multi-megabytes: every keystroke re-hashes it,
+// sync chunks it, and decoding it can OOM-crash the Android WebView (the "crash
+// on picture" reports). Cap the longest side and re-encode as JPEG for opaque
+// sources. ponytail: PNGs with transparency stay PNG (bigger) — acceptable.
+window.downscaleImageFile = function (file, maxSide = 1600) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const raw = evt.target.result;
+      const img = new Image();
+      img.onload = () => {
+        const w = img.naturalWidth, h = img.naturalHeight;
+        const isJpeg = /image\/jpe?g/i.test(file.type);
+        if (Math.max(w, h) <= maxSide && raw.length < 1500000) { resolve(raw); return; }
+        const scale = Math.min(1, maxSide / Math.max(w, h));
+        const c = document.createElement('canvas');
+        c.width = Math.round(w * scale); c.height = Math.round(h * scale);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        try {
+          resolve(isJpeg || raw.length > 1500000 ? c.toDataURL('image/jpeg', 0.85) : c.toDataURL('image/png'));
+        } catch (_) { resolve(raw); }
+      };
+      img.onerror = () => resolve(raw);
+      img.src = raw;
+    };
+    reader.readAsDataURL(file);
+  });
 };
 
 window.insertCodeSnippet = function() {
@@ -6516,18 +6540,13 @@ let selectedImageWrapper = null;
 document.addEventListener('click', (e) => {
   if (e.target.closest('.resizable-image-wrapper')) {
     const wrapper = e.target.closest('.resizable-image-wrapper');
-    const wasSelected = selectedImageWrapper === wrapper;
     if (selectedImageWrapper && selectedImageWrapper !== wrapper) {
       deselectImage();
     }
+    // Tap selects (resize handles + action bar with 🔍/Crop/Delete). The
+    // fullscreen viewer opens ONLY via the 🔍 button — auto-opening it on
+    // first tap made crop/resize unreachable on touch devices.
     selectImage(wrapper);
-    // Tapping an image that wasn't already selected also opens the fullscreen
-    // viewer (quick preview); once selected, the 🔍 button in the action bar
-    // re-opens it without needing to deselect/reselect.
-    if (!wasSelected) {
-      const tappedImg = wrapper.querySelector('img');
-      if (tappedImg) openImageFullscreen(tappedImg);
-    }
     return;
   }
   
@@ -6724,13 +6743,26 @@ function startImageCrop(wrapper) {
     cropW = Math.max(1, Math.min(cropW, nw - cropX));
     cropH = Math.max(1, Math.min(cropH, nh - cropY));
 
+    // Cap the output size: a full-res crop of a camera photo means a huge
+    // canvas + a multi-MB base64 string — enough to OOM the Android WebView.
+    const outScale = Math.min(1, 2048 / Math.max(cropW, cropH));
     const canvas = document.createElement('canvas');
-    canvas.width = cropW;
-    canvas.height = cropH;
+    canvas.width = Math.max(1, Math.round(cropW * outScale));
+    canvas.height = Math.max(1, Math.round(cropH * outScale));
     const ctx = canvas.getContext('2d');
-    ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+    ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, canvas.width, canvas.height);
 
-    img.src = canvas.toDataURL('image/png');
+    try {
+      // JPEG for photographic content keeps the stored note small; data URLs
+      // that came in as PNG stay PNG only if they're small enough already.
+      const asJpeg = canvas.toDataURL('image/jpeg', 0.9);
+      const asPng = (cropW * cropH < 1200000) ? canvas.toDataURL('image/png') : null;
+      img.src = (asPng && asPng.length < asJpeg.length) ? asPng : asJpeg;
+    } catch (err) {
+      showAppToast && showAppToast('Crop failed — image too large for this device.', { duration: 4000 });
+      cropOverlay.remove();
+      return;
+    }
 
     cropOverlay.remove();
     updateNoteContent();

@@ -14,7 +14,6 @@
         <item name="windowNoTitle">true</item>
         <item name="android:windowNoTitle">true</item>
         <item name="android:fontFamily">sans</item>
-        <item name="android:background">@color/yn_surface</item>
         <item name="android:windowBackground">@color/yn_surface</item>
         <item name="android:colorAccent">@color/colorAccent</item>
         <item name="android:statusBarColor">@color/yn_surface</item>
