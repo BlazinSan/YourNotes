@@ -16,35 +16,75 @@
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
-    <!-- Onboarding Overlay -->
+    <!-- Onboarding Overlay — app-themed intro + feature carousel -->
     <div id="onboarding-overlay" class="onboarding-overlay" style="display: none;">
-      <div class="onboarding-card">
-        <h2 data-i18n="onboarding.welcome">Welcome to YourNotes</h2>
-        <p data-i18n="onboarding.subtitle">Let's set up your personal workspace.</p>
-
-        <div class="onboarding-input-group">
-          <label for="onboarding-name" data-i18n="onboarding.name_q">What's your name?</label>
-          <input type="text" id="onboarding-name" placeholder="e.g. John Doe" data-i18n-ph="onboarding.name_ph" />
+      <div class="onb-scene">
+        <div class="onb-ambient" aria-hidden="true">
+          <div class="onb-glow g1"></div>
+          <div class="onb-glow g2"></div>
+          <img class="onb-logo" src="/icon.png" alt="" />
         </div>
+        <div class="onb-sheet">
 
-        <div class="onboarding-input-group">
-          <label for="onboarding-role" data-i18n="onboarding.job_q">What's your job?</label>
-          <input type="text" id="onboarding-role" placeholder="e.g. Software Engineer" data-i18n-ph="onboarding.job_ph" />
-        </div>
-
-        <button id="onboarding-submit" class="onboarding-btn" data-i18n="onboarding.enter">Enter Workspace</button>
-
-        <div class="onboarding-sync">
-          <div class="onboarding-sync-divider"><span>or sync across your devices — optional</span></div>
-          <form class="onboarding-sync-fields" onsubmit="return false;">
-            <input type="email" name="email" id="onboarding-sync-email" placeholder="Email" autocomplete="username" />
-            <input type="password" name="password" id="onboarding-sync-pass" placeholder="Password" autocomplete="current-password" />
-            <div class="onboarding-sync-btns">
-              <button type="submit" id="onboarding-signin" class="onboarding-sync-btn primary">Sign in</button>
-              <button type="button" id="onboarding-signup" class="onboarding-sync-btn">Create account</button>
+          <!-- View: feature carousel -->
+          <div class="onb-view" id="onb-view-carousel">
+            <div class="onb-carousel" dir="ltr">
+              <div class="onb-slides" id="onb-slides">
+                <div class="onb-slide">
+                  <h2>Capture anything<br>in seconds</h2>
+                  <div class="onb-mock m-editor"><i></i><i></i><i></i><i></i><i></i></div>
+                </div>
+                <div class="onb-slide">
+                  <h2>Organize<br>into notebooks</h2>
+                  <div class="onb-mock m-grid"><b></b><b></b><b></b><b></b></div>
+                </div>
+                <div class="onb-slide">
+                  <h2>Search<br>that just works</h2>
+                  <div class="onb-mock m-search"><span class="bar"></span><i></i><i></i><i></i><i></i></div>
+                </div>
+                <div class="onb-slide">
+                  <h2>Sync across<br>your devices</h2>
+                  <div class="onb-mock m-sync"><b class="dev-a"></b><b class="dev-b"></b><span class="tick">✓</span></div>
+                </div>
+              </div>
             </div>
-            <p id="onboarding-sync-status" class="onboarding-sync-status"></p>
-          </form>
+            <div class="onb-dots" id="onb-dots">
+              <button type="button" class="active" aria-label="Slide 1"></button>
+              <button type="button" aria-label="Slide 2"></button>
+              <button type="button" aria-label="Slide 3"></button>
+              <button type="button" aria-label="Slide 4"></button>
+            </div>
+            <button type="button" class="onb-link" id="onb-guest-btn">Continue without an account</button>
+            <button type="button" class="onb-pill" id="onb-email-btn">Continue with email</button>
+            <p class="onb-terms">Your notes stay on this device unless you <b>sign in to sync</b></p>
+          </div>
+
+          <!-- View: sign in / create account (sync) -->
+          <div class="onb-view" id="onb-view-email" hidden>
+            <button type="button" class="onb-back" data-onb-back aria-label="Back">&#8249;</button>
+            <h2 class="onb-h">Your notes,<br>everywhere</h2>
+            <form class="onb-form" onsubmit="return false;">
+              <input type="email" name="email" id="onboarding-sync-email" placeholder="Email" autocomplete="username" />
+              <input type="password" name="password" id="onboarding-sync-pass" placeholder="Password" autocomplete="current-password" />
+              <button type="submit" id="onboarding-signin" class="onb-pill">Sign in</button>
+              <button type="button" id="onboarding-signup" class="onb-link">Create an account instead</button>
+              <p id="onboarding-sync-status" class="onb-status"></p>
+            </form>
+          </div>
+
+          <!-- View: guest name / job -->
+          <div class="onb-view" id="onb-view-name" hidden>
+            <button type="button" class="onb-back" data-onb-back aria-label="Back">&#8249;</button>
+            <h2 class="onb-h" data-i18n="onboarding.welcome">Welcome to YourNotes</h2>
+            <div class="onb-form">
+              <label for="onboarding-name" data-i18n="onboarding.name_q">What's your name?</label>
+              <input type="text" id="onboarding-name" placeholder="e.g. John Doe" data-i18n-ph="onboarding.name_ph" />
+              <label for="onboarding-role" data-i18n="onboarding.job_q">What's your job?</label>
+              <input type="text" id="onboarding-role" placeholder="e.g. Software Engineer" data-i18n-ph="onboarding.job_ph" />
+              <button type="button" id="onboarding-submit" class="onb-pill" data-i18n="onboarding.enter">Enter Workspace</button>
+            </div>
+          </div>
+
         </div>
       </div>
     </div>

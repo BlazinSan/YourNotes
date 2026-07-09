@@ -253,7 +253,51 @@ function init() {
 
   if (!savedUserName || !savedUserRole) {
     if (onboardingOverlay) onboardingOverlay.style.display = 'flex';
-    
+
+    // --- Carousel: auto-advance, dots, swipe ---
+    const onbSlides = document.getElementById('onb-slides');
+    const onbDots = Array.from(document.querySelectorAll('#onb-dots button'));
+    let onbIdx = 0, onbTimer = null;
+    const goSlide = (i) => {
+      onbIdx = (i + onbDots.length) % onbDots.length;
+      if (onbSlides) onbSlides.style.transform = `translateX(-${onbIdx * 100}%)`;
+      onbDots.forEach((d, j) => d.classList.toggle('active', j === onbIdx));
+    };
+    const startAuto = () => { clearInterval(onbTimer); onbTimer = setInterval(() => goSlide(onbIdx + 1), 3200); };
+    onbDots.forEach((d, i) => d.addEventListener('click', () => { goSlide(i); startAuto(); }));
+    if (onbSlides) {
+      let touchX = null;
+      onbSlides.addEventListener('touchstart', (e) => { touchX = e.touches[0].clientX; }, { passive: true });
+      onbSlides.addEventListener('touchend', (e) => {
+        if (touchX == null) return;
+        const dx = e.changedTouches[0].clientX - touchX;
+        touchX = null;
+        if (Math.abs(dx) > 40) { goSlide(onbIdx + (dx < 0 ? 1 : -1)); startAuto(); }
+      }, { passive: true });
+    }
+    startAuto();
+
+    // --- View switching: carousel <-> sign-in <-> guest name ---
+    const onbViews = {
+      carousel: document.getElementById('onb-view-carousel'),
+      email: document.getElementById('onb-view-email'),
+      name: document.getElementById('onb-view-name'),
+    };
+    const showOnbView = (key) => {
+      for (const [k, el] of Object.entries(onbViews)) if (el) el.hidden = (k !== key);
+      if (key === 'carousel') startAuto(); else clearInterval(onbTimer);
+    };
+    const onbEmailBtn = document.getElementById('onb-email-btn');
+    const onbGuestBtn = document.getElementById('onb-guest-btn');
+    if (onbEmailBtn) onbEmailBtn.addEventListener('click', () => { showOnbView('email'); document.getElementById('onboarding-sync-email')?.focus(); });
+    if (onbGuestBtn) onbGuestBtn.addEventListener('click', () => { showOnbView('name'); if (onboardingNameInput) onboardingNameInput.focus(); });
+    document.querySelectorAll('#onboarding-overlay [data-onb-back]').forEach((b) => b.addEventListener('click', () => showOnbView('carousel')));
+
+    const dismissOnboarding = () => {
+      clearInterval(onbTimer);
+      if (onboardingOverlay) onboardingOverlay.style.display = 'none';
+    };
+
     if (onboardingSubmit) {
       onboardingSubmit.addEventListener('click', () => {
         savedUserName = onboardingNameInput.value.trim() || 'Guest';
@@ -263,7 +307,7 @@ function init() {
         localStorage.setItem('userRole', savedUserRole);
 
         updateSidebarProfile();
-        onboardingOverlay.style.display = 'none';
+        dismissOnboarding();
       });
     }
 
@@ -278,7 +322,7 @@ function init() {
       savedUserName = localStorage.getItem('userName');
       savedUserRole = localStorage.getItem('userRole');
       updateSidebarProfile();
-      if (onboardingOverlay) onboardingOverlay.style.display = 'none';
+      dismissOnboarding();
     };
     const onbSignin = document.getElementById('onboarding-signin');
     const onbSignup = document.getElementById('onboarding-signup');
@@ -4489,18 +4533,6 @@ async function openBoardItem(item) {
   return false;
 }
 
-function maybeShowBoardTipToast() {
-  if (!isTouchLayout() || localStorage.getItem('yn_board_tip_dismissed')) return;
-  if (maybeShowBoardTipToast._shown) return;
-  maybeShowBoardTipToast._shown = true;
-  setTimeout(() => {
-    showAppToast('Tip: drag/drop a file here to pin it to your dashboard.', {
-      persistKey: 'yn_board_tip_dismissed',
-      duration: 7600
-    });
-  }, 700);
-}
-
 function boardDefaultPoint(offset = 0) {
   const banner = document.getElementById('dashboard-banner');
   const w = banner ? banner.clientWidth : 320;
@@ -4692,8 +4724,6 @@ function renderBoard() {
       ? ''
       : 'Drop files, images or notes here — they pin to your board';
   }
-  maybeShowBoardTipToast();
-
   const banner = document.getElementById('dashboard-banner');
   const boardWidth = banner ? banner.clientWidth : 1000;
   const scale = boardWidth / 1000;
