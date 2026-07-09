@@ -4399,6 +4399,17 @@ async function boardBlobUrl(fileId) {
   });
 }
 
+async function getBoardBlob(fileId) {
+  const db = await boardDb();
+  if (!db) return null;
+  return new Promise((resolve) => {
+    const tx = db.transaction('files', 'readonly');
+    const req = tx.objectStore('files').get(fileId);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => resolve(null);
+  });
+}
+
 function closeBoardViewer() {
   if (!activeBoardViewer) return false;
   const url = activeBoardViewer.dataset.blobUrl;
@@ -4457,31 +4468,44 @@ function showBoardViewer(item, src, isBlob = false) {
 // So each platform gets its own real open path instead.
 async function openBoardViewerFile(item, src, fallbackName) {
   const filename = item.name || fallbackName || 'pinned-file';
+  const isHttp = /^https?:/i.test(src || '');
   const isElectron = !!(window.electronAPI && window.electronAPI.openPath);
+
+  // Resolve the raw bytes as a Blob from the SOURCE OF TRUTH (never the viewer URL).
+  const getBlob = async () => {
+    if (item.fileId) { const b = await getBoardBlob(item.fileId); if (b) return b; }
+    const dataUrl = item.dataUrl || (src && src.startsWith('data:') ? src : '');
+    if (dataUrl) { const r = await fetch(dataUrl); return await r.blob(); } // same-origin data: is safe
+    return null;
+  };
+
   if (isElectron) {
+    // 1) real file on THIS machine
     if (item.path && window.electronAPI.fileExists && window.electronAPI.fileExists(item.path)) {
       window.electronAPI.openPath(item.path);
       return;
     }
-    if (window.electronAPI.saveBoardFile) {
-      try {
-        const res = await fetch(src);
-        const buf = await res.arrayBuffer();
-        const osPath = await window.electronAPI.saveBoardFile(filename, buf);
-        window.electronAPI.openPath(osPath);
-      } catch (err) {
-        console.error(err);
-        showAppToast('Failed to open file.');
-      }
-      return;
+    // 2) cloud https: — open externally (routes through setWindowOpenHandler → shell.openExternal)
+    if (isHttp) { window.open(src, '_blank'); return; }
+    // 3) blob/data — write bytes to a temp OS file, then open it
+    try {
+      const blob = await getBlob();
+      if (!blob) throw new Error('no bytes');
+      const buf = await blob.arrayBuffer();
+      const osPath = await window.electronAPI.saveBoardFile(filename, buf);
+      window.electronAPI.openPath(osPath);
+    } catch (err) {
+      console.error(err);
+      showAppToast('Failed to open file.');
     }
+    return;
   }
-  // Android/web: fetch the src (blob:/data:/http(s) URL) into a real Blob and
-  // hand off to saveExportFile, which writes to the cache dir + native share
-  // sheet on Android, or falls back to an anchor download on web.
+
+  // Android / web
+  if (isHttp) { window.open(src, '_blank'); return; } // Capacitor opens external https in the system browser
   try {
-    const res = await fetch(src);
-    const blob = await res.blob();
+    const blob = await getBlob();
+    if (!blob) throw new Error('no bytes');
     await saveExportFile(filename, blob);
   } catch (err) {
     console.error(err);
