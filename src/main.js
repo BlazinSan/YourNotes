@@ -655,6 +655,16 @@ function getNotePreview(note) {
   return note.preview;
 }
 
+// Full lowercased plain-text of the body for SEARCH (no 4000-char cap — the
+// preview slice would make deep matches unfindable). Cached on the note and
+// invalidated wherever the body changes (updateNoteContent / setActiveNote).
+function getNoteSearchText(note) {
+  if (typeof note._searchText !== 'string') {
+    note._searchText = (note.body || '').replace(/<img\b[^>]*>/gi, '').replace(/<[^>]*>?/gm, '').toLowerCase();
+  }
+  return note._searchText;
+}
+
 function loadStringSet(key) {
   try {
     return new Set(JSON.parse(localStorage.getItem(key) || '[]'));
@@ -855,7 +865,7 @@ function setActiveNote(id) {
     clearTimeout(_saveDebounceTimer);
     _saveDebounceTimer = null;
     const _prev = notes.find(n => n.id === activeNoteId);
-    if (_prev) _prev.preview = computeNotePreview(_prev.body);
+    if (_prev) { _prev.preview = computeNotePreview(_prev.body); _prev._searchText = undefined; }
     saveNotes();
   }
   activeNoteId = id;
@@ -1275,7 +1285,7 @@ function renderHomeGrid(searchTerm = '') {
 
   const filtered = modeNotes.filter(n => {
     const title = (n.title || '').toLowerCase();
-    const plainBody = getNotePreview(n).toLowerCase();
+    const plainBody = getNoteSearchText(n);
     const group = noteGroup(n).toLowerCase();
     const matchSearch = !term || title.includes(term) || plainBody.includes(term) || group.includes(term);
     const matchFolder = homeFolderFilter === 'all' || noteGroup(n) === homeFolderFilter;
@@ -1408,6 +1418,7 @@ function updateNoteContent() {
     _saveDebounceTimer = setTimeout(() => {
       _saveDebounceTimer = null;
       note.preview = computeNotePreview(note.body);
+      note._searchText = undefined;
       saveNotes();
       // Patch just this note's sidebar row instead of a full renderNotesList
       // (which regex-strips every note's body) when it's safe to do so — no
@@ -3387,6 +3398,7 @@ function initGraph() {
     // Auto-fit: keep the whole graph framed (zoomed out to fit) until the user
     // pans, zooms or drags. Once both physics and camera converge, hold the
     // frame perfectly still instead of endlessly chasing (that was the shimmer).
+    let cameraSettling = false;
     if (!userAdjusted && gNodes.length) {
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       for (const n of gNodes) {
@@ -3397,14 +3409,16 @@ function initGraph() {
       const targetScale = Math.max(0.25, Math.min(0.95, Math.min((cssW - fitPad * 2) / bw, (cssH - fitPad * 2) / bh)));
       const targetPanX = (cssW - bw * targetScale) / 2 - minX * targetScale;
       const targetPanY = (cssH - bh * targetScale) / 2 - minY * targetScale;
-      const converged = frozen && Math.abs(targetScale - scale) < 0.02 && Math.abs(targetPanX - panX) < 3 && Math.abs(targetPanY - panY) < 3;
+      const converged = Math.abs(targetScale - scale) < 0.02 && Math.abs(targetPanX - panX) < 3 && Math.abs(targetPanY - panY) < 3;
       if (!converged) {
+        cameraSettling = true; // keep the loop alive until auto-fit lands, else the graph freezes mis-framed
         const k = frozen ? 0.06 : 0.12;
         scale += (targetScale - scale) * k;
         panX += (targetPanX - panX) * k;
         panY += (targetPanY - panY) * k;
       }
     }
+    draw._cameraSettling = cameraSettling;
 
     // Determine active set for hovering and searching
     const searchTerm = (homeSearchInput ? homeSearchInput.value.toLowerCase().trim() : '');
@@ -3524,7 +3538,7 @@ function initGraph() {
 
     // Once physics is frozen and all alpha/label interpolation has visually
     // settled, stop rescheduling — wakeGraph() restarts the loop on interaction.
-    const stillAnimating = !frozen || maxAlphaDelta > 0.01 || labelDelta > 0.01;
+    const stillAnimating = !frozen || maxAlphaDelta > 0.01 || labelDelta > 0.01 || draw._cameraSettling;
     if (stillAnimating) {
       graphAnimationFrame = requestAnimationFrame(draw);
     } else {
@@ -5186,7 +5200,7 @@ window.renderCollegeFolders = function() {
         <svg viewBox="0 0 24 24" width="40" height="40" stroke="currentColor" stroke-width="2" fill="none"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
       </div>
       <h4 class="college-folder-title" title="${gsEscape(folder.name)}">${gsEscape(folder.name)}</h4>
-      ${folder.category ? `<span class="college-folder-category-badge">${folder.category}</span>` : '<span class="college-folder-category-badge" style="opacity:0.3">Uncategorized</span>'}
+      ${folder.category ? `<span class="college-folder-category-badge">${gsEscape(folder.category)}</span>` : '<span class="college-folder-category-badge" style="opacity:0.3">Uncategorized</span>'}
       <div class="college-folder-meta">
         <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
         <span>${pdfCount} ${pdfWord}</span>

@@ -5,14 +5,20 @@ const fs = require('fs');
 // Blocklist for shell.openPath / saved board files: refuse launching executables
 // or scripts that arrived via synced/cloud data (poisoned board items, dropped files).
 const BLOCKED_EXT = new Set(['.exe','.bat','.cmd','.com','.msi','.lnk','.ps1','.vbs','.js','.scr','.jar','.hta','.mjs','.cjs','.reg','.wsf','.wsh','.pif','.cpl','.msc','.gadget','.application','.ws']);
+// True if the filename's real extension is executable/script. Strips trailing
+// dots/spaces first — Windows silently drops them when resolving/creating, so
+// "evil.exe " would otherwise write a real .exe that slips past a naive check.
+function extBlocked(name) {
+  const cleaned = String(name || '').replace(/[\s.]+$/, '');
+  return BLOCKED_EXT.has(path.extname(cleaned).toLowerCase());
+}
 function isBlockedTarget(p) {
   const s = String(p || '');
   if (!s) return true;
-  if (s.startsWith('\\\\') || s.startsWith('//')) return true; // UNC
-  // strip trailing dots/spaces (Windows ignores them when resolving) before ext check
-  const cleaned = s.replace(/[\s.]+$/,'');
-  const ext = path.extname(cleaned).toLowerCase();
-  return BLOCKED_EXT.has(ext);
+  // Normalize separators before the UNC test — "\/host\share" / "/\host" are
+  // slash-agnostic to the Windows shell and would otherwise evade a raw prefix check.
+  if (s.replace(/\//g, '\\').startsWith('\\\\')) return true; // UNC (any separator mix)
+  return extBlocked(s);
 }
 
 // No application menu bar (File/Edit/View/Window/Help). Set before any window
@@ -93,26 +99,32 @@ function createWindow() {
   // mid-write can never leave a half-written (corrupt) store on disk.
   let writeTimer = null, dirty = false, lastBackup = 0, flushChain = Promise.resolve();
   function flushStore(sync) {
-    if (!dirty) return;
     // Safety: if we failed to read an existing store this session, never write —
     // that would overwrite the user's good data with our empty memory.
     if (!loadOk) { dirty = false; return; }
-    dirty = false;
-    const json = JSON.stringify(store);
     if (sync === true) {
-      // before-quit: the process may exit before an async write settles, so this
-      // path stays fully synchronous. Write the backup FIRST and independently,
-      // so it always holds the latest good data even if the primary store is
-      // locked and the atomic rename below fails.
-      try { fs.writeFileSync(backupPath, json); } catch (_) {}
+      // before-quit: ALWAYS persist the current store, regardless of `dirty`.
+      // An async flush from the 400ms timer or the window `blur` may have already
+      // set dirty=false while its write was still in flight on the libuv pool;
+      // the process then exits before that write's rename lands, losing the edit.
+      // So the quit path unconditionally writes the live store synchronously to a
+      // dedicated tmp (never the async chain's tmpPath — avoids an interleave race)
+      // and renames it into place as the final act before exit.
+      dirty = false;
+      const jsonQ = JSON.stringify(store);
+      try { fs.writeFileSync(backupPath, jsonQ); } catch (_) {}
       try {
-        fs.writeFileSync(tmpPath, json);
-        fs.renameSync(tmpPath, storePath);
+        const qtmp = storePath + '.qtmp';
+        fs.writeFileSync(qtmp, jsonQ);
+        fs.renameSync(qtmp, storePath);
       } catch (e) {
-        console.error('Failed to persist store (locked?) — backup holds the latest', e && e.code);
+        console.error('Failed to persist store on quit (locked?) — backup holds the latest', e && e.code);
       }
       return;
     }
+    if (!dirty) return;
+    dirty = false;
+    const json = JSON.stringify(store);
     // Serialize async flushes onto a single chain. blur + the 400ms timer can
     // both fire a flush; two concurrent writers sharing tmpPath would interleave
     // bytes and race the rename (ENOENT / corrupt store). Chaining keeps each
@@ -198,8 +210,8 @@ function createWindow() {
   ipcMain.handle('save-board-file', async (event, name, buffer) => {
     const dir = path.join(app.getPath('userData'), 'board_files');
     try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
-    const ext = path.extname(name || '') || '';
-    if (BLOCKED_EXT.has(String(ext).toLowerCase())) throw new Error('blocked file type');
+    if (extBlocked(name)) throw new Error('blocked file type');
+    const ext = path.extname(String(name || '').replace(/[\s.]+$/, '')) || '';
     const dest = path.join(dir, Date.now().toString(36) + Math.random().toString(36).slice(2, 8) + ext);
     fs.writeFileSync(dest, Buffer.from(buffer));
     return dest;

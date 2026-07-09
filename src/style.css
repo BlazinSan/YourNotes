@@ -1761,7 +1761,10 @@ body {
   border: 1px solid var(--panel-border);
   box-shadow: 0 30px 70px var(--shadow-color);
 }
-@media (max-width: 480px), (max-height: 880px) {
+/* Full-bleed only on actual phones/tablets. The old `max-height: 880px` fired on
+   any laptop shorter than 880px (1280x800, 1366x768…), making the desktop overlay
+   a sparse edge-to-edge slab instead of the centered phone-shaped card. */
+@media (max-width: 480px), (pointer: coarse) {
   .onb-scene { width: 100vw; height: 100vh; height: 100dvh; border-radius: 0; border: none; }
 }
 
@@ -5605,6 +5608,11 @@ body.haven-open {
   .board-viewer-image .board-viewer-card {
     height: auto !important;
     max-height: none !important;
+    /* shrink-wrap WIDTH too — the generic mobile card forces width:100%, which
+       left small/narrow photos floating in big empty side bars (letterbox). */
+    width: auto !important;
+    max-width: 100% !important;
+    margin: 0 auto !important;
     display: flex !important;
     flex-direction: column !important;
   }
