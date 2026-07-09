@@ -47,11 +47,15 @@
       "output": "release"
     },
     "win": {
-      "icon": "icon.png",
+      "icon": "build/icon.ico",
       "target": [
         "nsis",
         "portable"
       ]
+    },
+    "nsis": {
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico"
     },
     "mac": {
       "icon": "icon.png",
