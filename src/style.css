@@ -1410,6 +1410,38 @@ body {
   background: #fff;
 }
 
+/* Image variant: shrink-wrap the card to the photo's aspect instead of the rigid file frame. */
+.board-viewer-image .board-viewer-card {
+  width: auto;
+  max-width: min(760px, 96vw);
+  height: auto;
+  max-height: none;
+  display: flex;
+  flex-direction: column;
+  overflow: visible;
+}
+
+.board-viewer-image .board-viewer-body {
+  min-height: 0;
+  height: auto;
+  overflow: visible;
+  background: transparent;
+}
+
+.board-viewer-image .board-viewer-img-wrap {
+  width: auto;
+  height: auto;
+}
+
+.board-viewer-image .board-viewer-body img {
+  max-width: min(100%, 96vw);
+  max-height: 78dvh;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  display: block;
+}
+
 .board-viewer-file {
   display: grid;
   justify-items: center;
@@ -5562,10 +5594,29 @@ body.haven-open {
     justify-content: center !important;
   }
 
+  /* Image variant: let the card shrink-wrap the photo. The generic mobile
+     overlay stretches its card to full height (align-items: stretch); for a
+     fitted image that would leave dead space (letterbox) below a short/wide
+     photo, so center instead and let card height follow the image. */
+  .board-viewer-overlay.board-viewer-image {
+    align-items: center !important;
+  }
+
+  .board-viewer-image .board-viewer-card {
+    height: auto !important;
+    max-height: none !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  .board-viewer-image .board-viewer-body {
+    overflow: visible !important;
+  }
+
   .board-viewer-image .board-viewer-body img {
     display: block;
-    max-width: 100% !important;
-    max-height: 100% !important;
+    max-width: min(100%, 96vw) !important;
+    max-height: 78dvh !important;
     width: auto !important;
     height: auto !important;
     object-fit: contain !important;
