@@ -4277,18 +4277,59 @@ function showBoardViewer(item, src, isBlob = false) {
         ${!isImage && !isPdf ? `<div class="board-viewer-file"><svg viewBox="0 0 24 24" width="42" height="42" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg><span>${gsEscape(item.name || 'Pinned file')}</span></div>` : ''}
       </div>
       <div class="board-viewer-actions">
-        <a href="${src}" target="_blank" rel="noopener" download="${gsEscape(item.name || 'pinned-file')}">Open file</a>
+        <button type="button" class="board-viewer-open">Open file</button>
       </div>
     </div>
   `;
   overlay.addEventListener('click', (e) => { if (e.target === overlay) closeBoardViewer(); });
   overlay.querySelector('.board-viewer-head button').addEventListener('click', closeBoardViewer);
+  overlay.querySelector('.board-viewer-open').addEventListener('click', () => {
+    openBoardViewerFile(item, src, isImage ? 'Pinned image' : 'Pinned file');
+  });
   document.body.appendChild(overlay);
   activeBoardViewer = overlay;
 
   if (isImage) {
     const imgEl = overlay.querySelector('.board-viewer-img-wrap img');
     if (imgEl) enablePinchToZoom(imgEl);
+  }
+}
+
+// Board viewer "Open file" handler. A plain anchor+download doesn't work here:
+// Electron's setWindowOpenHandler denies blob:/data:/file: URLs on target=_blank,
+// and Android WebView silently no-ops anchor/blob downloads (see saveExportFile).
+// So each platform gets its own real open path instead.
+async function openBoardViewerFile(item, src, fallbackName) {
+  const filename = item.name || fallbackName || 'pinned-file';
+  const isElectron = !!(window.electronAPI && window.electronAPI.openPath);
+  if (isElectron) {
+    if (item.path && window.electronAPI.fileExists && window.electronAPI.fileExists(item.path)) {
+      window.electronAPI.openPath(item.path);
+      return;
+    }
+    if (window.electronAPI.saveBoardFile) {
+      try {
+        const res = await fetch(src);
+        const buf = await res.arrayBuffer();
+        const osPath = await window.electronAPI.saveBoardFile(filename, buf);
+        window.electronAPI.openPath(osPath);
+      } catch (err) {
+        console.error(err);
+        showAppToast('Failed to open file.');
+      }
+      return;
+    }
+  }
+  // Android/web: fetch the src (blob:/data:/http(s) URL) into a real Blob and
+  // hand off to saveExportFile, which writes to the cache dir + native share
+  // sheet on Android, or falls back to an anchor download on web.
+  try {
+    const res = await fetch(src);
+    const blob = await res.blob();
+    await saveExportFile(filename, blob);
+  } catch (err) {
+    console.error(err);
+    showAppToast('Failed to open file.');
   }
 }
 

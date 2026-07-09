@@ -1426,17 +1426,21 @@ body {
   border-bottom: 0;
 }
 
-.board-viewer-actions a {
+.board-viewer-actions a,
+.board-viewer-actions button.board-viewer-open {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-height: 42px;
   padding: 0 16px;
+  border: none;
   border-radius: 12px;
   background: var(--accent-color);
   color: #fff;
   text-decoration: none;
+  font: inherit;
   font-weight: 800;
+  cursor: pointer;
 }
 
 #dashboard-board {
