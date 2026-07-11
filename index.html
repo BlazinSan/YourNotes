@@ -944,13 +944,18 @@
       <div class="haven-viewport" id="haven-viewport">
         <div class="haven-world" id="haven-world"><!-- 3D room built by JS --></div>
       </div>
+      <div class="haven-status" id="haven-status" role="status" aria-live="polite">
+        <span class="haven-status-spinner" aria-hidden="true"></span>
+        <span id="haven-status-text">Preparing your retreat…</span>
+        <button type="button" id="haven-retry" onclick="retryHaven()">Retry scene</button>
+      </div>
       <div class="haven-vignette"></div>
       <div class="haven-ui" id="haven-ui">
         <div class="haven-ui-top">
           <div class="haven-themes" id="haven-themes">
-            <button class="haven-theme-btn active" data-theme="cabin" onclick="setHavenTheme('cabin')">🪵 Log Cabin</button>
-            <button class="haven-theme-btn" data-theme="beach" onclick="setHavenTheme('beach')">🏖️ Beach</button>
-            <button class="haven-theme-btn" data-theme="city" onclick="setHavenTheme('city')">🌆 Highrise</button>
+            <button type="button" class="haven-theme-btn active" data-theme="cabin" onclick="setHavenTheme('cabin')">🪵 Log Cabin</button>
+            <button type="button" class="haven-theme-btn" data-theme="beach" onclick="setHavenTheme('beach')">🏖️ Beach</button>
+            <button type="button" class="haven-theme-btn" data-theme="city" onclick="setHavenTheme('city')">🌆 Highrise</button>
           </div>
           <button class="haven-rotate" id="haven-rotate" onclick="toggleHavenOrientation()" title="Rotate">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 9 9"></path><polyline points="21 3 21 9 15 9"></polyline></svg>
@@ -960,13 +965,13 @@
           </button>
         </div>
         <div class="haven-ui-bottom">
-          <div class="haven-title-badge"><span id="haven-sub">Fireplace crackling in a snowed-in log cabin.</span></div>
+          <div class="haven-title-badge"><span id="haven-sub">Rain on the glass, chess by a warm hearth.</span></div>
           <div class="haven-ui-controls">
             <div class="haven-spots" id="haven-spots">
-              <span class="haven-spots-label">Seat</span>
-              <button class="haven-spot active" data-spot="0" onclick="setHavenSpot(0)" title="Seat 1"></button>
-              <button class="haven-spot" data-spot="1" onclick="setHavenSpot(1)" title="Seat 2"></button>
-              <button class="haven-spot" data-spot="2" onclick="setHavenSpot(2)" title="Seat 3"></button>
+              <span class="haven-spots-label">View</span>
+              <button type="button" class="haven-spot active" data-spot="0" onclick="setHavenSpot(0)" title="Hearth view" aria-label="Hearth view"></button>
+              <button type="button" class="haven-spot" data-spot="1" onclick="setHavenSpot(1)" title="Rain window view" aria-label="Rain window view"></button>
+              <button type="button" class="haven-spot" data-spot="2" onclick="setHavenSpot(2)" title="Reading chair view" aria-label="Reading chair view"></button>
             </div>
             <div class="haven-audio">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M3 10v4h4l5 5V5L7 10H3z"></path><path d="M16 8a5 5 0 0 1 0 8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg>

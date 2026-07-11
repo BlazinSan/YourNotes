@@ -3,9 +3,12 @@ import './sync.js'
 import { Capacitor, SystemBars, SystemBarsStyle } from '@capacitor/core'
 import { ScreenOrientation } from '@capacitor/screen-orientation'
 import { Filesystem, Directory } from '@capacitor/filesystem'
+import { FileViewer } from '@capacitor/file-viewer'
 import { Share } from '@capacitor/share'
-import html2canvas from 'html2canvas'
-import { jsPDF } from 'jspdf'
+
+// Android uses the phone's native text-selection handles and action mode.
+// Keep the former web toolbar implementation dormant for older experiments.
+const IS_ANDROID_APP = false;
 
 // Global drop/dragover safety net: without this, dropping a file anywhere the
 // app doesn't have its own handler falls through to the OS default, which in
@@ -27,7 +30,10 @@ const _originalGetItem = Storage.prototype.getItem;
 const _storageCache = new Map();
 
 Storage.prototype.setItem = function(key, value) {
+  const hadCachedValue = _storageCache.has(key);
+  const previousCachedValue = _storageCache.get(key);
   _storageCache.set(key, value);
+  const hasElectronBackup = Boolean(window.electronAPI && (window.electronAPI.saveData || window.electronAPI.saveDataSync));
   if (window.electronAPI && window.electronAPI.saveData) {
     // Fire-and-forget async save — main debounces the actual disk write.
     window.electronAPI.saveData(key, value);
@@ -37,7 +43,16 @@ Storage.prototype.setItem = function(key, value) {
   try {
     _originalSetItem.call(this, key, value);
   } catch (e) {
-    console.warn("Storage quota exceeded in browser context, but successfully backup-persisted via Electron API.", e);
+    if (!hasElectronBackup) {
+      // On web/Capacitor there is no second persistence layer. Propagate the
+      // failure so cloud pull does not advance its cursor after a value failed
+      // to land on this device. Restore the read cache as well: getItem() must
+      // never pretend the rejected write was persisted.
+      if (hadCachedValue) _storageCache.set(key, previousCachedValue);
+      else _storageCache.delete(key);
+      throw e;
+    }
+    console.warn("Storage quota exceeded in browser context, but the value was backup-persisted via Electron API.", e);
   }
   // Cloud sync: schedule a debounced push when signed in (no-op otherwise)
   if (window.__syncNotifyChange) window.__syncNotifyChange(key);
@@ -60,11 +75,26 @@ Storage.prototype.getItem = function(key) {
 // (and even a full factory reset) silently resurrect from the store file on restart.
 const _originalRemoveItem = Storage.prototype.removeItem;
 Storage.prototype.removeItem = function(key) {
+  const hadCachedValue = _storageCache.has(key);
+  const previousCachedValue = _storageCache.get(key);
   _storageCache.delete(key);
+  const hasElectronBackup = Boolean(window.electronAPI && (window.electronAPI.saveData || window.electronAPI.saveDataSync));
   if (window.electronAPI && window.electronAPI.saveDataSync) {
     window.electronAPI.saveDataSync(key, null); // null = delete in the main process
+  } else if (window.electronAPI && window.electronAPI.saveData) {
+    window.electronAPI.saveData(key, null);
   }
-  try { _originalRemoveItem.call(this, key); } catch (_) {}
+  try {
+    _originalRemoveItem.call(this, key);
+  } catch (e) {
+    if (!hasElectronBackup) {
+      if (hadCachedValue) _storageCache.set(key, previousCachedValue);
+      throw e;
+    }
+    console.warn("Storage removal failed in browser context, but the deletion was backup-persisted via Electron API.", e);
+  }
+  // Deletions are sync changes too (for example removing a profile picture).
+  if (window.__syncNotifyChange) window.__syncNotifyChange(key);
 };
 const _originalClear = Storage.prototype.clear;
 Storage.prototype.clear = function() {
@@ -1842,12 +1872,18 @@ window.showPanel = function(panelId, btnId) {
   }
   const dashboardBannerEl = document.getElementById('dashboard-banner');
   if (dashboardBannerEl) {
+    // On phone the dashboard banner is a destination of its own, not a
+    // persistent sub-header.  Keep the desktop layout unchanged, but give CSS
+    // an explicit state so Projects/Tasks/Session/etc. do not retain the
+    // collapsed dashboard strip above their real content.
+    dashboardBannerEl.classList.toggle('mobile-page-hidden', panelId !== 'dashboard-expanded');
     if (panelId === 'home-grid' || panelId === 'home-graph') {
       dashboardBannerEl.classList.remove('expanded');
       dashboardBannerEl.classList.remove('thin');
     } else if (panelId === 'dashboard-expanded') {
       dashboardBannerEl.classList.add('expanded');
       dashboardBannerEl.classList.remove('thin');
+      scheduleBoardRenderAfterExpand();
     } else {
       dashboardBannerEl.classList.remove('expanded');
       dashboardBannerEl.classList.add('thin');
@@ -2980,8 +3016,295 @@ document.addEventListener('DOMContentLoaded', () => {
 // -----------------------------------------
 // Floating Toolbar
 // -----------------------------------------
+let androidSelectionSnapshot = null;
+let androidSelectionActions = null;
+let androidLongPressTimer = null;
+let androidLongPressPointer = null;
+let androidApplyingSelection = false;
+
+const ANDROID_LONG_PRESS_MS = 520;
+const ANDROID_LONG_PRESS_SLOP = 12;
+
+function editableSelectionTarget(node) {
+  const element = node && (node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement);
+  if (!element) return null;
+  return element.closest('#note-body, input, textarea, [contenteditable="true"]');
+}
+
+function captureAndroidSelection() {
+  if (!IS_ANDROID_APP) return null;
+  const active = document.activeElement;
+  if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) {
+    const start = Number(active.selectionStart);
+    const end = Number(active.selectionEnd);
+    if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+      return { type: 'field', element: active, start, end, text: active.value.slice(start, end) };
+    }
+  }
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || !selection.rangeCount) return null;
+  const range = selection.getRangeAt(0);
+  const target = editableSelectionTarget(range.commonAncestorContainer);
+  if (!target || !String(range.toString()).trim()) return null;
+  return { type: 'range', element: target, range: range.cloneRange(), text: range.toString() };
+}
+
+function showAndroidSelectionActions(snapshot) {
+  if (!snapshot || !String(snapshot.text || '').trim()) return;
+  androidSelectionSnapshot = snapshot;
+  ensureAndroidSelectionActions().classList.add('is-visible');
+}
+
+function androidWordBounds(value, requestedOffset) {
+  const text = String(value || '');
+  if (!text) return { start: 0, end: 0 };
+  let offset = Math.max(0, Math.min(text.length, Number(requestedOffset) || 0));
+  if (offset === text.length) offset -= 1;
+  const isWord = (char) => /[\w\u00c0-\uffff'-]/.test(char || '');
+  if (!isWord(text[offset])) {
+    let left = offset;
+    let right = offset;
+    while (left >= 0 || right < text.length) {
+      if (left >= 0 && isWord(text[left])) { offset = left; break; }
+      if (right < text.length && isWord(text[right])) { offset = right; break; }
+      left -= 1;
+      right += 1;
+    }
+  }
+  if (!isWord(text[offset])) return { start: offset, end: Math.min(text.length, offset + 1) };
+  let start = offset;
+  let end = offset + 1;
+  while (start > 0 && isWord(text[start - 1])) start -= 1;
+  while (end < text.length && isWord(text[end])) end += 1;
+  return { start, end };
+}
+
+function androidRangeAtPoint(target, clientX, clientY) {
+  let node = null;
+  let offset = 0;
+  if (document.caretPositionFromPoint) {
+    const position = document.caretPositionFromPoint(clientX, clientY);
+    node = position?.offsetNode || null;
+    offset = position?.offset || 0;
+  } else if (document.caretRangeFromPoint) {
+    const caret = document.caretRangeFromPoint(clientX, clientY);
+    node = caret?.startContainer || null;
+    offset = caret?.startOffset || 0;
+  }
+  if (!node || !target.contains(node)) return null;
+  if (node.nodeType !== Node.TEXT_NODE) {
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    node = walker.nextNode();
+    offset = 0;
+  }
+  if (!node || node.nodeType !== Node.TEXT_NODE) return null;
+  const bounds = androidWordBounds(node.nodeValue || '', offset);
+  if (bounds.end <= bounds.start) return null;
+  const range = document.createRange();
+  range.setStart(node, bounds.start);
+  range.setEnd(node, bounds.end);
+  return range;
+}
+
+function applyAndroidLongPressSelection(pointer) {
+  const target = pointer?.target;
+  if (!target || !target.isConnected) return;
+  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+    target.focus({ preventScroll: true });
+    const value = String(target.value || '');
+    const supportsRange = typeof target.selectionStart === 'number' && typeof target.selectionEnd === 'number';
+    const offset = supportsRange ? target.selectionStart : 0;
+    const bounds = supportsRange ? androidWordBounds(value, offset) : { start: 0, end: value.length };
+    if (bounds.end <= bounds.start) return;
+    if (supportsRange) {
+      try { target.setSelectionRange(bounds.start, bounds.end); } catch (_) {}
+    }
+    showAndroidSelectionActions({
+      type: 'field', element: target, start: bounds.start, end: bounds.end,
+      text: value.slice(bounds.start, bounds.end), supportsRange
+    });
+    return;
+  }
+
+  const range = androidRangeAtPoint(target, pointer.x, pointer.y);
+  if (!range || !String(range.toString()).trim()) return;
+  androidApplyingSelection = true;
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  androidApplyingSelection = false;
+  showAndroidSelectionActions({ type: 'range', element: target, range: range.cloneRange(), text: range.toString() });
+}
+
+function cancelAndroidLongPress() {
+  if (androidLongPressTimer) clearTimeout(androidLongPressTimer);
+  androidLongPressTimer = null;
+  androidLongPressPointer = null;
+}
+
+function restoreAndroidSelection(snapshot) {
+  if (!snapshot || !snapshot.element || !snapshot.element.isConnected) return false;
+  snapshot.element.focus({ preventScroll: true });
+  if (snapshot.type === 'field') {
+    if (snapshot.supportsRange !== false) {
+      try { snapshot.element.setSelectionRange(snapshot.start, snapshot.end); } catch (_) {}
+    }
+    return true;
+  }
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(snapshot.range);
+  return true;
+}
+
+async function writeAndroidSelectionClipboard(text) {
+  const value = String(text || '');
+  if (!value) return false;
+  try {
+    await navigator.clipboard.writeText(value);
+    return true;
+  } catch (_) {
+    const helper = document.createElement('textarea');
+    helper.value = value;
+    helper.setAttribute('readonly', '');
+    Object.assign(helper.style, { position: 'fixed', opacity: '0', pointerEvents: 'none' });
+    document.body.appendChild(helper);
+    helper.select();
+    const copied = document.execCommand('copy');
+    helper.remove();
+    restoreAndroidSelection(androidSelectionSnapshot);
+    return copied;
+  }
+}
+
+function hideAndroidSelectionActions(clearSelection = false) {
+  if (androidSelectionActions) androidSelectionActions.classList.remove('is-visible');
+  if (clearSelection && androidSelectionSnapshot) {
+    if (androidSelectionSnapshot.type === 'field') {
+      const end = androidSelectionSnapshot.end;
+      if (androidSelectionSnapshot.supportsRange !== false) {
+        try { androidSelectionSnapshot.element.setSelectionRange(end, end); } catch (_) {}
+      }
+    } else {
+      window.getSelection()?.removeAllRanges();
+    }
+  }
+  androidSelectionSnapshot = null;
+}
+
+function ensureAndroidSelectionActions() {
+  if (!IS_ANDROID_APP || androidSelectionActions) return androidSelectionActions;
+  const bar = document.createElement('div');
+  bar.id = 'android-selection-actions';
+  bar.setAttribute('role', 'toolbar');
+  bar.setAttribute('aria-label', 'Text selection actions');
+  bar.innerHTML = `
+    <button type="button" data-selection-action="cut">Cut</button>
+    <button type="button" data-selection-action="copy">Copy</button>
+    <button type="button" data-selection-action="all">Select all</button>
+    <button type="button" data-selection-action="close" aria-label="Close selection actions">×</button>`;
+  bar.addEventListener('pointerdown', (event) => event.preventDefault());
+  bar.addEventListener('click', async (event) => {
+    const button = event.target.closest('[data-selection-action]');
+    if (!button || !androidSelectionSnapshot) return;
+    const action = button.dataset.selectionAction;
+    const snapshot = androidSelectionSnapshot;
+    if (action === 'close') {
+      hideAndroidSelectionActions(true);
+      return;
+    }
+    if (action === 'all') {
+      if (snapshot.type === 'field') {
+        const text = String(snapshot.element.value || '');
+        if (snapshot.supportsRange !== false) {
+          try { snapshot.element.setSelectionRange(0, text.length); } catch (_) {}
+        }
+        showAndroidSelectionActions({ ...snapshot, start: 0, end: text.length, text });
+      } else {
+        const range = document.createRange();
+        range.selectNodeContents(snapshot.element);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+      if (snapshot.type !== 'field') setTimeout(updateAndroidSelectionActions, 0);
+      return;
+    }
+    if (!restoreAndroidSelection(snapshot)) return;
+    const copied = await writeAndroidSelectionClipboard(snapshot.text);
+    if (action === 'cut' && copied) {
+      if (snapshot.type === 'field') {
+        if (snapshot.supportsRange === false) {
+          snapshot.element.value = snapshot.element.value.slice(0, snapshot.start)
+            + snapshot.element.value.slice(snapshot.end);
+        } else {
+          snapshot.element.setRangeText('', snapshot.start, snapshot.end, 'start');
+        }
+      } else {
+        snapshot.range.deleteContents();
+      }
+      snapshot.element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteByCut' }));
+    }
+    hideAndroidSelectionActions(action === 'cut');
+    if (copied) showAppToast(action === 'cut' ? 'Text cut' : 'Copied to clipboard', { duration: 1800 });
+  });
+  document.body.appendChild(bar);
+  androidSelectionActions = bar;
+  return bar;
+}
+
+function updateAndroidSelectionActions() {
+  if (!IS_ANDROID_APP) return;
+  const snapshot = captureAndroidSelection();
+  if (!snapshot) {
+    hideAndroidSelectionActions(false);
+    return;
+  }
+  androidSelectionSnapshot = snapshot;
+  ensureAndroidSelectionActions().classList.add('is-visible');
+}
+
+if (IS_ANDROID_APP) {
+  document.addEventListener('pointerdown', (event) => {
+    if (event.pointerType && event.pointerType !== 'touch' && event.pointerType !== 'pen') return;
+    const target = editableSelectionTarget(event.target);
+    if (!target) return;
+    cancelAndroidLongPress();
+    androidLongPressPointer = {
+      id: event.pointerId, target, x: event.clientX, y: event.clientY,
+      startX: event.clientX, startY: event.clientY
+    };
+    androidLongPressTimer = setTimeout(() => {
+      const pointer = androidLongPressPointer;
+      androidLongPressTimer = null;
+      androidLongPressPointer = null;
+      applyAndroidLongPressSelection(pointer);
+    }, ANDROID_LONG_PRESS_MS);
+  }, true);
+  document.addEventListener('pointermove', (event) => {
+    if (!androidLongPressPointer || event.pointerId !== androidLongPressPointer.id) return;
+    if (Math.hypot(event.clientX - androidLongPressPointer.startX, event.clientY - androidLongPressPointer.startY)
+        > ANDROID_LONG_PRESS_SLOP) cancelAndroidLongPress();
+  }, true);
+  document.addEventListener('pointerup', cancelAndroidLongPress, true);
+  document.addEventListener('pointercancel', cancelAndroidLongPress, true);
+  document.addEventListener('contextmenu', (event) => {
+    if (editableSelectionTarget(event.target)) event.preventDefault();
+  }, true);
+  document.addEventListener('selectstart', (event) => {
+    if (!androidApplyingSelection && editableSelectionTarget(event.target)) event.preventDefault();
+  }, true);
+  document.addEventListener('selectionchange', () => setTimeout(updateAndroidSelectionActions, 0));
+  document.addEventListener('select', () => setTimeout(updateAndroidSelectionActions, 0), true);
+  document.addEventListener('focusout', () => setTimeout(updateAndroidSelectionActions, 80), true);
+}
+
 document.addEventListener('selectionchange', () => {
   if (!activeNoteId || !floatingToolbar) return;
+  if (IS_ANDROID_APP) {
+    hideToolbar();
+    return;
+  }
   if (currentHomeView === 'graph' && homePage.style.display === 'flex') {
     hideToolbar();
     return;
@@ -4358,12 +4681,180 @@ window.loadLofiFile = function(e) {
 // Desktop saves dropped files to disk. Mobile stores compressed image pins and
 // lightweight named file cards so the board still works without drag/drop.
 // -----------------------------------------
-let boardItems = JSON.parse(localStorage.getItem('opennotes_board') || '[]');
-function saveBoard() { localStorage.setItem('opennotes_board', JSON.stringify(boardItems)); }
-// board_files names are safe (timestamp+random+ext) and userData has no spaces
-const fileUrlOf = (p) => 'file:///' + String(p).replace(/\\/g, '/');
+let boardItems = [];
+try {
+  const storedBoardItems = JSON.parse(localStorage.getItem('opennotes_board') || '[]');
+  boardItems = Array.isArray(storedBoardItems) ? storedBoardItems.filter(item => item && typeof item === 'object') : [];
+} catch (err) {
+  console.warn('Ignoring invalid pinned-board data', err);
+}
+function saveBoard() {
+  try {
+    localStorage.setItem('opennotes_board', JSON.stringify(boardItems));
+    return true;
+  } catch (err) {
+    console.warn('Could not save pinned-board data', err);
+    return false;
+  }
+}
+// Produce a real file URL even when a path contains spaces, #, %, non-ASCII,
+// or other characters that would otherwise be interpreted as URL syntax.
+// Existing legacy file URLs are normalized too: older values left spaces/#/%
+// unescaped, which made valid filenames look like URL fragments.
+const fileUrlOf = (value) => {
+  const raw = String(value || '');
+  const normalized = raw.replace(/^file:\/+/i, '').replace(/\\/g, '/').replace(/^\/+/, '');
+  return 'file:///' + normalized.split('/').map((part, index) => {
+    if (index === 0 && /^[A-Za-z]:$/.test(part)) return part;
+    try { return encodeURIComponent(decodeURIComponent(part)); }
+    catch (_) { return encodeURIComponent(part); }
+  }).join('/');
+};
 const isTouchLayout = () => window.matchMedia('(pointer: coarse), (max-width: 820px)').matches;
 let activeBoardViewer = null;
+
+function safeOpenFilename(value, blob) {
+  const original = String(value || '').split(/[\\/]/).pop() || 'pinned-file';
+  const cleaned = original
+    .replace(/[\u0000-\u001f\u007f<>:"/\\|?*]/g, '_')
+    .replace(/[. ]+$/g, '')
+    .trim();
+  let filename = cleaned || 'pinned-file';
+  if (!/\.[A-Za-z0-9]{1,12}$/.test(filename)) {
+    const extensionByType = {
+      'application/pdf': '.pdf',
+      'image/jpeg': '.jpg',
+      'image/png': '.png',
+      'image/gif': '.gif',
+      'image/webp': '.webp',
+      'text/plain': '.txt',
+      'text/markdown': '.md'
+    };
+    filename += extensionByType[String(blob && blob.type || '').toLowerCase()] || '';
+  }
+  if (filename.length > 180) {
+    const dot = filename.lastIndexOf('.');
+    const ext = dot > 0 ? filename.slice(dot, dot + 14) : '';
+    filename = filename.slice(0, Math.max(1, 180 - ext.length)).replace(/[. ]+$/g, '') + ext;
+  }
+  return filename;
+}
+
+const BLOCKED_PIN_EXTENSIONS = new Set([
+  'apk', 'exe', 'bat', 'cmd', 'com', 'msi', 'lnk', 'ps1', 'vbs', 'js',
+  'mjs', 'cjs', 'scr', 'jar', 'hta', 'reg', 'wsf', 'wsh', 'pif', 'cpl', 'msc',
+  'gadget', 'application', 'ws'
+]);
+
+function blockedPinFilename(value) {
+  const cleaned = String(value || '').replace(/[. ]+$/g, '');
+  const match = cleaned.match(/\.([^.\\/]+)$/);
+  return !!(match && BLOCKED_PIN_EXTENSIONS.has(match[1].toLowerCase()));
+}
+
+function nativeAbsolutePath(uri) {
+  const value = String(uri || '');
+  if (!/^file:\/\//i.test(value)) return value;
+  try { return decodeURIComponent(new URL(value).pathname); }
+  catch (_) { return decodeURIComponent(value.replace(/^file:\/\/+?/i, '/')); }
+}
+
+function desktopPath(value) {
+  const raw = String(value || '');
+  if (!/^file:/i.test(raw)) return raw;
+  // Decode manually rather than through URL.pathname so a legacy unescaped
+  // `#` in a real Windows filename is not mistaken for a URL fragment.
+  let path = raw.replace(/^file:\/\//i, '');
+  try { path = decodeURIComponent(path); } catch (_) {}
+  if (/^\/[A-Za-z]:\//.test(path)) path = path.slice(1);
+  return path.replace(/\//g, '\\');
+}
+
+function cleanOpenError(error, fallback = 'The system could not open this file.') {
+  const message = typeof error === 'string' ? error : String(error && (error.message || error.error) || '');
+  return (message || fallback).replace(/^Error:\s*/i, '').split('\n')[0].slice(0, 180);
+}
+
+function showShareFallback(filename, uri, error) {
+  if (!document.body) return;
+  closeAppAlert();
+  const overlay = document.createElement('div');
+  overlay.className = 'app-alert-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.innerHTML = `
+    <div class="app-alert-card">
+      <p>${gsEscape(`No app could open “${filename}”. ${cleanOpenError(error)} You can share it to another app instead.`)}</p>
+      <div style="display:flex;justify-content:flex-end;gap:10px">
+        <button type="button" class="modal-btn secondary app-alert-cancel">Cancel</button>
+        <button type="button" class="modal-btn primary app-alert-share">Share instead</button>
+      </div>
+    </div>
+  `;
+  activeAppAlert = overlay;
+  document.body.appendChild(overlay);
+  const close = () => {
+    if (activeAppAlert === overlay) activeAppAlert = null;
+    overlay.remove();
+  };
+  overlay.querySelector('.app-alert-cancel').addEventListener('click', close);
+  overlay.querySelector('.app-alert-share').addEventListener('click', async () => {
+    try {
+      await Share.share({ title: filename, files: [uri], dialogTitle: `Share ${filename}` });
+      close();
+    } catch (shareError) {
+      console.error('Native share fallback failed', shareError);
+      close();
+      showAppToast(`Could not share ${filename}: ${cleanOpenError(shareError)}`);
+    }
+  });
+  overlay.addEventListener('click', (event) => { if (event.target === overlay) close(); });
+  try { overlay.querySelector('.app-alert-share').focus({ preventScroll: true }); } catch (_) {}
+}
+
+async function writeNativeCacheFile(filename, blob) {
+  const safeName = safeOpenFilename(filename, blob);
+  const nonce = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const result = await Filesystem.writeFile({
+    path: `yn-open/${nonce}-${safeName}`,
+    data: await blobToBase64(blob),
+    directory: Directory.Cache,
+    recursive: true,
+  });
+  if (!result || !result.uri) throw new Error('The temporary file was not created.');
+  return { filename: safeName, uri: result.uri, path: nativeAbsolutePath(result.uri) };
+}
+
+async function openNativeBlob(filename, blob) {
+  if (blockedPinFilename(filename)) {
+    showAppToast('This file type cannot be opened safely.');
+    return false;
+  }
+  let cached;
+  try {
+    cached = await writeNativeCacheFile(filename, blob);
+    await FileViewer.openDocumentFromLocalPath({ path: cached.path });
+    return true;
+  } catch (error) {
+    console.error('Native file viewer failed', error);
+    if (cached && cached.uri) showShareFallback(cached.filename, cached.uri, error);
+    else showAppToast(`Could not prepare ${safeOpenFilename(filename, blob)}: ${cleanOpenError(error)}`);
+    return false;
+  }
+}
+
+async function openElectronPath(path, filename) {
+  try {
+    const result = await window.electronAPI.openPath(path);
+    if (result && result.ok === true) return true;
+    const error = result && (result.error || (result.blocked ? 'This file type is blocked for safety.' : ''));
+    throw new Error(error || 'The desktop file handler did not accept the file.');
+  } catch (error) {
+    console.error('Desktop file open failed', error);
+    showAppToast(`Could not open ${safeOpenFilename(filename)}: ${cleanOpenError(error)}`);
+    return false;
+  }
+}
 
 function boardDb() {
   if (!('indexedDB' in window)) return Promise.resolve(null);
@@ -4450,8 +4941,19 @@ function showBoardViewer(item, src, isBlob = false) {
   `;
   overlay.addEventListener('click', (e) => { if (e.target === overlay) closeBoardViewer(); });
   overlay.querySelector('.board-viewer-head button').addEventListener('click', closeBoardViewer);
-  overlay.querySelector('.board-viewer-open').addEventListener('click', () => {
-    openBoardViewerFile(item, src, isImage ? 'Pinned image' : 'Pinned file');
+  const openButton = overlay.querySelector('.board-viewer-open');
+  openButton.addEventListener('click', async () => {
+    if (openButton.disabled) return;
+    const label = openButton.textContent;
+    openButton.disabled = true;
+    openButton.textContent = 'Opening…';
+    try { await openBoardViewerFile(item, src, isImage ? 'Pinned image' : 'Pinned file'); }
+    finally {
+      if (openButton.isConnected) {
+        openButton.disabled = false;
+        openButton.textContent = label;
+      }
+    }
   });
   document.body.appendChild(overlay);
   activeBoardViewer = overlay;
@@ -4476,40 +4978,63 @@ async function openBoardViewerFile(item, src, fallbackName) {
     if (item.fileId) { const b = await getBoardBlob(item.fileId); if (b) return b; }
     const dataUrl = item.dataUrl || (src && src.startsWith('data:') ? src : '');
     if (dataUrl) { const r = await fetch(dataUrl); return await r.blob(); } // same-origin data: is safe
+    if (src && src.startsWith('blob:')) { const r = await fetch(src); return await r.blob(); }
+    if (isHttp) {
+      const response = await fetch(src);
+      if (!response.ok) throw new Error(`Download failed (${response.status}).`);
+      return await response.blob();
+    }
     return null;
   };
 
   if (isElectron) {
     // 1) real file on THIS machine
-    if (item.path && window.electronAPI.fileExists && window.electronAPI.fileExists(item.path)) {
-      window.electronAPI.openPath(item.path);
+    const localPath = desktopPath(item.path || (/^file:/i.test(src || '') ? src : ''));
+    if (localPath && window.electronAPI.fileExists && window.electronAPI.fileExists(localPath)) {
+      await openElectronPath(localPath, filename);
       return;
     }
-    // 2) cloud https: — open externally (routes through setWindowOpenHandler → shell.openExternal)
-    if (isHttp) { window.open(src, '_blank'); return; }
-    // 3) blob/data — write bytes to a temp OS file, then open it
+    // 2) cloud/blob/data — materialize the exact bytes with their original
+    // extension, then use the associated desktop app. This also makes signed
+    // cloud URLs behave like files rather than opening a browser tab.
     try {
       const blob = await getBlob();
       if (!blob) throw new Error('no bytes');
       const buf = await blob.arrayBuffer();
-      const osPath = await window.electronAPI.saveBoardFile(filename, buf);
-      window.electronAPI.openPath(osPath);
+      const tempFilename = safeOpenFilename(filename, blob);
+      const osPath = await window.electronAPI.saveBoardFile(tempFilename, buf);
+      await openElectronPath(osPath, tempFilename);
     } catch (err) {
       console.error(err);
-      showAppToast('Failed to open file.');
+      showAppToast(`Could not open ${safeOpenFilename(filename)}: ${cleanOpenError(err)}`);
     }
     return;
   }
 
-  // Android / web
-  if (isHttp) { window.open(src, '_blank'); return; } // Capacitor opens external https in the system browser
+  // Android: always hand a real cache file to the native viewer. Share is
+  // offered only after a viewer failure and only when the user taps it.
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const blob = await getBlob();
+      if (!blob) throw new Error('The file data is not available on this device.');
+      await openNativeBlob(filename, blob);
+    } catch (err) {
+      console.error(err);
+      showAppToast(`Could not open ${safeOpenFilename(filename)}: ${cleanOpenError(err)}`);
+    }
+    return;
+  }
+
+  // Browser/PWA fallback. HTTP URLs can open directly; local blobs are saved
+  // because a normal web page cannot launch an arbitrary installed file app.
+  if (isHttp) { window.open(src, '_blank', 'noopener,noreferrer'); return; }
   try {
     const blob = await getBlob();
     if (!blob) throw new Error('no bytes');
     await saveExportFile(filename, blob);
   } catch (err) {
     console.error(err);
-    showAppToast('Failed to open file.');
+    showAppToast(`Could not open ${safeOpenFilename(filename)}: ${cleanOpenError(err)}`);
   }
 }
 
@@ -4541,12 +5066,11 @@ window.viewBoardPDF = function(name, src) {
   }
 };
 
-function openBoardResolved(item, src) {
-  if (item.type === 'file' && /\.pdf$/i.test(item.name || '')) {
-    window.viewBoardPDF(item.name, src);
-  } else {
-    showBoardViewer(item, src);
-  }
+function openBoardResolved(item, src, isBlob = false) {
+  // Keep every pinned image/file/PDF in the board viewer so the same native
+  // “Open file” action is always available. The college viewer remains for
+  // documents opened from the College section itself.
+  showBoardViewer(item, src, isBlob);
 }
 
 async function openBoardItem(item) {
@@ -4554,10 +5078,10 @@ async function openBoardItem(item) {
   // 1) local OS path (Electron) — only if it actually exists on THIS machine;
   // a path pinned on another device won't be here.
   if (item.path && window.electronAPI && window.electronAPI.openPath) {
-    const exists = window.electronAPI.fileExists ? window.electronAPI.fileExists(item.path) : true;
+    const localPath = desktopPath(item.path);
+    const exists = window.electronAPI.fileExists ? window.electronAPI.fileExists(localPath) : true;
     if (exists) {
-      window.electronAPI.openPath(item.path);
-      return true;
+      return await openElectronPath(localPath, item.name || 'pinned-file');
     }
   }
   // 2) inline data URL (small images pinned on mobile/web)
@@ -4569,27 +5093,24 @@ async function openBoardItem(item) {
   if (item.fileId) {
     const url = await boardBlobUrl(item.fileId);
     if (url) {
-      if (item.type === 'file' && /\.pdf$/i.test(item.name || '')) {
-        window.viewBoardPDF(item.name, url);
-      } else {
-        showBoardViewer(item, url, true);
-      }
+      openBoardResolved(item, url, true);
       return true;
     }
   }
-  // 4) cloud file map — by basename (desktop-uploaded files) or blob_<fileId>
-  // (IndexedDB blobs uploaded from another device via uploadBoardBlobs)
+  // 4) cloud file map — blob_<fileId> for IndexedDB pins, otherwise the
+  // directory-qualified resolver (`board_files/<name>`, etc.). Basename is
+  // retained only as a final migration fallback for old cloud rows.
   let fileMap = {};
   try { fileMap = JSON.parse(localStorage.getItem('yn_file_map') || '{}'); } catch (_) {}
   let cloudUrl = '';
   if (item.fileId && fileMap['blob_' + item.fileId]) cloudUrl = fileMap['blob_' + item.fileId];
   if (!cloudUrl && item.path) {
+    const resolved = item.path && window.resolveFileUrl ? window.resolveFileUrl(fileUrlOf(item.path)) : '';
+    if (resolved && !/^file:/i.test(String(resolved))) cloudUrl = resolved;
+  }
+  if (!cloudUrl && item.path) {
     const base = String(item.path).split(/[\\/]/).pop();
     if (base && fileMap[base]) cloudUrl = fileMap[base];
-  }
-  if (!cloudUrl) {
-    const resolved = item.path && window.resolveFileUrl ? window.resolveFileUrl(fileUrlOf(item.path)) : '';
-    if (resolved && !String(resolved).startsWith('file:///')) cloudUrl = resolved;
   }
   if (cloudUrl) {
     openBoardResolved(item, cloudUrl);
@@ -4599,56 +5120,383 @@ async function openBoardItem(item) {
   return false;
 }
 
-// --- Board coordinate helpers (board is always 1000 base units wide) ---
+// --- Board geometry ---------------------------------------------------------
+// Stored sizes remain in a stable 1000-unit-wide coordinate system. Accessible
+// minimums are derived for the current pointer/viewport and are NEVER written by
+// render or repair. Positions use 0..1 normalized coordinates so a phone opening
+// the board cannot permanently clamp desktop coordinates (or vice versa).
+const BOARD_BASE_WIDTH = 1000;
+const BOARD_REFERENCE_HEIGHT = 700; // legacy x/y fallback only; never viewport-derived
+const BOARD_SCHEMA_VERSION = 3;
+const BOARD_FINE_MIN_CSS = { w: 120, h: 88 };
+const BOARD_COARSE_MIN_CSS = { w: 132, h: 96 }; // 3 independent 44px interaction zones
+const BOARD_PIN_OVERHANG_CSS = 16;
+const BOARD_EDGE_INSET_CSS = 4;
+const BOARD_ITEM_GAP_CSS = 10;
+const BOARD_STORAGE_MIN = 48; // corruption guard, not the rendered interaction minimum
+const BOARD_STORAGE_MAX_W = 960;
+const BOARD_STORAGE_MAX_H = 900;
+let activeBoardLayouts = new Map();
+let activeBoardMetrics = null;
+let boardOverflowWarned = false;
+let boardExpandRenderToken = 0;
+
+function boardFinite(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+function boardRound(value, digits = 4) {
+  const factor = 10 ** digits;
+  return Math.round(boardFinite(value) * factor) / factor;
+}
+function boardStoredNumberIsValid(value) {
+  return value !== null && value !== '' && Number.isFinite(Number(value));
+}
+function clampNum(min, max, value) {
+  min = boardFinite(min);
+  max = boardFinite(max, min);
+  value = boardFinite(value, min);
+  if (max < min) return min;
+  return Math.min(Math.max(value, min), max);
+}
 function boardMetrics() {
   const banner = document.getElementById('dashboard-banner');
-  const boardWidth = banner ? banner.clientWidth : 1000;
-  const boardHeight = banner ? banner.clientHeight : 700;
-  const scale = boardWidth / 1000 || 1;
-  const heightBase = Math.round(boardHeight / scale) || 700;
-  // Scale-aware minimum: guarantee >=120x92 RENDERED px so the 28px handle +
-  // 22px delete + grab strip stay usable on phone AND desktop.
-  const minWbase = Math.round(120 / scale);
-  const minHbase = Math.round(92 / scale);
-  return { scale, heightBase, minWbase, minHbase };
+  const boardWidth = Math.max(1, boardFinite(banner && banner.clientWidth, BOARD_BASE_WIDTH));
+  const boardHeight = Math.max(1, boardFinite(banner && banner.clientHeight, BOARD_REFERENCE_HEIGHT));
+  const scale = Math.max(0.01, boardWidth / BOARD_BASE_WIDTH);
+  const coarse = window.matchMedia('(pointer: coarse)').matches;
+  const minCss = coarse ? BOARD_COARSE_MIN_CSS : BOARD_FINE_MIN_CSS;
+  return {
+    scale,
+    coarse,
+    heightBase: Math.max(1, boardHeight / scale),
+    minWbase: minCss.w / scale,
+    minHbase: minCss.h / scale,
+    pinOverhangBase: BOARD_PIN_OVERHANG_CSS / scale,
+    edgeInsetBase: BOARD_EDGE_INSET_CSS / scale,
+    gapBase: BOARD_ITEM_GAP_CSS / scale,
+    searchStepBase: 20 / scale
+  };
 }
-// Clamp v into [min,max]. If the available range is inverted (max < min — e.g. a
-// card cornered with less room than the minimum size), the AVAILABLE SPACE wins
-// (return max, floored at 0) rather than snapping to min and overshooting the board.
-function clampNum(min, max, v) { if (max < min) return Math.max(0, max); return Math.min(Math.max(v, min), max); }
-// The banner's live height is only the board's real canvas when it's expanded (not
-// the collapsed 80px .thin state used on non-dashboard panels). Gate size migration.
+
 function boardExpandedForMigration() {
-  const b = document.getElementById('dashboard-banner');
-  return !!(b && b.classList.contains('expanded') && b.clientHeight > 160);
+  const banner = document.getElementById('dashboard-banner');
+  return !!(banner && banner.classList.contains('expanded') && banner.clientHeight > 160);
 }
-// Clamp an item's position given its size (used on drag + migration).
-function clampBoardPos(item, m) {
-  m = m || boardMetrics();
-  item.x = clampNum(0, 1000 - item.w, Math.round(item.x));
-  item.y = clampNum(0, m.heightBase - item.h, Math.round(item.y));
-}
-function boardRectsOverlap(a, b) {
-  return !(a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y);
-}
-// Find a non-overlapping in-bounds base position for a new w x h pin, starting near (x,y).
-function boardFreeSlot(x, y, w, h) {
-  const m = boardMetrics();
-  const maxX = Math.max(0, 1000 - w), maxY = Math.max(0, m.heightBase - h);
-  const step = 30;
-  for (let ring = 0; ring < 40; ring++) {
-    const cx = clampNum(0, maxX, x + ring * step);
-    const cy = clampNum(0, maxY, y + ring * step);
-    const cand = { x: cx, y: cy, w, h };
-    if (!boardItems.some(it => boardRectsOverlap(cand, it))) return { x: cx, y: cy };
-    if (cx === maxX && cy === maxY) break; // ran out of room — accept staggered fallback
+
+function boardStableHash(value) {
+  const s = String(value || 'board-item');
+  let hash = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    hash ^= s.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
   }
-  return { x: clampNum(0, maxX, x), y: clampNum(0, maxY, y) };
+  return hash >>> 0;
+}
+
+function boardDefaultsFor(item) {
+  if (item && item.type === 'image') return { w: 220, h: 160 };
+  if (item && item.type === 'file') return { w: 190, h: 90 };
+  return { w: 210, h: 130 };
+}
+
+function sanitizeBoardItem(item, index, seenIds) {
+  let changed = false;
+  const set = (key, value) => {
+    if (item[key] !== value) { item[key] = value; changed = true; }
+  };
+  if (!['image', 'file', 'text'].includes(item.type)) set('type', 'text');
+  const identity = item.id || `${item.type}|${item.name || ''}|${item.text || ''}|${index}`;
+  const baseId = typeof item.id === 'string' && item.id ? item.id : `legacy-${index}-${boardStableHash(identity).toString(36)}`;
+  let id = baseId;
+  // Crafted/corrupt data can already contain the suffix we would normally add.
+  // Keep incrementing until the map key is genuinely unique.
+  if (seenIds) {
+    let suffix = 0;
+    while (seenIds.has(id)) id = `${baseId}-${index}-${++suffix}`;
+  }
+  if (seenIds) seenIds.add(id);
+  set('id', id);
+
+  const defaults = boardDefaultsFor(item);
+  const safeW = clampNum(BOARD_STORAGE_MIN, BOARD_STORAGE_MAX_W, boardFinite(item.w, defaults.w) > 0 ? boardFinite(item.w, defaults.w) : defaults.w);
+  const safeH = clampNum(BOARD_STORAGE_MIN, BOARD_STORAGE_MAX_H, boardFinite(item.h, defaults.h) > 0 ? boardFinite(item.h, defaults.h) : defaults.h);
+  set('w', boardRound(safeW));
+  set('h', boardRound(safeH));
+
+  const hash = boardStableHash(id);
+  const stableRot = ((hash % 161) - 80) / 10; // stable -8deg..8deg, never a new random layout
+  set('rot', boardRound(clampNum(-10, 10, Number.isFinite(Number(item.rot)) ? Number(item.rot) : stableRot), 1));
+  set('pin', Math.round(clampNum(0, BOARD_PIN_COLORS.length - 1, Number.isFinite(Number(item.pin)) ? Number(item.pin) : ((hash >>> 8) % BOARD_PIN_COLORS.length))));
+
+  const nxValid = boardStoredNumberIsValid(item.nx);
+  const nyValid = boardStoredNumberIsValid(item.ny);
+  let hasPosition = false;
+  if (nxValid && nyValid) {
+    set('nx', boardRound(clampNum(0, 1, Number(item.nx)), 6));
+    set('ny', boardRound(clampNum(0, 1, Number(item.ny)), 6));
+    hasPosition = true;
+  } else if ('nx' in item || 'ny' in item) {
+    delete item.nx;
+    delete item.ny;
+    changed = true;
+  }
+  // Fine- and coarse-pointer positions are kept independently. A phone may need
+  // a different collision repair because its accessible minimum is larger; that
+  // repair must not move the desktop layout back and forth through sync.
+  for (const suffix of ['f', 'c']) {
+    const xKey = `nx${suffix}`, yKey = `ny${suffix}`;
+    const xValid = boardStoredNumberIsValid(item[xKey]);
+    const yValid = boardStoredNumberIsValid(item[yKey]);
+    if (xValid && yValid) {
+      set(xKey, boardRound(clampNum(0, 1, Number(item[xKey])), 6));
+      set(yKey, boardRound(clampNum(0, 1, Number(item[yKey])), 6));
+      hasPosition = true;
+    } else if (xKey in item || yKey in item) {
+      delete item[xKey];
+      delete item[yKey];
+      changed = true;
+    }
+  }
+  if (hasPosition) set('boardV', BOARD_SCHEMA_VERSION);
+  else if ('boardV' in item) { delete item.boardV; changed = true; }
+  set('x', boardRound(boardFinite(item.x, 0)));
+  set('y', boardRound(boardFinite(item.y, 0)));
+  return changed;
+}
+
+// The decorated rectangle includes the part of the pushpin above the card and is
+// rotated around the same centre as the CSS transform. This is the actual shape
+// used for bounds and collision checks, not just the unrotated card box.
+function boardVisualInsets(layout, m) {
+  const w = layout.w, h = layout.h;
+  const radians = boardFinite(layout.rot) * Math.PI / 180;
+  const cos = Math.cos(radians), sin = Math.sin(radians);
+  const cx = w / 2, cy = h / 2;
+  const corners = [[0, -m.pinOverhangBase], [w, -m.pinOverhangBase], [w, h], [0, h]];
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  corners.forEach(([px, py]) => {
+    const dx = px - cx, dy = py - cy;
+    const x = cx + dx * cos - dy * sin;
+    const y = cy + dx * sin + dy * cos;
+    minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+    minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+  });
+  return {
+    left: Math.max(0, -minX),
+    right: Math.max(0, maxX - w),
+    top: Math.max(0, -minY),
+    bottom: Math.max(0, maxY - h)
+  };
+}
+
+function boardSizeFits(w, h, rot, m) {
+  const inset = boardVisualInsets({ w, h, rot }, m);
+  return w + inset.left + inset.right <= BOARD_BASE_WIDTH - m.edgeInsetBase * 2 + 0.01
+    && h + inset.top + inset.bottom <= m.heightBase - m.edgeInsetBase * 2 + 0.01;
+}
+
+function boardEffectiveSize(item, m, requestedW = item.w, requestedH = item.h) {
+  const minW = Math.min(m.minWbase, BOARD_BASE_WIDTH - m.edgeInsetBase * 2);
+  const minH = Math.min(m.minHbase, m.heightBase - m.edgeInsetBase * 2);
+  const targetW = Math.max(minW, boardFinite(requestedW, item.w));
+  const targetH = Math.max(minH, boardFinite(requestedH, item.h));
+  if (boardSizeFits(targetW, targetH, item.rot, m)) return { w: targetW, h: targetH };
+
+  // Fit oversized legacy/user sizes without mutating storage. Interpolate from the
+  // accessible minimum so both dimensions remain usable and the rotation stays intact.
+  if (!boardSizeFits(minW, minH, item.rot, m)) return { w: minW, h: minH };
+  let low = 0, high = 1;
+  for (let i = 0; i < 18; i++) {
+    const t = (low + high) / 2;
+    const w = minW + (targetW - minW) * t;
+    const h = minH + (targetH - minH) * t;
+    if (boardSizeFits(w, h, item.rot, m)) low = t; else high = t;
+  }
+  return {
+    w: minW + (targetW - minW) * low,
+    h: minH + (targetH - minH) * low
+  };
+}
+
+function boardPositionRange(layout, m) {
+  const inset = boardVisualInsets(layout, m);
+  const minX = m.edgeInsetBase + inset.left;
+  const maxX = BOARD_BASE_WIDTH - m.edgeInsetBase - inset.right - layout.w;
+  const minY = m.edgeInsetBase + inset.top;
+  const maxY = m.heightBase - m.edgeInsetBase - inset.bottom - layout.h;
+  return { minX, maxX, minY, maxY, valid: maxX >= minX && maxY >= minY };
+}
+
+function boardClampLayout(layout, m) {
+  const range = boardPositionRange(layout, m);
+  return {
+    ...layout,
+    x: clampNum(range.minX, range.maxX, layout.x),
+    y: clampNum(range.minY, range.maxY, layout.y)
+  };
+}
+
+function boardPreferredLayout(item, m) {
+  const size = boardEffectiveSize(item, m);
+  const base = { id: item.id, x: 0, y: 0, w: size.w, h: size.h, rot: item.rot || 0 };
+  const range = boardPositionRange(base, m);
+  const suffix = m.coarse ? 'c' : 'f';
+  const bucketX = Number(item[`nx${suffix}`]);
+  const bucketY = Number(item[`ny${suffix}`]);
+  const sharedX = Number(item.nx);
+  const sharedY = Number(item.ny);
+  const hasBucket = boardStoredNumberIsValid(item[`nx${suffix}`]) && boardStoredNumberIsValid(item[`ny${suffix}`]);
+  const hasShared = boardStoredNumberIsValid(item.nx) && boardStoredNumberIsValid(item.ny);
+  if (hasBucket || hasShared) {
+    const nx = hasBucket ? bucketX : sharedX;
+    const ny = hasBucket ? bucketY : sharedY;
+    base.x = range.minX + clampNum(0, 1, nx) * Math.max(0, range.maxX - range.minX);
+    base.y = range.minY + clampNum(0, 1, ny) * Math.max(0, range.maxY - range.minY);
+  } else {
+    base.x = boardFinite(item.x, range.minX);
+    base.y = boardFinite(item.y, range.minY);
+  }
+  return boardClampLayout(base, m);
+}
+
+function boardVisualRect(layout, m) {
+  const inset = boardVisualInsets(layout, m);
+  return {
+    left: layout.x - inset.left,
+    top: layout.y - inset.top,
+    right: layout.x + layout.w + inset.right,
+    bottom: layout.y + layout.h + inset.bottom
+  };
+}
+
+function boardVisualRectsOverlap(a, b, gap) {
+  return !(a.right + gap <= b.left || b.right + gap <= a.left || a.bottom + gap <= b.top || b.bottom + gap <= a.top);
+}
+
+function boardCandidateFits(candidate, m, placed) {
+  const range = boardPositionRange(candidate, m);
+  if (!range.valid || candidate.x < range.minX - 0.01 || candidate.x > range.maxX + 0.01 || candidate.y < range.minY - 0.01 || candidate.y > range.maxY + 0.01) return false;
+  const rect = boardVisualRect(candidate, m);
+  return !placed.some(other => other.id !== candidate.id && boardVisualRectsOverlap(rect, boardVisualRect(other, m), m.gapBase));
+}
+
+function boardFindNearestSlot(preferred, m, placed) {
+  preferred = boardClampLayout(preferred, m);
+  if (boardCandidateFits(preferred, m, placed)) return preferred;
+  const range = boardPositionRange(preferred, m);
+  if (!range.valid) return null;
+
+  const inset = boardVisualInsets(preferred, m);
+  const xs = [preferred.x, range.minX, range.maxX];
+  const ys = [preferred.y, range.minY, range.maxY];
+  placed.forEach(other => {
+    const rect = boardVisualRect(other, m);
+    xs.push(rect.right + m.gapBase + inset.left);
+    xs.push(rect.left - m.gapBase - preferred.w - inset.right);
+    ys.push(rect.bottom + m.gapBase + inset.top);
+    ys.push(rect.top - m.gapBase - preferred.h - inset.bottom);
+  });
+  const step = Math.max(8, m.searchStepBase);
+  for (let x = range.minX; x <= range.maxX; x += step) xs.push(x);
+  for (let y = range.minY; y <= range.maxY; y += step) ys.push(y);
+  xs.push(range.maxX); ys.push(range.maxY);
+
+  const unique = (values, min, max) => [...new Set(values
+    .filter(Number.isFinite)
+    .map(value => boardRound(clampNum(min, max, value), 3)))]
+    .sort((a, b) => a - b);
+  const xValues = unique(xs, range.minX, range.maxX);
+  const yValues = unique(ys, range.minY, range.maxY);
+  const candidates = [];
+  yValues.forEach(y => xValues.forEach(x => {
+    const dx = x - preferred.x, dy = y - preferred.y;
+    candidates.push({ x, y, distance: dx * dx + dy * dy });
+  }));
+  candidates.sort((a, b) => a.distance - b.distance || a.y - b.y || a.x - b.x);
+  for (const point of candidates) {
+    const candidate = { ...preferred, x: point.x, y: point.y };
+    if (boardCandidateFits(candidate, m, placed)) return candidate;
+  }
+  return null;
+}
+
+function boardWriteCanonical(item, layout, m, sizeChanged = false) {
+  if (sizeChanged) {
+    // This is an explicit user resize, not an automatic minimum migration.
+    item.w = boardRound(clampNum(BOARD_STORAGE_MIN, BOARD_STORAGE_MAX_W, layout.w));
+    item.h = boardRound(clampNum(BOARD_STORAGE_MIN, BOARD_STORAGE_MAX_H, layout.h));
+  }
+  const range = boardPositionRange(layout, m);
+  const nx = clampNum(0, 1, boardRound(range.maxX > range.minX ? (layout.x - range.minX) / (range.maxX - range.minX) : 0, 6));
+  const ny = clampNum(0, 1, boardRound(range.maxY > range.minY ? (layout.y - range.minY) / (range.maxY - range.minY) : 0, 6));
+  const suffix = m.coarse ? 'c' : 'f';
+  item[`nx${suffix}`] = nx;
+  item[`ny${suffix}`] = ny;
+  // Shared coordinates remain as a backward-compatible fallback. Current builds
+  // read the pointer-specific bucket first, so automatic phone repairs cannot
+  // overwrite a desktop placement (or vice versa).
+  item.nx = nx;
+  item.ny = ny;
+  item.boardV = BOARD_SCHEMA_VERSION;
+  // Fixed-reference fallback keeps older builds usable without writing live viewport values.
+  item.x = boardRound(item.nx * Math.max(0, BOARD_BASE_WIDTH - item.w));
+  item.y = boardRound(item.ny * Math.max(0, BOARD_REFERENCE_HEIGHT - item.h));
+}
+
+function boardBuildLayouts(m, migrateLegacy = false) {
+  const layouts = new Map();
+  const placed = [];
+  const seenIds = new Set();
+  let changed = false;
+  let overflowCount = 0;
+  boardItems.forEach((item, index) => {
+    changed = sanitizeBoardItem(item, index, seenIds) || changed;
+    const suffix = m.coarse ? 'c' : 'f';
+    const hadBucket = boardStoredNumberIsValid(item[`nx${suffix}`]) && boardStoredNumberIsValid(item[`ny${suffix}`]);
+    const preferred = boardPreferredLayout(item, m);
+    const repaired = boardFindNearestSlot(preferred, m, placed);
+    if (!repaired) {
+      // There is no honest way to show another accessible-size pin here without
+      // either overlap or clipping. Preserve its data and reveal it again when a
+      // larger layout has room instead of painting it on top of another pin.
+      overflowCount++;
+      return;
+    }
+    layouts.set(item.id, repaired);
+    placed.push(repaired);
+    const displaced = Math.abs(repaired.x - preferred.x) > 0.01 || Math.abs(repaired.y - preferred.y) > 0.01;
+    if (migrateLegacy && (!hadBucket || displaced)) {
+      boardWriteCanonical(item, repaired, m, false);
+      changed = true;
+    }
+  });
+  return { layouts, placed, changed, overflow: overflowCount > 0, overflowCount };
+}
+
+function boardPlaceNewItem(item, origin, m) {
+  const current = boardBuildLayouts(m, true);
+  if (current.overflowCount) return false;
+  sanitizeBoardItem(item, boardItems.length, new Set(boardItems.map(existing => existing.id)));
+  const size = boardEffectiveSize(item, m);
+  const preferred = boardClampLayout({
+    id: item.id,
+    x: boardFinite(origin && origin.x, 0),
+    y: boardFinite(origin && origin.y, 0),
+    w: size.w,
+    h: size.h,
+    rot: item.rot || 0
+  }, m);
+  const slot = boardFindNearestSlot(preferred, m, current.placed);
+  if (!slot) return false;
+  boardWriteCanonical(item, slot, m, false);
+  boardItems.push(item);
+  return true;
 }
 
 function boardDefaultPoint(offset = 0) {
   const m = boardMetrics();
-  const w = 1000, h = m.heightBase;
+  const w = BOARD_BASE_WIDTH, h = m.heightBase;
   return {
     x: Math.max(12, Math.min(w - 190, Math.round(w * 0.5 - 95 + offset))),
     y: Math.max(22, Math.min(h - 120, Math.round(h * 0.45 - 65 + offset)))
@@ -4665,10 +5513,37 @@ function boardPointFromEvent(e, offset = 0) {
   return { x: Math.max(8, Math.round(bx)), y: Math.max(12, Math.round(by)) };
 }
 
-function ensureBoardExpanded() {
+function waitForBoardReady() {
   const banner = document.getElementById('dashboard-banner');
-  if (!banner || banner.classList.contains('expanded')) return;
-  showPanel('dashboard-expanded', 'nav-dashboard-btn');
+  if (!banner || !banner.classList.contains('expanded')) return Promise.resolve();
+  return new Promise((resolve) => {
+    const started = performance.now();
+    let previousHeight = -1;
+    let stableFrames = 0;
+    const check = () => {
+      if (!banner.classList.contains('expanded')) { resolve(); return; }
+      const height = banner.getBoundingClientRect().height;
+      stableFrames = Math.abs(height - previousHeight) < 0.5 ? stableFrames + 1 : 0;
+      previousHeight = height;
+      if ((height > 160 && stableFrames >= 2) || performance.now() - started > 560) { resolve(); return; }
+      requestAnimationFrame(check);
+    };
+    requestAnimationFrame(check);
+  });
+}
+
+function scheduleBoardRenderAfterExpand() {
+  const token = ++boardExpandRenderToken;
+  waitForBoardReady().then(() => {
+    if (token === boardExpandRenderToken && boardExpandedForMigration()) renderBoard();
+  });
+}
+
+async function ensureBoardExpanded() {
+  const banner = document.getElementById('dashboard-banner');
+  if (!banner) return;
+  if (!banner.classList.contains('expanded')) showPanel('dashboard-expanded', 'nav-dashboard-btn');
+  await waitForBoardReady();
 }
 
 function boardFileInput() {
@@ -4750,49 +5625,58 @@ function imageFileToDataUrl(file) {
 }
 
 async function addBoardFiles(files, origin = null) {
-  ensureBoardExpanded();
+  await ensureBoardExpanded();
   origin = origin || boardDefaultPoint();
+  let added = 0;
+  let boardFull = 0;
   for (let i = 0; i < files.length; i++) {
     const f = files[i];
     const isImg = /^image\//.test(f.type) || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(f.name);
-    const iw = isImg ? 220 : 190, ih = isImg ? 160 : 90;
-    const pos = boardFreeSlot(origin.x + i * 26, origin.y + i * 26, iw, ih);
+    const id = 'b' + Date.now() + '-' + i + '-' + Math.random().toString(36).slice(2, 7);
+    let item = { id, type: isImg ? 'image' : 'file', name: f.name, mime: f.type, size: f.size, w: isImg ? 220 : 190, h: isImg ? 160 : 90, x: 0, y: 0 };
     if (window.electronAPI && window.electronAPI.saveBoardFile) {
       try {
         const buf = await f.arrayBuffer();
         const osPath = await window.electronAPI.saveBoardFile(f.name, buf);
-        boardItems.push({ id: 'b' + Date.now() + '-' + i, type: isImg ? 'image' : 'file', path: osPath, name: f.name, x: pos.x, y: pos.y, w: isImg ? 220 : 190, h: isImg ? 160 : 90 });
-        continue;
+        item.path = osPath;
       } catch (_) {}
     }
-    if (isImg) {
+    if (!item.path && isImg) {
       const dataUrl = await imageFileToDataUrl(f);
-      if (dataUrl) {
-        boardItems.push({ id: 'b' + Date.now() + '-' + i, type: 'image', dataUrl, name: f.name, mime: f.type, x: pos.x, y: pos.y, w: 220, h: 160 });
-      }
-    } else {
+      if (!dataUrl) continue;
+      item.dataUrl = dataUrl;
+    } else if (!item.path && !isImg) {
       const fileId = 'bf-' + Date.now() + '-' + i + '-' + Math.random().toString(36).slice(2);
       const stored = await saveBoardBlob(fileId, f);
-      boardItems.push({ id: 'b' + Date.now() + '-' + i, type: 'file', name: f.name, mime: f.type, size: f.size, fileId: stored ? fileId : '', x: pos.x, y: pos.y, w: 190, h: 90 });
+      item.fileId = stored ? fileId : '';
       if (!stored) showAppToast('Pinned the file label, but this phone could not store the file data.', { duration: 6200 });
     }
+    const placed = boardPlaceNewItem(item, { x: origin.x + i * 26, y: origin.y + i * 26 }, boardMetrics());
+    if (placed) added++; else boardFull++;
+  }
+  if (added) {
+    if (!saveBoard()) showAppToast('The board is out of storage space. Remove a large pin and try again.', { duration: 6200 });
+    renderBoard();
+  }
+  if (boardFull) showAppToast(boardFull === 1 ? 'There is no non-overlapping space for that pin.' : `${boardFull} files were not pinned because the board is full.`, { duration: 6200 });
+}
+
+async function addBoardTextPin(text, origin = null) {
+  await ensureBoardExpanded();
+  origin = origin || boardDefaultPoint();
+  const id = 'b' + Date.now();
+  const item = { id, type: 'text', text, x: 0, y: 0, w: 210, h: 130 };
+  if (!boardPlaceNewItem(item, origin, boardMetrics())) {
+    showAppToast('There is no non-overlapping space for another pin.', { duration: 6200 });
+    return false;
   }
   saveBoard();
   renderBoard();
-}
-
-function addBoardTextPin(text, origin = null) {
-  ensureBoardExpanded();
-  origin = origin || boardDefaultPoint();
-  const id = 'b' + Date.now();
-  const pos = boardFreeSlot(origin.x, origin.y, 210, 130);
-  boardItems.push({ id, type: 'text', text, x: pos.x, y: pos.y, w: 210, h: 130 });
-  saveBoard();
-  renderBoard();
   setTimeout(() => {
-    const el = document.querySelector(`[data-board-id="${id}"] .board-text`);
+    const el = document.querySelector(`[data-board-id="${id}"] .board-text-content`);
     if (el) { el.focus(); document.execCommand('selectAll', false, null); }
   }, 80);
+  return true;
 }
 
 window.boardDragOver = function(e) { e.preventDefault(); const b = document.getElementById('dashboard-banner'); if (b) b.classList.add('board-dragover'); };
@@ -4807,7 +5691,7 @@ window.boardDrop = async function(e) {
     await addBoardFiles(files, origin);
   } else {
     const text = (e.dataTransfer.getData('text/plain') || '').trim();
-    if (text) addBoardTextPin(text, origin);
+    if (text) await addBoardTextPin(text, origin);
   }
 };
 
@@ -4827,6 +5711,10 @@ function linkifyText(text) {
 }
 
 function renderBoard() {
+  // Removing a captured element mid-gesture is not guaranteed to dispatch
+  // lostpointercapture in every WebView. Explicitly finish first so no window
+  // listeners or global drag lock survive a navigation/resize re-render.
+  if (cancelActiveBoardGesture) cancelActiveBoardGesture();
   const board = document.getElementById('dashboard-board');
   if (!board) return;
   board.innerHTML = '';
@@ -4838,46 +5726,50 @@ function renderBoard() {
       ? ''
       : 'Drop files, images or notes here — they pin to your board';
   }
-  const banner = document.getElementById('dashboard-banner');
-  const boardWidth = banner ? banner.clientWidth : 1000;
-  const scale = boardWidth / 1000;
+  if (!boardExpandedForMigration()) {
+    activeBoardLayouts = new Map();
+    activeBoardMetrics = null;
+    return;
+  }
 
-  let assigned = false;
+  const m = boardMetrics();
+  const scale = m.scale;
+  const built = boardBuildLayouts(m, true);
+  activeBoardLayouts = built.layouts;
+  activeBoardMetrics = m;
+  if (hint && built.overflow && built.layouts.size === 0) {
+    hint.style.display = '';
+    const label = hint.querySelector('span');
+    if (label) label.textContent = 'These pins need a larger board to stay separate.';
+  }
+  if (built.overflow && !boardOverflowWarned) {
+    boardOverflowWarned = true;
+    const count = built.overflowCount;
+    showAppToast(`${count} ${count === 1 ? 'pin is' : 'pins are'} hidden at this screen size so nothing overlaps. Remove a pin or open the board on a larger screen.`, { duration: 6200 });
+  } else if (!built.overflow) {
+    boardOverflowWarned = false;
+  }
+
   boardItems.forEach(item => {
-    // Give each pinned item a stable slight tilt + pin colour once (never upside-down/90°).
-    if (item.rot === undefined) { item.rot = Math.round((Math.random() * 20 - 10) * 10) / 10; item.pin = Math.floor(Math.random() * BOARD_PIN_COLORS.length); assigned = true; }
-    // Idempotent migration: snap escaped/over-scaled items back in bounds and raise
-    // legacy under-min items up to the new minimum. CRITICAL: only when the banner is
-    // truly expanded with a real height — on a collapsed/.thin (80px) banner the live
-    // clientHeight is not the board's logical canvas, and clamping h/y to it would
-    // permanently squash every card (silent data loss on any window resize while off
-    // the dashboard). When not expanded, render at stored coords and never save.
-    const m = boardMetrics();
-    if (boardExpandedForMigration()) {
-      const ox2 = item.x, oy2 = item.y, ow2 = item.w, oh2 = item.h;
-      item.w = Math.min(Math.max(item.w, m.minWbase), 1000);
-      item.h = Math.min(Math.max(item.h, m.minHbase), m.heightBase);
-      clampBoardPos(item, m);
-      if (item.x !== ox2 || item.y !== oy2 || item.w !== ow2 || item.h !== oh2) assigned = true;
-    }
+    const layout = built.layouts.get(item.id);
+    if (!layout) return;
     const card = document.createElement('div');
-    card.className = 'board-card board-' + item.type;
+    card.className = 'board-card board-card-' + item.type;
     card.dataset.boardId = item.id;
-    card.style.left = (item.x * scale) + 'px'; card.style.top = (item.y * scale) + 'px';
-    card.style.width = (item.w * scale) + 'px'; card.style.height = (item.h * scale) + 'px';
+    card.style.left = (layout.x * scale) + 'px'; card.style.top = (layout.y * scale) + 'px';
+    card.style.width = (layout.w * scale) + 'px'; card.style.height = (layout.h * scale) + 'px';
     card.style.transform = 'rotate(' + (item.rot || 0) + 'deg)';
     let inner = '';
     let imgUrl = '';
     if (item.type === 'image') {
-      imgUrl = item.dataUrl || (window.resolveFileUrl ? window.resolveFileUrl(fileUrlOf(item.path)) : fileUrlOf(item.path));
+      imgUrl = item.dataUrl || (item.path ? (window.resolveFileUrl ? window.resolveFileUrl(fileUrlOf(item.path)) : fileUrlOf(item.path)) : '');
       inner = `<div class="board-body board-img"></div>`;
     }
     else if (item.type === 'file') inner = `<div class="board-body board-file"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg><span>${gsEscape(item.name || 'File')}</span></div>`;
     else {
-      // Split into a non-editable top header drag zone and an editable content area below
-      inner = `<div class="board-body board-text"><div class="board-text-header" style="height:14px; margin-bottom:4px; cursor:grab;"></div><div class="board-text-content" contenteditable="true" style="outline:none; height:calc(100% - 18px); overflow:auto;">${linkifyText(item.text || '')}</div></div>`;
+      inner = `<div class="board-body board-text"><div class="board-text-header" aria-label="Drag pinned note"></div><div class="board-text-content" contenteditable="true">${linkifyText(item.text || '')}</div></div>`;
     }
-    card.innerHTML = `<div class="board-pin">${boardPinSvg(BOARD_PIN_COLORS[item.pin || 0])}</div>` + inner + `<button class="board-del" title="Remove">&times;</button><div class="board-resize"></div>`;
+    card.innerHTML = `<div class="board-pin">${boardPinSvg(BOARD_PIN_COLORS[item.pin || 0])}</div>` + inner + `<button type="button" class="board-del" title="Remove" aria-label="Remove pinned item">&times;</button><div class="board-resize" role="button" aria-label="Resize pinned item" tabindex="0"></div>`;
     const boardImgEl = card.querySelector('.board-img'); if (boardImgEl && imgUrl) boardImgEl.style.backgroundImage = "url('" + imgUrl + "')";
     card.onclick = (ev) => ev.stopPropagation();
     const bodyContentEl = card.querySelector('.board-text-content');
@@ -4898,13 +5790,67 @@ function renderBoard() {
       saveBoard();
       renderBoard();
     };
-    makeBoardCardInteractive(card, item);
+    makeBoardCardInteractive(card, item, layout, m);
     board.appendChild(card);
   });
-  if (assigned) saveBoard();
+  if (built.changed) saveBoard();
 }
 
-function makeBoardCardInteractive(card, item) {
+let cancelActiveBoardGesture = null;
+
+function trackBoardPointer(target, startEvent, onMove, onFinish) {
+  let active = true;
+  const pointerId = startEvent.pointerId;
+  const move = (event) => {
+    if (!active || event.pointerId !== pointerId) return;
+    event.preventDefault();
+    onMove(event);
+  };
+  const finish = (event, cancelled) => {
+    if (!active || (event && event.pointerId !== undefined && event.pointerId !== pointerId)) return;
+    active = false;
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    window.removeEventListener('pointercancel', cancel);
+    window.removeEventListener('blur', blur);
+    window.removeEventListener('pagehide', pagehide);
+    document.removeEventListener('visibilitychange', visibility);
+    target.removeEventListener('lostpointercapture', lostCapture);
+    try { if (target.hasPointerCapture(pointerId)) target.releasePointerCapture(pointerId); } catch (_) {}
+    if (cancelActiveBoardGesture === cancelGesture) cancelActiveBoardGesture = null;
+    window.isDraggingBoardCard = false;
+    onFinish(event, !!cancelled);
+  };
+  const up = event => finish(event, false);
+  const cancel = event => finish(event, true);
+  const blur = () => finish(null, true);
+  const pagehide = () => finish(null, true);
+  const visibility = () => { if (document.hidden) finish(null, true); };
+  const lostCapture = event => finish(event, true);
+  const cancelGesture = () => finish(null, true);
+
+  window.addEventListener('pointermove', move, { passive: false });
+  window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', cancel);
+  window.addEventListener('blur', blur);
+  window.addEventListener('pagehide', pagehide);
+  document.addEventListener('visibilitychange', visibility);
+  target.addEventListener('lostpointercapture', lostCapture);
+  cancelActiveBoardGesture = cancelGesture;
+  try { target.setPointerCapture(pointerId); } catch (_) {}
+}
+
+function applyBoardLayoutToCard(card, layout, m) {
+  card.style.left = (layout.x * m.scale) + 'px';
+  card.style.top = (layout.y * m.scale) + 'px';
+  card.style.width = (layout.w * m.scale) + 'px';
+  card.style.height = (layout.h * m.scale) + 'px';
+  // The drag shadow provides lift. Scaling here would make the painted card
+  // larger than the geometry used for edge and collision checks.
+  card.style.transform = `rotate(${layout.rot || 0}deg)`;
+}
+
+function makeBoardCardInteractive(card, item, initialLayout, m) {
   // Capture clean click event to prevent WebView navigation crash
   card.addEventListener('click', (e) => {
     const link = e.target.closest('a');
@@ -4916,6 +5862,7 @@ function makeBoardCardInteractive(card, item) {
   });
 
   card.addEventListener('pointerdown', (e) => {
+    if (e.button !== undefined && e.button !== 0) return;
     const link = e.target.closest('a');
     if (link) {
       e.preventDefault();
@@ -4924,65 +5871,88 @@ function makeBoardCardInteractive(card, item) {
     }
     if (e.target.closest('.board-resize') || e.target.closest('.board-del')) return;
     if (item.type === 'text' && e.target.closest('.board-text-content')) return; // let text editing work
+    if (window.isDraggingBoardCard) return;
     e.stopPropagation();
     window.isDraggingBoardCard = true;
-
-    const m = boardMetrics();
     const scale = m.scale;
-
-    const sx = e.clientX, sy = e.clientY, ox = item.x, oy = item.y;
-    const rot = item.rot || 0;
-    let moved = false; // a real drag only once the pointer travels past a small threshold
-    try { card.setPointerCapture(e.pointerId); } catch (_) {}
-    const move = (ev) => {
+    const start = { ...initialLayout };
+    const others = [...activeBoardLayouts.values()].filter(layout => layout && layout.id !== item.id);
+    const sx = e.clientX, sy = e.clientY;
+    let moved = false;
+    let blocked = false;
+    let lastValid = { ...start };
+    let lastProposed = { ...start };
+    card.classList.add('dragging');
+    trackBoardPointer(card, e, (ev) => {
       if (!moved) {
-        if (Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) <= 4) return; // still a click
-        moved = true; card.classList.add('dragging'); card.style.transform = 'rotate(' + rot + 'deg) scale(1.03)';
+        const threshold = m.coarse ? 8 : 4;
+        if (Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) <= threshold) return;
+        moved = true;
       }
       const dx = (ev.clientX - sx) / scale;
       const dy = (ev.clientY - sy) / scale;
-      item.x = clampNum(0, 1000 - item.w, Math.round(ox + dx));
-      item.y = clampNum(0, m.heightBase - item.h, Math.round(oy + dy));
-      card.style.left = (item.x * scale) + 'px';
-      card.style.top = (item.y * scale) + 'px';
-    };
-    const up = () => {
-      window.isDraggingBoardCard = false;
-      card.removeEventListener('pointermove', move); card.removeEventListener('pointerup', up);
-      if (moved) { card.classList.remove('dragging'); card.style.transform = 'rotate(' + rot + 'deg)'; saveBoard(); }
-      else if (item.type !== 'text') { openBoardItem(item); } // clean click → open
-    };
-    card.addEventListener('pointermove', move); card.addEventListener('pointerup', up);
+      lastProposed = boardClampLayout({ ...start, x: start.x + dx, y: start.y + dy }, m);
+      if (boardCandidateFits(lastProposed, m, others)) {
+        lastValid = lastProposed;
+        blocked = false;
+        card.classList.remove('board-blocked');
+        applyBoardLayoutToCard(card, lastValid, m, true);
+      } else {
+        blocked = true;
+        card.classList.add('board-blocked');
+      }
+    }, (_event, cancelled) => {
+      card.classList.remove('dragging', 'board-blocked');
+      if (cancelled) { applyBoardLayoutToCard(card, start, m); return; }
+      if (!moved) {
+        applyBoardLayoutToCard(card, start, m, false);
+        if (item.type !== 'text') openBoardItem(item);
+        return;
+      }
+      if (blocked) {
+        const snapped = boardFindNearestSlot(lastProposed, m, others);
+        if (snapped) lastValid = snapped;
+      }
+      boardWriteCanonical(item, lastValid, m, false);
+      saveBoard();
+      renderBoard();
+    });
   });
 
   const handle = card.querySelector('.board-resize');
   if (handle) {
     handle.addEventListener('pointerdown', (e) => {
+      if (e.button !== undefined && e.button !== 0) return;
+      if (window.isDraggingBoardCard) return;
       e.stopPropagation(); e.preventDefault();
       window.isDraggingBoardCard = true;
-
-      const m = boardMetrics();
       const scale = m.scale;
-
-      const sx = e.clientX, sy = e.clientY, ow = item.w, oh = item.h;
-      try { handle.setPointerCapture(e.pointerId); } catch (_) {}
+      const start = { ...initialLayout };
+      const others = [...activeBoardLayouts.values()].filter(layout => layout && layout.id !== item.id);
+      const sx = e.clientX, sy = e.clientY;
+      let lastValid = { ...start };
+      let changedSize = false;
       card.classList.add('dragging');
-      const move = (ev) => {
+      trackBoardPointer(handle, e, (ev) => {
         const dx = (ev.clientX - sx) / scale;
         const dy = (ev.clientY - sy) / scale;
-        item.w = clampNum(m.minWbase, 1000 - item.x, Math.round(ow + dx));
-        item.h = clampNum(m.minHbase, m.heightBase - item.y, Math.round(oh + dy));
-        card.style.width = (item.w * scale) + 'px';
-        card.style.height = (item.h * scale) + 'px';
-      };
-      const up = () => { 
-        window.isDraggingBoardCard = false;
-        card.classList.remove('dragging'); 
-        handle.removeEventListener('pointermove', move); 
-        handle.removeEventListener('pointerup', up); 
-        saveBoard(); 
-      };
-      handle.addEventListener('pointermove', move); handle.addEventListener('pointerup', up);
+        const size = boardEffectiveSize(item, m, start.w + dx, start.h + dy);
+        const candidate = { ...start, w: size.w, h: size.h };
+        if (boardCandidateFits(candidate, m, others)) {
+          lastValid = candidate;
+          changedSize = Math.abs(candidate.w - start.w) > 0.5 || Math.abs(candidate.h - start.h) > 0.5;
+          card.classList.remove('board-blocked');
+          applyBoardLayoutToCard(card, lastValid, m, true);
+        } else {
+          card.classList.add('board-blocked');
+        }
+      }, (_event, cancelled) => {
+        card.classList.remove('dragging', 'board-blocked');
+        if (cancelled || !changedSize) { applyBoardLayoutToCard(card, start, m); return; }
+        boardWriteCanonical(item, lastValid, m, true);
+        saveBoard();
+        renderBoard();
+      });
     });
   }
 }
@@ -5981,18 +6951,59 @@ document.addEventListener('click', (e) => {
   if (isNaN(volume)) volume = 0.5;
   let isOpen = false;
   let eng = null; // engine module namespace (dynamic import)
+  let havenLifetime = 0;
+  let havenSceneRevision = 0;
+  let havenOrientationRevision = 0;
+  let havenOrientationQueue = Promise.resolve();
 
   const SUBS = {
-    cabin: 'Fireplace crackling in a snowed-in log cabin.',
-    beach: 'Waves rolling in under a warm sunset.',
-    city: 'City lights from a quiet high-rise bed.'
+    cabin: 'Rain on the glass, chess by a warm hearth.',
+    beach: 'Moonlit water, warm sand and a lantern by the shore.',
+    city: 'A lived-in blue-hour loft above the city.'
+  };
+  const VIEW_NAMES = {
+    cabin: ['Hearth view', 'Rain window view', 'Reading chair view'],
+    beach: ['Shore lantern view', 'Palm walk and hut view', 'Stargazing view'],
+    city: ['Window desk view', 'Bed at the glass view', 'Sofa sunset view']
   };
 
   function syncUi() {
     const sub = document.getElementById('haven-sub'); if (sub) sub.textContent = SUBS[theme] || '';
     document.querySelectorAll('#haven-fs .haven-theme-btn').forEach(b => b.classList.toggle('active', b.dataset.theme === theme));
-    document.querySelectorAll('#haven-fs .haven-spot').forEach(b => b.classList.toggle('active', +b.dataset.spot === spot));
+    document.querySelectorAll('#haven-fs .haven-spot').forEach(b => {
+      const index = +b.dataset.spot;
+      const label = (VIEW_NAMES[theme] || VIEW_NAMES.cabin)[index] || `View ${index + 1}`;
+      b.classList.toggle('active', index === spot);
+      b.title = label;
+      b.setAttribute('aria-label', label);
+    });
   }
+
+  function setHavenBusy(busy, message = 'Preparing your retreat…', retry = false) {
+    fsEl.classList.toggle('is-loading', !!busy);
+    fsEl.classList.toggle('has-render-error', !!retry);
+    const text = document.getElementById('haven-status-text'); if (text) text.textContent = message;
+    const retryButton = document.getElementById('haven-retry'); if (retryButton) retryButton.hidden = !retry;
+    document.querySelectorAll('#haven-fs .haven-theme-btn, #haven-fs .haven-spot').forEach((button) => {
+      button.disabled = !!busy;
+    });
+  }
+
+  function syncHavenLayoutClasses() {
+    const phone = Capacitor.isNativePlatform() || window.matchMedia('(pointer: coarse)').matches;
+    fsEl.classList.toggle('haven-mobile-lite', phone);
+    fsEl.classList.toggle('haven-phone-landscape', phone && !havenPortrait);
+  }
+
+  function onRenderStatus(event) {
+    if (!isOpen) return;
+    const detail = event.detail || {};
+    if (detail.state === 'ready') setHavenBusy(false);
+    else if (detail.state === 'context-lost' || detail.state === 'error') {
+      setHavenBusy(true, detail.message || 'The scene paused unexpectedly.', true);
+    }
+  }
+  window.addEventListener('haven-render-status', onRenderStatus);
 
   // ---------- Auto-hide UI ----------
   let hideTimer = null;
@@ -6008,6 +7019,7 @@ document.addEventListener('click', (e) => {
   // On phone, open the haven in landscape (it's a wide cinematic space).
   // User can flip to portrait with the rotate button; we don't hard-lock.
   let havenPortrait = false;
+  let havenPreviousOrientation = null;
   async function lockOrientation(orient) {
     if (!Capacitor.isNativePlatform()) return;
     try { await ScreenOrientation.lock({ orientation: orient }); } catch (_) {}
@@ -6016,18 +7028,49 @@ document.addEventListener('click', (e) => {
     if (!Capacitor.isNativePlatform()) return;
     try { await ScreenOrientation.unlock(); } catch (_) {}
   }
+  function requestHavenOrientation(orientation, unlockAfter) {
+    const revision = ++havenOrientationRevision;
+    // Native orientation calls are asynchronous. Serialize them so an old
+    // landscape request cannot settle after a later close/reopen and undo the
+    // newest orientation. Superseded queued requests are skipped entirely.
+    havenOrientationQueue = havenOrientationQueue.catch(() => {}).then(async () => {
+      if (revision !== havenOrientationRevision) return;
+      if (orientation) {
+        await lockOrientation(orientation);
+        // Locking the previous orientation first restores Android's remembered
+        // user_rotation when auto-rotate is disabled; unlocking immediately
+        // afterward also restores normal sensor behavior when it is enabled.
+        if (unlockAfter) await unlockOrientation();
+      } else await unlockOrientation();
+    });
+    return havenOrientationQueue;
+  }
   window.toggleHavenOrientation = function () {
     havenPortrait = !havenPortrait;
-    lockOrientation(havenPortrait ? 'portrait' : 'landscape');
+    requestHavenOrientation(havenPortrait ? 'portrait' : 'landscape');
+    syncHavenLayoutClasses();
     const b = document.getElementById('haven-rotate'); if (b) b.classList.toggle('active', havenPortrait);
   };
 
   window.openHaven = async function () {
     if (isOpen) return;
     isOpen = true;
+    const lifetime = ++havenLifetime;
+    const sceneRevision = ++havenSceneRevision;
     havenPortrait = false;
-    lockOrientation('landscape');
+    havenPreviousOrientation = null;
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const currentOrientation = await ScreenOrientation.orientation();
+        havenPreviousOrientation = currentOrientation && currentOrientation.type || null;
+      } catch (_) {}
+      if (!isOpen || lifetime !== havenLifetime) return;
+    }
+    requestHavenOrientation('landscape');
     fsEl.style.display = 'block';
+    document.body.classList.add('haven-open');
+    syncHavenLayoutClasses();
+    setHavenBusy(true);
     syncUi();
     const vol = document.getElementById('haven-volume'); if (vol) vol.value = volume;
     startAudio();
@@ -6036,18 +7079,35 @@ document.addEventListener('click', (e) => {
     document.addEventListener('pointerdown', pokeUi);
     document.addEventListener('keydown', onKey);
     try {
-      eng = eng || await import('./haven/engine3d.js');
-      await eng.openHaven3D(viewport, theme, spot);
-    } catch (e) { console.error('Safe Haven engine failed to start', e); }
+      const engineModule = eng || await import('./haven/engine.js');
+      // Closing while the split engine chunk is loading used to let this
+      // continuation mount a hidden renderer after the overlay was gone.
+      if (!isOpen || lifetime !== havenLifetime || sceneRevision !== havenSceneRevision) return;
+      eng = engineModule;
+      const ready = await eng.openHaven3D(viewport, theme, spot);
+      if (!isOpen || lifetime !== havenLifetime || sceneRevision !== havenSceneRevision) return;
+      if (ready === false) throw new Error('Safe Haven startup was superseded');
+      setHavenBusy(false);
+    } catch (e) {
+      if (!isOpen || lifetime !== havenLifetime || sceneRevision !== havenSceneRevision) return;
+      console.error('Safe Haven engine failed to start', e);
+      setHavenBusy(true, 'The scene could not start on this device.', true);
+    }
   };
 
   window.closeHaven = function () {
     if (!isOpen) return;
     isOpen = false;
-    unlockOrientation();
+    havenLifetime++;
+    havenSceneRevision++;
+    const restoreOrientation = havenPreviousOrientation;
+    havenPreviousOrientation = null;
+    requestHavenOrientation(restoreOrientation, !!restoreOrientation);
     stopAudio();
     try { if (eng) eng.closeHaven3D(); } catch (_) {}
     fsEl.style.display = 'none';
+    fsEl.classList.remove('is-loading', 'has-render-error', 'haven-phone-landscape', 'haven-mobile-lite');
+    document.body.classList.remove('haven-open');
     clearTimeout(hideTimer);
     document.removeEventListener('mousemove', onMove);
     document.removeEventListener('pointerdown', pokeUi);
@@ -6059,8 +7119,20 @@ document.addEventListener('click', (e) => {
     theme = t; localStorage.setItem('opennotes_haven_theme', t);
     syncUi();
     if (isOpen) {
-      startAudio();
-      try { if (eng) await eng.setHavenTheme3D(t); } catch (e) { console.error(e); }
+      const lifetime = havenLifetime;
+      const sceneRevision = ++havenSceneRevision;
+      setHavenBusy(true, `Preparing ${t === 'city' ? 'the high-rise' : `the ${t}`}…`);
+      try {
+        const ready = eng ? await eng.setHavenTheme3D(t) : false;
+        if (!isOpen || lifetime !== havenLifetime || sceneRevision !== havenSceneRevision || theme !== t) return;
+        if (ready === false) throw new Error('Safe Haven theme change was superseded');
+        if (!document.hidden) startAudio();
+        setHavenBusy(false);
+      } catch (e) {
+        if (!isOpen || lifetime !== havenLifetime || sceneRevision !== havenSceneRevision || theme !== t) return;
+        console.error(e);
+        setHavenBusy(true, 'That scenery could not be prepared.', true);
+      }
     }
   };
 
@@ -6076,12 +7148,44 @@ document.addEventListener('click', (e) => {
   };
 
   window.stopHaven = function () { if (isOpen) window.closeHaven(); };
+  window.retryHaven = async function () {
+    if (!isOpen || !eng) return;
+    const lifetime = havenLifetime;
+    const sceneRevision = ++havenSceneRevision;
+    setHavenBusy(true, 'Restoring the scenery…');
+    try {
+      const ready = await eng.retryHaven3D();
+      if (!isOpen || lifetime !== havenLifetime || sceneRevision !== havenSceneRevision) return;
+      setHavenBusy(!ready, ready ? '' : 'The scenery is still unavailable.', !ready);
+    } catch (error) {
+      if (!isOpen || lifetime !== havenLifetime || sceneRevision !== havenSceneRevision) return;
+      console.error(error);
+      setHavenBusy(true, 'The scenery is still unavailable.', true);
+    }
+  };
 
   // ---------- Procedural ambience (Web Audio; per-theme) ----------
   let actx = null, nodes = [], master = null, crackleTimer = null, audioTimers = [];
-  function noiseBuf(sec) { const b = actx.createBuffer(1, Math.floor(actx.sampleRate * sec), actx.sampleRate); const d = b.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; return b; }
-  // brown-ish noise (softer, for waves/traffic)
-  function brownBuf(sec) { const b = actx.createBuffer(1, Math.floor(actx.sampleRate * sec), actx.sampleRate); const d = b.getChannelData(0); let last = 0; for (let i = 0; i < d.length; i++) { const w = Math.random() * 2 - 1; last = (last + 0.02 * w) / 1.02; d[i] = last * 3.5; } return b; }
+  const ambienceBufferCache = new Map();
+  function ambienceNoise(kind, seconds) {
+    // AudioBuffers are immutable and safe to share across BufferSources. Reuse
+    // them so gulls, traffic and brushed hats do not trigger recurring GC.
+    const duration = Math.max(0.1, Math.ceil(Number(seconds || 0.1) * 4) / 4);
+    const key = `${kind}:${duration}`;
+    if (ambienceBufferCache.has(key)) return ambienceBufferCache.get(key);
+    const buffer = actx.createBuffer(1, Math.floor(actx.sampleRate * duration), actx.sampleRate);
+    const data = buffer.getChannelData(0);
+    let last = 0;
+    for (let i = 0; i < data.length; i++) {
+      const white = Math.random() * 2 - 1;
+      if (kind === 'brown') { last = (last + 0.02 * white) / 1.02; data[i] = last * 3.5; }
+      else data[i] = white;
+    }
+    ambienceBufferCache.set(key, buffer);
+    return buffer;
+  }
+  const noiseBuf = (seconds) => ambienceNoise('white', seconds);
+  const brownBuf = (seconds) => ambienceNoise('brown', seconds);
   function later(fn, ms) { const id = setTimeout(fn, ms); audioTimers.push(id); return id; }
   function stopAudio() {
     if (crackleTimer) { clearTimeout(crackleTimer); crackleTimer = null; }
@@ -6089,6 +7193,13 @@ document.addEventListener('click', (e) => {
     nodes.forEach(n => { try { n.stop && n.stop(); } catch (_) {} try { n.disconnect && n.disconnect(); } catch (_) {} });
     nodes = []; master = null;
   }
+  function onHavenVisibilityChange() {
+    if (!isOpen) return;
+    if (document.hidden) stopAudio();
+    else startAudio();
+  }
+  document.addEventListener('visibilitychange', onHavenVisibilityChange);
+  window.addEventListener('pagehide', stopAudio);
   // one seagull cry: two detuned oscillators swept up then down
   function seagull() {
     if (!actx || theme !== 'beach' || !master) return;
@@ -6776,42 +7887,46 @@ function buildA4ExportContainer(note) {
   return container;
 }
 
-function exportNoteAsImageA4(note) {
+async function exportNoteAsImageA4(note) {
   const toast = showAppToast('Generating A4 image export...', { duration: 0 });
   const container = buildA4ExportContainer(note);
 
-  html2canvas(container, {
-    scale: 2,
-    useCORS: true,
-    logging: false
-  }).then(canvas => {
-    canvas.toBlob(async blob => {
-      container.remove();
-      if (toast) toast.remove();
-      if (blob) {
-        await saveExportFile(`${(note.title || 'Untitled').replace(/[^a-z0-9]/gi, '_').toLowerCase()}.png`, blob);
-        showAppToast('A4 image exported successfully!');
-      }
-    }, 'image/png');
-  }).catch(err => {
+  try {
+    // Export tooling is sizeable and used rarely. Loading it on demand keeps
+    // normal startup, phone navigation and Safe Haven entry noticeably leaner.
+    const { default: html2canvas } = await import('html2canvas');
+    const canvas = await html2canvas(container, {
+      scale: 2,
+      useCORS: true,
+      logging: false
+    });
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+    if (!blob) throw new Error('Image encoder returned no data');
+    await saveExportFile(`${(note.title || 'Untitled').replace(/[^a-z0-9]/gi, '_').toLowerCase()}.png`, blob);
+    showAppToast('A4 image exported successfully!');
+  } catch (err) {
     console.error(err);
+    showAppToast('Failed to generate A4 image export.');
+  } finally {
     container.remove();
     if (toast) toast.remove();
-    showAppToast('Failed to generate A4 image export.');
-  });
+  }
 }
 
-function exportNoteAsPdfA4(note) {
+async function exportNoteAsPdfA4(note) {
   const toast = showAppToast('Generating PDF export...', { duration: 0 });
   const container = buildA4ExportContainer(note);
 
-  html2canvas(container, {
-    scale: 2,
-    useCORS: true,
-    logging: false
-  }).then(canvas => {
-    container.remove();
-
+  try {
+    const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+      import('html2canvas'),
+      import('jspdf')
+    ]);
+    const canvas = await html2canvas(container, {
+      scale: 2,
+      useCORS: true,
+      logging: false
+    });
     const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
     const pageWidth = pdf.internal.pageSize.getWidth();
     const pageHeight = pdf.internal.pageSize.getHeight();
@@ -6842,15 +7957,15 @@ function exportNoteAsPdfA4(note) {
     }
 
     const blob = pdf.output('blob');
-    if (toast) toast.remove();
-    saveExportFile(`${(note.title || 'Untitled').replace(/[^a-z0-9]/gi, '_').toLowerCase()}.pdf`, blob)
-      .then(() => showAppToast('PDF exported successfully!'));
-  }).catch(err => {
+    await saveExportFile(`${(note.title || 'Untitled').replace(/[^a-z0-9]/gi, '_').toLowerCase()}.pdf`, blob);
+    showAppToast('PDF exported successfully!');
+  } catch (err) {
     console.error(err);
+    showAppToast('Failed to generate PDF export.');
+  } finally {
     container.remove();
     if (toast) toast.remove();
-    showAppToast('Failed to generate PDF export.');
-  });
+  }
 }
 
 // -----------------------------------------

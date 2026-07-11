@@ -13,6 +13,14 @@ export default defineSchema({
     token: v.string(),
   }).index("by_token", ["token"]),
 
+  // Per-user monotonic sync cursor. Every KV mutation updates this row in the
+  // same transaction, serializing concurrent writers without relying on wall
+  // clock/commit ordering.
+  syncState: defineTable({
+    userId: v.id("users"),
+    cursor: v.number(),
+  }).index("by_user", ["userId"]),
+
   // One row per localStorage key — keeps every row far under Convex's 1MB doc cap
   kv: defineTable({
     userId: v.id("users"),
@@ -21,7 +29,11 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_user_key", ["userId", "key"])
-    .index("by_user", ["userId"]),
+    .index("by_user", ["userId"])
+    // Lets clients pull only rows changed since their last successful sync.
+    // `updatedAt` is assigned by the mutation on the server, so device clock
+    // skew cannot make a change permanently invisible.
+    .index("by_user_updated", ["userId", "updatedAt"]),
 
   // App-managed files (college PDFs, banner, board files, profile picture),
   // keyed by their unique local filename. Bytes live in Cloudflare R2; here we

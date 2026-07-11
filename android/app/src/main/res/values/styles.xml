@@ -23,9 +23,6 @@
         <item name="android:forceDarkAllowed">false</item>
         <item name="android:textColorHighlight">@color/yn_text_highlight</item>
         <item name="android:colorControlActivated">@color/colorAccent</item>
-        <item name="android:textSelectHandle">@drawable/yn_text_select_handle_middle</item>
-        <item name="android:textSelectHandleLeft">@drawable/yn_text_select_handle_left</item>
-        <item name="android:textSelectHandleRight">@drawable/yn_text_select_handle_right</item>
     </style>
 
 

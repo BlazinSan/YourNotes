@@ -22,15 +22,15 @@ export function build(ctx) {
   const rand = (a, b) => a + Math.random() * (b - a);
 
   // ---------------------------------------------------------------- sky + fog
-  scene.fog = new THREE.FogExp2(0x10182e, 0.0075);
+  scene.fog = new THREE.FogExp2(0x151b36, 0.0065);
 
   const skyTex = makeTex(4, 512, (g, w, h) => {
     const gr = g.createLinearGradient(0, 0, 0, h);
-    gr.addColorStop(0.0, '#0a1230');   // zenith — deep rich blue like the references
-    gr.addColorStop(0.38, '#12204a');
-    gr.addColorStop(0.52, '#1a2a5c');
-    gr.addColorStop(0.60, '#33285e');  // violet band at the skyline
-    gr.addColorStop(0.68, '#1a1a38');
+    gr.addColorStop(0.0, '#101b49');   // rich blue-hour zenith
+    gr.addColorStop(0.34, '#27346c');
+    gr.addColorStop(0.50, '#5a3f86');
+    gr.addColorStop(0.60, '#b95482');  // pink-violet band at the skyline
+    gr.addColorStop(0.68, '#e77b75');
     gr.addColorStop(1.0, '#0a0c18');
     g.fillStyle = gr; g.fillRect(0, 0, w, h);
   });
@@ -41,34 +41,45 @@ export function build(ctx) {
   root.add(sky);
   scene.background = new THREE.Color(0x05070f);
 
+  // One continuous loft, composed as three lived-in zones instead of a prop
+  // showroom: sofa at left, window desk in the middle, bed at right.
+  const W = 12, H = 3.2, D = 8;
+  // Keep the large furniture outside the central sightline. Both pieces used
+  // to sit close enough to the camera that their backs became opaque blocks
+  // in the desk view, especially on portrait screens.
+  const BED_X = 3.62;
+  const SOFA_X = -3.62;
+
   // ---------------------------------------------------------------- lights
-  root.add(new THREE.HemisphereLight(0x38466e, 0x241d33, 0.7));
-  // soft warm ambient so the bed + room read as a cosy lamplit space, not black
-  root.add(new THREE.AmbientLight(0x35283f, 0.5));
+  root.add(new THREE.HemisphereLight(0x91a7d8, 0x5b3a43, 1.42));
+  // A broad, low-cost fill gives every material a readable base value. The
+  // two point lights can then provide warmth without blowing out their lamps.
+  root.add(new THREE.AmbientLight(0x9b7180, 1.02));
 
-  const lampLightL = new THREE.PointLight(0xffb36b, 9, 6.5, 2);
-  lampLightL.position.set(-1.55, 1.05, 1.9);
-  const lampLightR = new THREE.PointLight(0xffb36b, 9, 6.5, 2);
-  lampLightR.position.set(1.55, 1.05, 1.9);
+  // Keep only two dynamic lights on phone: one broad lived-in room pool and
+  // one bedside pool. Earlier both lights sat at the bed, leaving the desk
+  // and sofa as black silhouettes against the glass.
+  const lampLightL = new THREE.PointLight(0xffb87a, 4.05, 8, 2);
+  // This pool belongs to the task lamp/desk zone. Bringing it forward from
+  // the bed reveals the walnut, plant and rug while leaving the BasicMaterial
+  // skyline untouched.
+  lampLightL.position.set(-0.55, 1.7, -1.35);
+  const lampLightR = new THREE.PointLight(0xffaa68, 4.65, 7, 2);
+  lampLightR.position.set(BED_X + 0.75, 1.05, 1.75);
   root.add(lampLightL, lampLightR);
-  // warm fill over the bed so the duvet/pillows catch light
-  const bedFill = new THREE.PointLight(0xffc98a, 3.2, 8, 1.7);
-  bedFill.position.set(0, 1.7, 1.2);
-  root.add(bedFill);
-
-  const coveLight = new THREE.PointLight(0xffb36b, 1.1, 7, 2);
-  coveLight.position.set(0, 2.65, 0.5);
-  root.add(coveLight);
 
   // ---------------------------------------------------------------- room shell
-  const W = 7, H = 3, D = 6; // x, y, z; z runs -3 (glass) .. +3
-  const wallMat = new THREE.MeshLambertMaterial({ color: 0x17131f });
+  const wallMat = new THREE.MeshLambertMaterial({
+    color: 0x574052,
+    emissive: 0x160d16,
+    emissiveIntensity: 0.28,
+  });
 
   const floorTex = makeTex(256, 256, (g, w, h) => {
-    g.fillStyle = '#221913'; g.fillRect(0, 0, w, h);
+    g.fillStyle = '#3b281f'; g.fillRect(0, 0, w, h);
     for (let row = 0; row < 8; row++) {
       const y = row * 32;
-      g.fillStyle = row % 2 ? '#241b14' : '#1f1712';
+      g.fillStyle = row % 2 ? '#432d23' : '#37241d';
       g.fillRect(0, y, w, 32);
       g.strokeStyle = 'rgba(0,0,0,0.55)'; g.lineWidth = 2;
       g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke();
@@ -82,9 +93,14 @@ export function build(ctx) {
     }
   });
   floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
-  floorTex.repeat.set(3, 2.5);
+  floorTex.repeat.set(5, 3.5);
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(W, D),
-    new THREE.MeshLambertMaterial({ map: floorTex, color: 0xbfae9e }));
+    new THREE.MeshLambertMaterial({
+      map: floorTex,
+      color: 0xe0c2ad,
+      emissive: 0x160b07,
+      emissiveIntensity: 0.2,
+    }));
   floor.rotation.x = -Math.PI / 2;
   root.add(floor);
 
@@ -101,25 +117,41 @@ export function build(ctx) {
   root.add(wallL, wallR, wallF);
 
   // ceiling cove — warm emissive perimeter strips
-  const coveMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffb36b).multiplyScalar(1.02) });
+  const coveMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffad68).multiplyScalar(0.82) });
   const coveGeoX = new THREE.BoxGeometry(W - 0.5, 0.03, 0.06);
   const coveGeoZ = new THREE.BoxGeometry(0.06, 0.03, D - 0.5);
-  const cove1 = new THREE.Mesh(coveGeoX, coveMat); cove1.position.set(0, 2.93, D / 2 - 0.22);
-  const cove2 = new THREE.Mesh(coveGeoX, coveMat); cove2.position.set(0, 2.93, -D / 2 + 0.22);
-  const cove3 = new THREE.Mesh(coveGeoZ, coveMat); cove3.position.set(-W / 2 + 0.22, 2.93, 0);
-  const cove4 = new THREE.Mesh(coveGeoZ, coveMat); cove4.position.set(W / 2 - 0.22, 2.93, 0);
+  const cove1 = new THREE.Mesh(coveGeoX, coveMat); cove1.position.set(0, H - 0.07, D / 2 - 0.22);
+  const cove2 = new THREE.Mesh(coveGeoX, coveMat); cove2.position.set(0, H - 0.07, -D / 2 + 0.22);
+  const cove3 = new THREE.Mesh(coveGeoZ, coveMat); cove3.position.set(-W / 2 + 0.22, H - 0.07, 0);
+  const cove4 = new THREE.Mesh(coveGeoZ, coveMat); cove4.position.set(W / 2 - 0.22, H - 0.07, 0);
   root.add(cove1, cove2, cove3, cove4);
 
   // rug
-  const rug = new THREE.Mesh(new THREE.CircleGeometry(1.9, SEG * 2),
-    new THREE.MeshLambertMaterial({ color: 0x2c2740 }));
-  rug.rotation.x = -Math.PI / 2; rug.scale.set(1.35, 1, 1); rug.position.set(0, 0.012, 0.2);
+  const rugTex = makeTex(192, 192, (g, w, h) => {
+    g.fillStyle = '#8c5f72'; g.fillRect(0, 0, w, h);
+    g.strokeStyle = 'rgba(239,188,147,0.48)'; g.lineWidth = 5;
+    for (let y = -w; y < h + w; y += 32) {
+      g.beginPath(); g.moveTo(0, y); g.lineTo(w, y + w); g.stroke();
+    }
+    g.strokeStyle = 'rgba(52,45,77,0.38)'; g.lineWidth = 2;
+    for (let y = -w; y < h + w; y += 32) {
+      g.beginPath(); g.moveTo(0, y + 14); g.lineTo(w, y + w + 14); g.stroke();
+    }
+  });
+  const rugMat = new THREE.MeshLambertMaterial({
+    map: rugTex, color: 0xc4a1aa, emissive: 0x160b13, emissiveIntensity: 0.22
+  });
+  const rug = new THREE.Mesh(new THREE.CircleGeometry(1.9, SEG * 2), rugMat);
+  rug.rotation.x = -Math.PI / 2; rug.scale.set(1.45, 1, 1); rug.position.set(SOFA_X + 0.55, 0.012, -0.35);
   root.add(rug);
+  const deskRug = new THREE.Mesh(new THREE.PlaneGeometry(3.65, 1.35), rugMat);
+  deskRug.rotation.x = -Math.PI / 2; deskRug.position.set(0, 0.013, -1.92);
+  root.add(deskRug);
 
   // soft shadow discs
   const shadowTex = makeTex(128, 128, (g, w, h) => {
     const gr = g.createRadialGradient(64, 64, 4, 64, 64, 62);
-    gr.addColorStop(0, 'rgba(0,0,0,0.55)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    gr.addColorStop(0, 'rgba(0,0,0,0.34)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
     g.fillStyle = gr; g.fillRect(0, 0, w, h);
   });
   const shadowMat = new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthWrite: false });
@@ -128,20 +160,21 @@ export function build(ctx) {
     m.rotation.x = -Math.PI / 2; m.position.set(x, 0.02, z); m.scale.set(sx, sz, 1);
     root.add(m);
   }
-  shadowDisc(0, 1.15, 3.0, 3.0);
-  shadowDisc(-1.55, 1.9, 1.1, 1.1);
-  shadowDisc(1.55, 1.9, 1.1, 1.1);
-  shadowDisc(-2.9, 2.4, 1.2, 1.2);
+  shadowDisc(BED_X, 1.15, 3.0, 3.0);
+  shadowDisc(BED_X - 1.35, 1.9, 1.1, 1.1);
+  shadowDisc(BED_X + 1.35, 1.9, 1.1, 1.1);
+  shadowDisc(SOFA_X, 0.7, 3.4, 1.8);
+  shadowDisc(0, -2.65, 3.4, 1.1);
 
   // ---------------------------------------------------------------- bed
-  const bed = new THREE.Group(); bed.position.set(0, 0, 1.15); root.add(bed);
+  const bed = new THREE.Group(); bed.position.set(BED_X, 0, 1.15); root.add(bed);
 
   const platform = new THREE.Mesh(new THREE.BoxGeometry(2.25, 0.3, 2.35),
-    new THREE.MeshLambertMaterial({ color: 0x241d2c }));
+    new THREE.MeshLambertMaterial({ color: 0x514052, emissive: 0x120b13, emissiveIntensity: 0.24 }));
   platform.position.y = 0.15; bed.add(platform);
 
   const headboard = new THREE.Mesh(new THREE.BoxGeometry(2.35, 1.0, 0.12),
-    new THREE.MeshLambertMaterial({ color: 0x2a2233 }));
+    new THREE.MeshLambertMaterial({ color: 0x665166, emissive: 0x170d17, emissiveIntensity: 0.25 }));
   headboard.position.set(0, 0.65, 1.18); bed.add(headboard);
 
   const duvetTex = makeTex(256, 256, (g, w, h) => {
@@ -166,7 +199,9 @@ export function build(ctx) {
   duvet.position.set(0, 0.36, -0.1);
   bed.add(duvet);
 
-  const pillowMat = new THREE.MeshStandardMaterial({ color: 0xefeaf6, roughness: 1 });
+  const pillowMat = new THREE.MeshStandardMaterial({
+    color: 0xf2e7ec, emissive: 0x180f16, emissiveIntensity: 0.16, roughness: 1
+  });
   const pillowGeo = new THREE.SphereGeometry(1, SEG, SEG);
   for (let i = 0; i < 4; i++) {
     const p = new THREE.Mesh(pillowGeo, pillowMat);
@@ -177,21 +212,25 @@ export function build(ctx) {
   }
 
   const throwB = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.07, 0.55),
-    new THREE.MeshLambertMaterial({ color: 0x6a5a8c }));
+    new THREE.MeshLambertMaterial({ color: 0xb56c62, emissive: 0x210d0c, emissiveIntensity: 0.18 }));
   throwB.position.set(0, 0.51, -0.72); throwB.rotation.x = 0.04;
   bed.add(throwB);
 
   // ---------------------------------------------------------------- nightstands + lamps
-  const standMat = new THREE.MeshLambertMaterial({ color: 0x201a29 });
-  const lampBaseCol = new THREE.Color(0xffcf8a);
-  const shadeMatL = new THREE.MeshBasicMaterial({ color: lampBaseCol.clone().multiplyScalar(3) });
-  const shadeMatR = new THREE.MeshBasicMaterial({ color: lampBaseCol.clone().multiplyScalar(3) });
+  const standMat = new THREE.MeshLambertMaterial({
+    color: 0x6f493c, emissive: 0x160a08, emissiveIntensity: 0.2
+  });
+  const shadeMatL = new THREE.MeshStandardMaterial({
+    color: 0xffd0a0, emissive: 0xff8b49, emissiveIntensity: 0.72,
+    roughness: 0.68, side: THREE.DoubleSide,
+  });
+  const shadeMatR = shadeMatL.clone();
   function nightstand(x, shadeMat) {
     const g = new THREE.Group(); g.position.set(x, 0, 1.9);
     const box = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.5, 0.45), standMat);
     box.position.y = 0.25; g.add(box);
     const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.03, 0.35, 8),
-      new THREE.MeshLambertMaterial({ color: 0x3a3040 }));
+      new THREE.MeshLambertMaterial({ color: 0x6a5558 }));
     stem.position.y = 0.68; g.add(stem);
     const shade = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, 0.2, SEG, 1, true), shadeMat);
     shade.position.y = 0.93; g.add(shade);
@@ -199,13 +238,13 @@ export function build(ctx) {
     cap.rotation.x = -Math.PI / 2; cap.position.y = 1.03; g.add(cap);
     root.add(g);
   }
-  nightstand(-1.55, shadeMatL);
-  nightstand(1.55, shadeMatR);
+  nightstand(BED_X - 1.35, shadeMatL);
+  nightstand(BED_X + 1.35, shadeMatR);
 
   // wall art on front wall above headboard
-  const art = new THREE.Group(); art.position.set(0, 1.95, 2.96); art.rotation.y = Math.PI;
+  const art = new THREE.Group(); art.position.set(BED_X, 1.95, D / 2 - 0.04); art.rotation.y = Math.PI;
   const frame = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.65, 0.03),
-    new THREE.MeshLambertMaterial({ color: 0x0e0b14 }));
+    new THREE.MeshLambertMaterial({ color: 0x765243, emissive: 0x150907, emissiveIntensity: 0.16 }));
   const artTex = makeTex(96, 64, (g, w, h) => {
     const gr = g.createLinearGradient(0, 0, w, h);
     gr.addColorStop(0, '#3a2f55'); gr.addColorStop(0.55, '#6b4a6e'); gr.addColorStop(1, '#c98a5e');
@@ -218,11 +257,13 @@ export function build(ctx) {
   art.add(frame, canvasArt); root.add(art);
 
   // plant silhouette, corner
-  const plant = new THREE.Group(); plant.position.set(-2.9, 0, 2.4);
+  const plant = new THREE.Group(); plant.position.set(-5.2, 0, 2.8);
   const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.14, 0.3, SEG),
-    new THREE.MeshLambertMaterial({ color: 0x241c26 }));
+    new THREE.MeshLambertMaterial({ color: 0x9b5f4b, emissive: 0x160806, emissiveIntensity: 0.18 }));
   pot.position.y = 0.15; plant.add(pot);
-  const leafMat = new THREE.MeshLambertMaterial({ color: 0x1c2a22 });
+  const leafMat = new THREE.MeshLambertMaterial({
+    color: 0x4d745d, emissive: 0x0b1a10, emissiveIntensity: 0.28
+  });
   const leaves = new THREE.Group(); leaves.position.y = 0.3;
   for (let i = 0; i < 5; i++) {
     const leaf = new THREE.Mesh(new THREE.ConeGeometry(0.1, rand(0.7, 1.2), 6), leafMat);
@@ -233,16 +274,110 @@ export function build(ctx) {
   }
   plant.add(leaves); root.add(plant);
 
+  // ---------------------------------------------------------------- window desk
+  const desk = new THREE.Group(); desk.position.set(0, 0, -2.65);
+  const walnut = new THREE.MeshStandardMaterial({
+    color: 0xa96f4d, emissive: 0x29150d, emissiveIntensity: 0.18, roughness: 0.82
+  });
+  const blackMetal = new THREE.MeshStandardMaterial({
+    color: 0x373642, emissive: 0x090913, emissiveIntensity: 0.18, roughness: 0.58, metalness: 0.38
+  });
+  const deskTop = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.1, 0.72), walnut);
+  deskTop.position.y = 0.77; desk.add(deskTop);
+  for (const x of [-1.42, 1.42]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.75, 0.08), blackMetal);
+    leg.position.set(x, 0.375, 0); desk.add(leg);
+  }
+  const laptopBase = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.035, 0.46), blackMetal);
+  laptopBase.position.set(0.35, 0.84, -0.02); desk.add(laptopBase);
+  const laptopScreenMat = new THREE.MeshBasicMaterial({ color: 0x264864 });
+  const laptopScreen = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.44, 0.025), laptopScreenMat);
+  laptopScreen.position.set(0.35, 1.05, -0.24); laptopScreen.rotation.x = -0.18; desk.add(laptopScreen);
+  const screenGlow = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.35),
+    new THREE.MeshBasicMaterial({ color: 0x80b7cc, transparent: true, opacity: 0.42 }));
+  screenGlow.position.set(0.35, 1.055, -0.253); screenGlow.rotation.x = -0.18; desk.add(screenGlow);
+  const taskLampStem = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.025, 0.62, 8), blackMetal);
+  taskLampStem.position.set(-1.08, 1.06, -0.02); taskLampStem.rotation.z = -0.16; desk.add(taskLampStem);
+  const taskLampShade = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.24, 12, 1, true),
+    new THREE.MeshStandardMaterial({
+      color: 0x5a4540, emissive: 0xffa45d, emissiveIntensity: 0.48,
+      roughness: 0.72, side: THREE.DoubleSide,
+    }));
+  taskLampShade.position.set(-1.14, 1.37, -0.02); taskLampShade.rotation.z = Math.PI; desk.add(taskLampShade);
+  for (let i = 0; i < 3; i++) {
+    const book = new THREE.Mesh(new THREE.BoxGeometry(0.34 + i * 0.02, 0.045, 0.22),
+      new THREE.MeshStandardMaterial({ color: [0x875746, 0x435a68, 0xb08a58][i], roughness: 0.9 }));
+    book.position.set(-0.54, 0.84 + i * 0.047, 0.08); book.rotation.y = -0.08 + i * 0.04; desk.add(book);
+  }
+  const deskPot = new THREE.Mesh(new THREE.CylinderGeometry(0.095, 0.075, 0.15, 10),
+    new THREE.MeshStandardMaterial({ color: 0x9b765f, roughness: 0.95 }));
+  deskPot.position.set(1.12, 0.88, 0.02); desk.add(deskPot);
+  for (let i = 0; i < 5; i++) {
+    const leaf = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.3 + i * 0.025, 6), leafMat);
+    leaf.position.set(1.12 + Math.cos(i * 1.25) * 0.06, 1.08, 0.02 + Math.sin(i * 1.25) * 0.05);
+    leaf.rotation.z = Math.cos(i * 1.25) * 0.38; desk.add(leaf);
+  }
+  root.add(desk);
+
+  // ---------------------------------------------------------------- sofa + coffee table
+  const sofa = new THREE.Group(); sofa.position.set(SOFA_X, 0, 0.58);
+  const sofaMat = new THREE.MeshStandardMaterial({
+    color: 0x78849b, emissive: 0x171c2a, emissiveIntensity: 0.18, roughness: 1
+  });
+  const sofaBase = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.38, 1.0), sofaMat);
+  sofaBase.position.y = 0.3; sofa.add(sofaBase);
+  const sofaBack = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.92, 0.26), sofaMat);
+  sofaBack.position.set(0, 0.76, 0.44); sofa.add(sofaBack);
+  for (const x of [-1.42, 1.42]) {
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.55, 1.02), sofaMat);
+    arm.position.set(x, 0.52, 0); sofa.add(arm);
+  }
+  const cushionGeo = new THREE.SphereGeometry(0.5, SEG, Math.max(8, SEG - 2));
+  for (let i = 0; i < 3; i++) {
+    const cushion = new THREE.Mesh(cushionGeo, new THREE.MeshStandardMaterial({
+      color: [0xa96f5c, 0x6d7790, 0xc19a64][i],
+      emissive: [0x1d0c08, 0x101422, 0x231407][i], emissiveIntensity: 0.14,
+      roughness: 1,
+    }));
+    cushion.scale.set(0.86, 0.22, 0.72); cushion.position.set(-0.92 + i * 0.92, 0.58, -0.14); sofa.add(cushion);
+  }
+  // A single draped throw gives the sofa a lived-in silhouette without adding
+  // a costly cloth simulation or a stack of decorative meshes.
+  const sofaThrow = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.055, 1.04),
+    new THREE.MeshStandardMaterial({
+      color: 0xbd765f, emissive: 0x210d08, emissiveIntensity: 0.16, roughness: 1
+    }));
+  sofaThrow.position.set(-0.72, 0.62, -0.03); sofaThrow.rotation.z = -0.06;
+  sofa.add(sofaThrow);
+  root.add(sofa);
+
+  const coffee = new THREE.Group(); coffee.position.set(SOFA_X + 0.68, 0, -1.02);
+  const coffeeTop = new THREE.Mesh(new THREE.CylinderGeometry(0.72, 0.72, 0.07, SEG * 2), walnut);
+  coffeeTop.position.y = 0.42; coffee.add(coffeeTop);
+  const coffeeLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.1, 0.4, 10), blackMetal);
+  coffeeLeg.position.y = 0.2; coffee.add(coffeeLeg);
+  const openBook = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.025, 0.32),
+    new THREE.MeshStandardMaterial({
+      color: 0xeadcc4, emissive: 0x160f08, emissiveIntensity: 0.12, roughness: 0.92
+    }));
+  openBook.position.set(-0.14, 0.48, 0.02); openBook.rotation.y = 0.24; coffee.add(openBook);
+  const coffeeMug = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.05, 0.11, 10),
+    new THREE.MeshStandardMaterial({ color: 0xb17656, roughness: 0.72 }));
+  coffeeMug.position.set(0.35, 0.51, -0.05); coffee.add(coffeeMug);
+  root.add(coffee);
+
   // ---------------------------------------------------------------- glass wall + mullions
   const glass = new THREE.Mesh(new THREE.PlaneGeometry(W, H),
-    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.06, depthWrite: false }));
+    new THREE.MeshBasicMaterial({ color: 0xd8e4ff, transparent: true, opacity: 0.035, depthWrite: false }));
   glass.position.set(0, H / 2, -D / 2 + 0.02);
   glass.renderOrder = 10;
   root.add(glass);
 
-  const mullionMat = new THREE.MeshLambertMaterial({ color: 0x0c0a12 });
+  const mullionMat = new THREE.MeshLambertMaterial({
+    color: 0x252130, emissive: 0x090713, emissiveIntensity: 0.16
+  });
   const mullionGeo = new THREE.BoxGeometry(0.06, H, 0.09);
-  [-2.1, -0.7, 0.7, 2.1].forEach(x => {
+  [-4.5, -3, -1.5, 0, 1.5, 3, 4.5].forEach(x => {
     const m = new THREE.Mesh(mullionGeo, mullionMat);
     m.position.set(x, H / 2, -D / 2 + 0.02); root.add(m);
   });
@@ -263,7 +398,7 @@ export function build(ctx) {
     map: streakTex, transparent: true, opacity: 0.05,
     blending: THREE.AdditiveBlending, depthWrite: false
   });
-  [-1.55, 1.55].forEach(x => {
+  [BED_X - 1.35, BED_X + 1.35].forEach(x => {
     const s = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 2.4), streakMat);
     s.position.set(x, 1.4, -D / 2 + 0.04); s.renderOrder = 11;
     root.add(s);
@@ -470,7 +605,6 @@ export function build(ctx) {
   root.add(rain);
 
   // ---------------------------------------------------------------- update (no per-frame allocations)
-  const _shadeCol = new THREE.Color();
   let nextSwap = 0;
   const swapCount = () => 2 + (Math.random() < 0.5 ? 1 : 0);
 
@@ -479,12 +613,10 @@ export function build(ctx) {
 
     // lamp flicker — subtle warm breathing
     const n1 = Math.sin(t * 13.7) * 0.5 + Math.sin(t * 7.3 + 1.7) * 0.35 + Math.sin(t * 2.1) * 0.15;
-    lampLightL.intensity = 6 * (1 + 0.05 * n1);
-    lampLightR.intensity = 6 * (1 + 0.05 * Math.sin(t * 11.3 + 2.4));
-    _shadeCol.copy(lampBaseCol).multiplyScalar(3 + 0.22 * n1);
-    shadeMatL.color.copy(_shadeCol);
-    _shadeCol.copy(lampBaseCol).multiplyScalar(3 + 0.22 * Math.sin(t * 11.3 + 2.4));
-    shadeMatR.color.copy(_shadeCol);
+    lampLightL.intensity = 4.05 * (1 + 0.035 * n1);
+    lampLightR.intensity = 4.65 * (1 + 0.035 * Math.sin(t * 11.3 + 2.4));
+    shadeMatL.emissiveIntensity = 0.72 * (1 + 0.045 * n1);
+    shadeMatR.emissiveIntensity = 0.72 * (1 + 0.045 * Math.sin(t * 11.3 + 2.4));
 
     // near-tower window twinkle: every 0.5-1s swap 2-3 instances lit<->unlit
     if (t > nextSwap) {
@@ -529,21 +661,34 @@ export function build(ctx) {
 
   // ---------------------------------------------------------------- seats
   const seats = [
-    { // lying in bed, gazing over the duvet at the skyline
-      pos: [0, 1.25, 1.6], look: [0, 1.05, -9]
+    {
+      // Window desk: a clean centre aisle frames the laptop and skyline while
+      // the bed and sofa remain small, readable edge vignettes.
+      desktop: { pos: [0, 1.52, 2.32], look: [0, 0.92, -5.1], fov: 58 },
+      phoneLandscape: { pos: [0, 1.5, 2.72], look: [0, 0.91, -5.2], fov: 60 },
+      portrait: { pos: [0, 1.56, 3.2], look: [0, 0.9, -5.05], fov: 64 },
     },
-    { // sitting on the bed edge by the right lamp, looking diagonally across the glass
-      pos: [1.25, 1.2, 1.05], look: [-2.6, 1.0, -7]
+    {
+      // Bed-at-the-glass: viewed diagonally from its open side so the duvet is
+      // a cosy lower-right foreground detail, never a wall across the image.
+      desktop: { pos: [-0.9, 2.0, 4.55], look: [3.35, 0.66, 0.0], fov: 54 },
+      phoneLandscape: { pos: [-0.55, 1.92, 4.8], look: [3.3, 0.7, 0.0], fov: 57 },
+      portrait: { pos: [-0.15, 2.08, 5.55], look: [3.15, 0.72, 0.05], fov: 62 },
     },
-    { // standing at the glass on the left, city below and ahead
-      pos: [-2.35, 1.48, -2.15], look: [-4.5, -0.5, -18]
-    }
+    {
+      // Sofa viewpoint: the camera now sits at the cushion rather than behind
+      // the opaque backrest. The book, mug and blue-hour city lead the frame.
+      desktop: { pos: [-3.62, 1.03, 0.08], look: [-1.35, 1.15, -6.6], fov: 55 },
+      phoneLandscape: { pos: [-3.5, 1.08, 0.3], look: [-1.3, 1.14, -6.7], fov: 57 },
+      portrait: { pos: [-3.34, 1.15, 0.62], look: [-1.18, 1.12, -6.3], fov: 62 },
+    },
   ];
 
   return {
     seats,
     update,
     dispose,
-    bloom: { strength: 0.45, radius: 0.4, threshold: 0.85 }
+    exposure: 1.08,
+    bloom: { strength: 0.15, radius: 0.24, threshold: 1.0 }
   };
 }

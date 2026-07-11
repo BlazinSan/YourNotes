@@ -1,5 +1,5 @@
-// cabin.js — LOG CABIN AT NIGHT
-// Cozy snowed-in interior: hot amber hearth vs deep blue winter dark outside.
+// cabin.js — RAINY LOG CABIN AT NIGHT
+// Intimate amber hearth against a cool, rain-washed pine forest.
 import * as THREE from 'three';
 
 export function build(ctx) {
@@ -127,31 +127,53 @@ export function build(ctx) {
     const grd = g.createLinearGradient(0, 0, 0, h);
     grd.addColorStop(0, '#0b1424'); grd.addColorStop(0.55, '#16233d'); grd.addColorStop(1, '#22335a');
     g.fillStyle = grd; g.fillRect(0, 0, w, h);
-    // stars
-    for (let i = 0; i < 120; i++) {
-      g.fillStyle = `rgba(220,230,255,${rand(0.25, 0.9)})`;
-      g.fillRect(rand(0, w), rand(0, h * 0.6), 1.6, 1.6);
-    }
-    // moon glow (matches emissive disc placed at u=0.65, v=0.7)
-    const mg = g.createRadialGradient(w * 0.65, h * 0.3, 4, w * 0.65, h * 0.3, 110);
-    mg.addColorStop(0, 'rgba(210,225,255,0.9)');
-    mg.addColorStop(0.25, 'rgba(160,185,235,0.4)');
-    mg.addColorStop(1, 'rgba(120,150,210,0)');
+    // Cloud-filtered moon glow. The soft pool of light reads through wet glass
+    // without turning the exterior into a star-field backdrop.
+    const mg = g.createRadialGradient(w * 0.68, h * 0.25, 4, w * 0.68, h * 0.25, 150);
+    mg.addColorStop(0, 'rgba(210,225,235,0.7)');
+    mg.addColorStop(0.3, 'rgba(120,155,185,0.24)');
+    mg.addColorStop(1, 'rgba(80,115,140,0)');
     g.fillStyle = mg; g.fillRect(0, 0, w, h);
-    // snow ground
-    g.fillStyle = '#9cb0d0'; g.fillRect(0, h * 0.82, w, h * 0.18);
-    // pine silhouettes
-    g.fillStyle = '#0a1220';
-    for (let i = 0; i < 16; i++) {
-      const x = rand(0, w), base = h * rand(0.8, 0.86), ph = rand(70, 150), pw = ph * 0.45;
+    // layered wet forest floor and mist
+    g.fillStyle = '#10211f'; g.fillRect(0, h * 0.78, w, h * 0.22);
+    const mist = g.createLinearGradient(0, h * 0.58, 0, h * 0.9);
+    mist.addColorStop(0, 'rgba(130,160,165,0)');
+    mist.addColorStop(0.52, 'rgba(130,160,165,0.16)');
+    mist.addColorStop(1, 'rgba(40,70,65,0)');
+    g.fillStyle = mist; g.fillRect(0, h * 0.5, w, h * 0.45);
+    // pine silhouettes in three depths
+    for (let layer = 0; layer < 3; layer++) {
+      g.fillStyle = ['#142c2b', '#0d2323', '#08191a'][layer];
+      const count = 10 + layer * 4;
+      for (let i = 0; i < count; i++) {
+        const x = rand(-20, w + 20), base = h * rand(0.79, 0.9), ph = rand(90, 190) * (0.8 + layer * 0.16), pw = ph * 0.42;
       for (let tier = 0; tier < 3; tier++) {
         const ty = base - ph * tier * 0.28, s = 1 - tier * 0.26;
         g.beginPath();
         g.moveTo(x - pw * s, ty); g.lineTo(x, ty - ph * 0.55 * s); g.lineTo(x + pw * s, ty);
         g.closePath(); g.fill();
       }
+      }
     }
   });
+
+  const rainGlassTex = makeTex(256, 512, (g, w, h) => {
+    g.clearRect(0, 0, w, h);
+    for (let i = 0; i < 74; i++) {
+      const x = rand(4, w - 4), y = rand(0, h), r = rand(1.2, 4.6);
+      const drop = g.createRadialGradient(x - r * 0.35, y - r * 0.45, 0.2, x, y, r);
+      drop.addColorStop(0, 'rgba(235,248,255,0.82)');
+      drop.addColorStop(0.38, 'rgba(160,195,210,0.34)');
+      drop.addColorStop(1, 'rgba(110,155,175,0)');
+      g.fillStyle = drop; g.beginPath(); g.ellipse(x, y, r * 0.72, r, 0, 0, TAU); g.fill();
+      if (i % 5 === 0) {
+        g.strokeStyle = 'rgba(185,220,230,0.2)';
+        g.lineWidth = Math.max(0.7, r * 0.28);
+        g.beginPath(); g.moveTo(x, y + r); g.bezierCurveTo(x + rand(-2, 2), y + 10, x + rand(-3, 3), y + 22, x + rand(-2, 2), y + rand(28, 58)); g.stroke();
+      }
+    }
+  });
+  rainGlassTex.wrapT = THREE.RepeatWrapping;
 
   const dotTex = makeTex(64, 64, (g, w, h) => {
     const grd = g.createRadialGradient(32, 32, 2, 32, 32, 30);
@@ -169,13 +191,8 @@ export function build(ctx) {
   scene.add(hemi);
   // gentle warm ambient so nothing sits in pure black (the references glow softly)
   scene.add(new THREE.AmbientLight(0x54381f, 0.7));
-  // broad warm fill so the whole room reads as fire-lit, not just the hearth
-  const roomFill = new THREE.PointLight(0xffa258, 4.6, 17, 1.5);
-  roomFill.position.set(0, 1.9, -0.6);
-  scene.add(roomFill);
-  const roomFill2 = new THREE.PointLight(0xffb070, 2.4, 14, 1.6);
-  roomFill2.position.set(0, 1.7, 2.2);
-  scene.add(roomFill2);
+  // Materials carry a low warm emissive fill; only the hearth and window use
+  // dynamic lights, keeping the phone scene predictable and inexpensive.
 
   // ------------------------------------------------------------------ room
   // A touch of emissive keyed to the wood texture lifts the walls/floor out of
@@ -330,10 +347,6 @@ export function build(ctx) {
     fl.position.set(cx, 1.93, -3.1); scene.add(fl);
     candleFlames.push(fl);
   }
-  const candleLight = new THREE.PointLight(0xffd9a0, 1.0, 4.2, 2);
-  candleLight.position.set(0, 1.98, -3.0);
-  scene.add(candleLight);
-
   const wreath = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.055, 8, SEG),
     new THREE.MeshStandardMaterial({ color: 0x234020, roughness: 1 }));
   wreath.position.set(0, 2.42, -2.98); scene.add(wreath);
@@ -364,7 +377,13 @@ export function build(ctx) {
   glass.rotation.y = Math.PI / 2; glass.position.set(-3.02, 1.7, 0);
   scene.add(glass);
 
-  // winter night backdrop + emissive moon
+  const wetGlass = new THREE.Mesh(new THREE.PlaneGeometry(1.58, 1.38),
+    new THREE.MeshBasicMaterial({ map: rainGlassTex, transparent: true, opacity: 0.72, depthWrite: false }));
+  wetGlass.rotation.y = Math.PI / 2; wetGlass.position.set(-2.965, 1.7, 0);
+  wetGlass.renderOrder = 8;
+  scene.add(wetGlass);
+
+  // rain-dark forest backdrop + clouded moon
   const backdrop = new THREE.Mesh(new THREE.PlaneGeometry(6, 4),
     new THREE.MeshBasicMaterial({ map: nightTex }));
   backdrop.rotation.y = Math.PI / 2; backdrop.position.set(-5.1, 1.9, 0);
@@ -379,21 +398,25 @@ export function build(ctx) {
   moonLight.position.set(-2.6, 1.9, 0.2);
   scene.add(moonLight);
 
-  // falling snow just outside the window
-  const SNOW_N = mobile ? 150 : 300;
-  const snowGeo = new THREE.BufferGeometry();
-  const sPos = new Float32Array(SNOW_N * 3);
-  const sBX = new Float32Array(SNOW_N), sSpd = new Float32Array(SNOW_N), sPh = new Float32Array(SNOW_N);
-  for (let i = 0; i < SNOW_N; i++) {
-    sBX[i] = rand(-4.7, -3.3); sSpd[i] = rand(0.25, 0.55); sPh[i] = rand(0, TAU);
-    sPos[i * 3] = sBX[i]; sPos[i * 3 + 1] = rand(0.1, 3.4); sPos[i * 3 + 2] = rand(-2.4, 1.6);
+  // Instanced-looking line field outside the window. One LineSegments draw call
+  // is enough for the full rain curtain.
+  const RAIN_N = mobile ? 90 : 170;
+  const rainGeo = new THREE.BufferGeometry();
+  const rainPos = new Float32Array(RAIN_N * 6);
+  const rainBaseX = new Float32Array(RAIN_N), rainBaseZ = new Float32Array(RAIN_N);
+  const rainSpeed = new Float32Array(RAIN_N), rainPhase = new Float32Array(RAIN_N);
+  for (let i = 0; i < RAIN_N; i++) {
+    rainBaseX[i] = rand(-4.85, -3.18); rainBaseZ[i] = rand(-2.3, 1.8);
+    rainSpeed[i] = rand(1.5, 2.8); rainPhase[i] = rand(0, TAU);
+    const y = rand(0.05, 3.55), p = i * 6;
+    rainPos[p] = rainBaseX[i]; rainPos[p + 1] = y; rainPos[p + 2] = rainBaseZ[i];
+    rainPos[p + 3] = rainBaseX[i] + 0.025; rainPos[p + 4] = y - 0.16; rainPos[p + 5] = rainBaseZ[i] + 0.01;
   }
-  snowGeo.setAttribute('position', new THREE.BufferAttribute(sPos, 3));
-  const snow = new THREE.Points(snowGeo, new THREE.PointsMaterial({
-    size: 0.035, map: dotTex, color: 0xcfd8ea, transparent: true,
-    opacity: 0.85, depthWrite: false
+  rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPos, 3));
+  const rain = new THREE.LineSegments(rainGeo, new THREE.LineBasicMaterial({
+    color: 0x9fc4d0, transparent: true, opacity: 0.4, depthWrite: false,
   }));
-  scene.add(snow);
+  scene.add(rain);
 
   // window nook bench
   const bench = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.4, 1.5), darkWood);
@@ -404,45 +427,104 @@ export function build(ctx) {
   shadow(0.5, -2.72, 0.4, 1, 1.7, 0.005);
 
   // ------------------------------------------------------------- furniture
-  // plush armchair facing the fire
-  const chair = new THREE.Group();
-  const fabric = new THREE.MeshStandardMaterial({ color: 0x5c3131, roughness: 1 });
-  const seat = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.42, 0.85), fabric);
-  seat.position.y = 0.24; chair.add(seat);
+  // Two deep chairs form a conversational nook, but both physically face the
+  // fireplace (local forward is -Z). Earlier builds rotated the only chair by
+  // PI, leaving its back toward the hearth.
+  const fabricLeft = new THREE.MeshStandardMaterial({
+    color: 0x66755b, emissive: 0x172016, emissiveIntensity: 0.26, roughness: 1
+  });
+  const fabricRight = new THREE.MeshStandardMaterial({
+    color: 0x7b5147, emissive: 0x24130f, emissiveIntensity: 0.25, roughness: 1
+  });
   const sphGeo = new THREE.SphereGeometry(0.5, SEG, Math.max(8, SEG - 4));
-  const back = new THREE.Mesh(sphGeo, fabric);
-  back.scale.set(0.95, 0.85, 0.34); back.position.set(0, 0.72, 0.38); chair.add(back);
-  for (const ax of [-0.5, 0.5]) {
-    const arm = new THREE.Mesh(sphGeo, fabric);
-    arm.scale.set(0.22, 0.42, 0.8); arm.position.set(ax, 0.5, 0.05); chair.add(arm);
+  function makeChair(material, x, z, rotation, withThrow) {
+    const chair = new THREE.Group();
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.4, 0.82), material);
+    seat.position.y = 0.23; chair.add(seat);
+    const back = new THREE.Mesh(sphGeo, material);
+    back.scale.set(0.92, 0.82, 0.33); back.position.set(0, 0.7, 0.37); chair.add(back);
+    for (const ax of [-0.47, 0.47]) {
+      const arm = new THREE.Mesh(sphGeo, material);
+      arm.scale.set(0.2, 0.4, 0.76); arm.position.set(ax, 0.48, 0.04); chair.add(arm);
+    }
+    const cushion = new THREE.Mesh(sphGeo, new THREE.MeshStandardMaterial({
+      color: material === fabricLeft ? 0x7d8c70 : 0x925e52,
+      emissive: material === fabricLeft ? 0x182217 : 0x291511,
+      emissiveIntensity: 0.2,
+      roughness: 1,
+    }));
+    cushion.scale.set(0.77, 0.15, 0.68); cushion.position.set(0, 0.46, -0.03); chair.add(cushion);
+    if (withThrow) {
+      const throwBlanket = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.045, 0.64),
+        new THREE.MeshStandardMaterial({ color: 0xc5a16f, roughness: 1 }));
+      throwBlanket.position.set(0.42, 0.7, 0.06); throwBlanket.rotation.z = 0.32; throwBlanket.rotation.y = 0.12;
+      chair.add(throwBlanket);
+    }
+    chair.position.set(x, 0, z); chair.rotation.y = rotation;
+    scene.add(chair);
+    shadow(0.68, x, z, 1.02, 0.92, 0.007);
+    return chair;
   }
-  const cushion = new THREE.Mesh(sphGeo, new THREE.MeshStandardMaterial({ color: 0x6d3c3c, roughness: 1 }));
-  cushion.scale.set(0.82, 0.16, 0.72); cushion.position.set(0, 0.48, -0.02); chair.add(cushion);
-  const throwB = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.05, 0.7),
-    new THREE.MeshStandardMaterial({ color: 0xc9a06a, roughness: 1 }));
-  throwB.position.set(0.5, 0.74, 0.05); throwB.rotation.z = 0.35; throwB.rotation.y = 0.15;
-  chair.add(throwB);
-  chair.position.set(0, 0, 2.75); chair.rotation.y = Math.PI;
-  scene.add(chair);
-  shadow(0.72, 0, 2.75, 1.05, 0.95, 0.007);
+  // Leave a genuine sightline through the pair: the board should be readable
+  // from the entry and window views, while the slight inward toe keeps both
+  // seats unmistakably aimed at the hearth rather than at the camera.
+  const chairLeft = makeChair(fabricLeft, -1.24, 0.82, -0.2, true);
+  const chairRight = makeChair(fabricRight, 1.24, 0.82, 0.2, false);
 
-  // side table + steaming mug
+  // Tea table, steaming mug and an actual low-draw-call chess set between the
+  // chairs. This creates one lived-in story cluster instead of scattered props.
+  const TABLE_X = 0.04, TABLE_Z = 0.02;
   const table = new THREE.Group();
-  const top = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.04, SEG), darkWood);
+  const top = new THREE.Mesh(new THREE.CylinderGeometry(0.54, 0.54, 0.055, SEG * 2), darkWood);
   top.position.y = 0.52; table.add(top);
-  const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.05, 0.5, Math.max(6, SEG / 2)), darkWood);
+  const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.08, 0.5, Math.max(6, SEG / 2)), darkWood);
   leg.position.y = 0.26; table.add(leg);
-  const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.18, 0.03, SEG), darkWood);
+  const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.25, 0.035, SEG), darkWood);
   foot.position.y = 0.015; table.add(foot);
   const mug = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.04, 0.09, Math.max(8, SEG / 2)),
     new THREE.MeshStandardMaterial({ color: 0xa33c2f, roughness: 0.6 }));
-  mug.position.y = 0.585; table.add(mug);
+  mug.position.set(0.39, 0.595, 0.08); table.add(mug);
   const handle = new THREE.Mesh(new THREE.TorusGeometry(0.028, 0.008, 6, 10),
     mug.material);
-  handle.position.set(0.05, 0.585, 0); table.add(handle);
-  table.position.set(1.35, 0, 2.3);
+  handle.position.set(0.44, 0.595, 0.08); table.add(handle);
+
+  const chessTex = makeTex(256, 256, (g, w, h) => {
+    const cell = w / 8;
+    for (let row = 0; row < 8; row++) for (let col = 0; col < 8; col++) {
+      g.fillStyle = (row + col) % 2 ? '#4b2d1b' : '#d0b27d';
+      g.fillRect(col * cell, row * cell, cell, cell);
+    }
+    g.strokeStyle = '#241307'; g.lineWidth = 10; g.strokeRect(5, 5, w - 10, h - 10);
+  });
+  const chessBoard = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.026, 0.5),
+    new THREE.MeshStandardMaterial({ map: chessTex, roughness: 0.82 }));
+  chessBoard.position.y = 0.57; table.add(chessBoard);
+
+  const pieceGeo = new THREE.CylinderGeometry(0.018, 0.033, 0.075, 7);
+  const lightPieces = new THREE.InstancedMesh(pieceGeo,
+    new THREE.MeshStandardMaterial({ color: 0xe1d4b9, roughness: 0.68 }), 16);
+  const darkPieces = new THREE.InstancedMesh(pieceGeo,
+    new THREE.MeshStandardMaterial({ color: 0x251915, roughness: 0.75 }), 16);
+  const pieceMatrix = new THREE.Matrix4();
+  for (let side = 0; side < 2; side++) {
+    const mesh = side ? darkPieces : lightPieces;
+    let index = 0;
+    for (let row = 0; row < 2; row++) for (let col = 0; col < 8; col++) {
+      const rank = side ? 7 - row : row;
+      const heightScale = row === 0 ? (1.18 + (3.5 - Math.abs(3.5 - col)) * 0.08) : 0.86;
+      pieceMatrix.compose(
+        new THREE.Vector3(-0.21875 + col * 0.0625, 0.622, -0.21875 + rank * 0.0625),
+        new THREE.Quaternion(), new THREE.Vector3(1, heightScale, 1),
+      );
+      mesh.setMatrixAt(index++, pieceMatrix);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    table.add(mesh);
+  }
+
+  table.position.set(TABLE_X, 0, TABLE_Z);
   scene.add(table);
-  shadow(0.3, 1.35, 2.3, 1, 1, 0.008);
+  shadow(0.56, TABLE_X, TABLE_Z, 1, 1, 0.008);
 
   // steam wisps
   const STEAM_N = 7;
@@ -451,7 +533,7 @@ export function build(ctx) {
   const stPh = new Float32Array(STEAM_N);
   for (let i = 0; i < STEAM_N; i++) {
     stPh[i] = rand(0, TAU);
-    stPos[i * 3] = 1.35; stPos[i * 3 + 1] = rand(0.64, 1.05); stPos[i * 3 + 2] = 2.3;
+    stPos[i * 3] = TABLE_X + 0.39; stPos[i * 3 + 1] = rand(0.66, 1.02); stPos[i * 3 + 2] = TABLE_Z + 0.08;
   }
   stGeo.setAttribute('position', new THREE.BufferAttribute(stPos, 3));
   const steam = new THREE.Points(stGeo, new THREE.PointsMaterial({
@@ -563,7 +645,7 @@ export function build(ctx) {
   // ----------------------------------------------------------------- update
   const posAttr = emberGeo.getAttribute('position');
   const colAttr = emberGeo.getAttribute('color');
-  const snowAttr = snowGeo.getAttribute('position');
+  const rainAttr = rainGeo.getAttribute('position');
   const steamAttr = stGeo.getAttribute('position');
 
   function update(t, dt) {
@@ -581,8 +663,7 @@ export function build(ctx) {
       fp.scale.x = 1 + 0.07 * Math.sin(t * 11.7 + i * 2.6);
     }
 
-    // candles
-    candleLight.intensity = 0.5 + 0.1 * Math.sin(t * 9.7) + 0.06 * Math.sin(t * 15.3 + 2.0);
+    // candles are emissive-only so the room stays at two dynamic lights
     candleFlames[0].scale.y = 1 + 0.25 * Math.sin(t * 11.0);
     candleFlames[1].scale.y = 1 + 0.25 * Math.sin(t * 12.4 + 3.3);
 
@@ -605,15 +686,17 @@ export function build(ctx) {
     posAttr.needsUpdate = true;
     colAttr.needsUpdate = true;
 
-    // snow outside the window
-    for (let i = 0; i < SNOW_N; i++) {
-      const i3 = i * 3;
-      let y = sPos[i3 + 1] - sSpd[i] * dt;
-      if (y < 0.05) y += 3.35;
-      sPos[i3 + 1] = y;
-      sPos[i3] = sBX[i] + 0.14 * Math.sin(t * 0.6 + sPh[i]);
+    // rain outside + slower wet-glass drift in the near plane
+    for (let i = 0; i < RAIN_N; i++) {
+      const p = i * 6;
+      let y = rainPos[p + 1] - rainSpeed[i] * dt;
+      if (y < 0.05) y += 3.5;
+      const x = rainBaseX[i] + Math.sin(t * 0.7 + rainPhase[i]) * 0.025;
+      rainPos[p] = x; rainPos[p + 1] = y; rainPos[p + 2] = rainBaseZ[i];
+      rainPos[p + 3] = x + 0.025; rainPos[p + 4] = y - 0.16; rainPos[p + 5] = rainBaseZ[i] + 0.01;
     }
-    snowAttr.needsUpdate = true;
+    rainAttr.needsUpdate = true;
+    rainGlassTex.offset.y = -(t * 0.012) % 1;
 
     // mug steam
     for (let i = 0; i < STEAM_N; i++) {
@@ -621,8 +704,8 @@ export function build(ctx) {
       let y = stPos[i3 + 1] + 0.12 * dt;
       if (y > 1.08) y = 0.64;
       stPos[i3 + 1] = y;
-      stPos[i3] = 1.35 + 0.03 * Math.sin(t * 1.3 + stPh[i] + y * 5.0);
-      stPos[i3 + 2] = 2.3 + 0.03 * Math.cos(t * 1.1 + stPh[i]);
+      stPos[i3] = TABLE_X + 0.39 + 0.03 * Math.sin(t * 1.3 + stPh[i] + y * 5.0);
+      stPos[i3 + 2] = TABLE_Z + 0.08 + 0.03 * Math.cos(t * 1.1 + stPh[i]);
     }
     steamAttr.needsUpdate = true;
 
@@ -642,9 +725,23 @@ export function build(ctx) {
 
   // ------------------------------------------------------------------ seats
   const seats = [
-    { pos: [0.55, 1.62, 3.15], look: [-0.1, 0.95, -3.0] },  // cosy establishing shot: rug, chair, table + fire
-    { pos: [-2.05, 1.35, 1.2], look: [-3.0, 1.7, -0.3] },   // window nook, moonlit corner + snow
-    { pos: [2.35, 1.2, 1.9], look: [-1.4, 1.05, -2.6] }     // by the bookshelf, fire + room in frame
+    {
+      desktop: { pos: [0.0, 1.84, 4.9], look: [0, 0.86, -2.65], fov: 54 },
+      phoneLandscape: { pos: [0.0, 1.74, 5.15], look: [0, 0.88, -2.7], fov: 55 },
+      portrait: { pos: [0.05, 1.88, 5.8], look: [0, 0.9, -2.55], fov: 60 },
+    },
+    {
+      // Requested left-side composition: droplets and frame close at left;
+      // the two fire-facing chairs, chess table and hearth recede to the right.
+      desktop: { pos: [-1.6, 1.86, 2.7], look: [-2.1, 1.04, -1.8], fov: 68 },
+      phoneLandscape: { pos: [-1.55, 1.82, 2.82], look: [-2.0, 1.04, -1.78], fov: 70 },
+      portrait: { pos: [-1.5, 1.9, 2.82], look: [-2.08, 1.04, -1.72], fov: 86 },
+    },
+    {
+      desktop: { pos: [2.48, 1.42, 3.35], look: [-0.28, 0.9, -2.78], fov: 55 },
+      phoneLandscape: { pos: [2.56, 1.38, 3.7], look: [-0.24, 0.92, -2.78], fov: 56 },
+      portrait: { pos: [2.42, 1.48, 4.32], look: [-0.2, 0.94, -2.62], fov: 61 },
+    },
   ];
 
   function dispose() { /* no timers or listeners; engine disposes GPU resources */ }
@@ -653,6 +750,7 @@ export function build(ctx) {
     seats,
     update,
     dispose,
-    bloom: { strength: 1.05, radius: 0.55, threshold: 0.75 }
+    exposure: 1.02,
+    bloom: { strength: 0.34, radius: 0.34, threshold: 0.9 }
   };
 }

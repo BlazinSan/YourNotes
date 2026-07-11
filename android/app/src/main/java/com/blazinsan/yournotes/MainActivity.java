@@ -4,9 +4,10 @@ import android.content.res.Configuration;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
-import android.view.Display;
+import android.util.Log;
+import android.view.ViewGroup;
+import android.view.ViewParent;
 import android.view.Window;
-import android.view.WindowManager;
 import androidx.activity.OnBackPressedCallback;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
@@ -23,29 +24,39 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         applyInitialSystemBarStyle();
-        preferHighestRefreshRate();
         installWebBackHandler();
         installRenderCrashRecovery();
     }
 
-    // The WebView renderer occasionally dies (OOM on huge images, autofill CHECK
-    // crashes on some OEM WebView builds). Without this handler Android kills the
-    // whole app — with it we reload the page and the user just sees the UI
-    // restart, data intact (everything persists in localStorage/native store).
+    // A WebView whose renderer has exited is permanently unusable. Remove and
+    // destroy that instance, then recreate the Activity so Capacitor constructs a
+    // fresh Bridge/WebView. Calling reload() on the dead WebView is unsupported.
     private void installRenderCrashRecovery() {
         Bridge bridge = getBridge();
         if (bridge == null || bridge.getWebView() == null) return;
         bridge.getWebView().setWebViewClient(new BridgeWebViewClient(bridge) {
             @Override
             public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
-                view.post(() -> {
+                String rendererDetails = "details unavailable below API 26";
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    rendererDetails = "didCrash=" + detail.didCrash()
+                            + ", priority=" + detail.rendererPriorityAtExit();
+                }
+                Log.e("YourNotes", "WebView renderer exited; recreating activity. "
+                        + rendererDetails);
+                runOnUiThread(() -> {
                     try {
-                        view.reload();
-                    } catch (Throwable t) {
-                        recreate();
+                        ViewParent parent = view.getParent();
+                        if (parent instanceof ViewGroup) {
+                            ((ViewGroup) parent).removeView(view);
+                        }
+                        view.destroy();
+                    } catch (Throwable cleanupError) {
+                        Log.e("YourNotes", "Failed to clean up dead WebView", cleanupError);
                     }
+                    if (!isFinishing() && !isDestroyed()) recreate();
                 });
-                return true; // handled — do NOT kill the app process
+                return true;
             }
         });
     }
@@ -86,26 +97,4 @@ public class MainActivity extends BridgeActivity {
         );
     }
 
-    private void preferHighestRefreshRate() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
-            return;
-        }
-
-        Display display = getWindowManager().getDefaultDisplay();
-        Display.Mode current = display.getMode();
-        Display.Mode best = current;
-
-        for (Display.Mode mode : display.getSupportedModes()) {
-            boolean sameResolution = mode.getPhysicalWidth() == current.getPhysicalWidth()
-                    && mode.getPhysicalHeight() == current.getPhysicalHeight();
-            if (sameResolution && mode.getRefreshRate() > best.getRefreshRate()) {
-                best = mode;
-            }
-        }
-
-        WindowManager.LayoutParams attrs = getWindow().getAttributes();
-        attrs.preferredDisplayModeId = best.getModeId();
-        attrs.preferredRefreshRate = best.getRefreshRate();
-        getWindow().setAttributes(attrs);
-    }
 }

@@ -10,7 +10,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   storeLoadFailed: () => ipcRenderer.sendSync('store-load-failed'),
   saveBoardFile: (name, buffer) => ipcRenderer.invoke('save-board-file', name, buffer),
   readFileBytes: (p) => ipcRenderer.invoke('read-file-bytes', p),
-  openPath: (p) => ipcRenderer.send('open-path', p),
+  // Await the OS hand-off so the renderer can distinguish a successful open
+  // from a blocked type, missing association, or shell error.
+  openPath: (p) => ipcRenderer.invoke('open-path', p),
   fileExists: (p) => ipcRenderer.sendSync('file-exists-sync', p),
   tokenGet: () => ipcRenderer.sendSync('token-get-sync'),
   tokenSet: (t) => ipcRenderer.sendSync('token-set-sync', t),

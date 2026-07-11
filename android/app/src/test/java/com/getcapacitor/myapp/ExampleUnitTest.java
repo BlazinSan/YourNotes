@@ -1,4 +1,4 @@
-package com.getcapacitor.myapp;
+package com.blazinsan.yournotes;
 
 import static org.junit.Assert.*;
 

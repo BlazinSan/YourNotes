@@ -1,9 +1,9 @@
 {
   "desktopName": "yournotes.desktop",
   "name": "yournotes",
-  "version": "0.0.0",
-  "author": "rajsriv <raj2005sriv@gmail.com>",
-  "homepage": "https://github.com/rajsriv/OpenNotes",
+  "version": "0.0.3",
+  "author": "BlazinSan <hammau05@gmail.com>",
+  "homepage": "https://github.com/BlazinSan/YourNotes",
   "private": true,
   "type": "module",
   "main": "electron-main.cjs",
@@ -17,18 +17,18 @@
     "package:linux": "npm run build && electron-builder -l"
   },
   "devDependencies": {
-    "@capacitor/assets": "^3.0.5",
     "@capacitor/cli": "^8.4.1",
     "chrome-remote-interface": "^0.34.0",
     "concurrently": "^10.0.3",
-    "electron": "^42.4.0",
-    "electron-builder": "^26.15.2",
-    "vite": "^8.0.12",
+    "electron": "^43.1.0",
+    "electron-builder": "^26.15.3",
+    "vite": "^8.1.4",
     "wait-on": "^9.0.10"
   },
   "dependencies": {
     "@capacitor/android": "^8.4.1",
     "@capacitor/core": "^8.4.1",
+    "@capacitor/file-viewer": "^2.0.1",
     "@capacitor/filesystem": "^8.1.2",
     "@capacitor/preferences": "^8.0.1",
     "@capacitor/screen-orientation": "^8.0.1",
@@ -37,7 +37,7 @@
     "convex": "^1.42.1",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",
-    "marked": "^18.0.5",
+    "marked": "^18.0.6",
     "three": "^0.185.1"
   },
   "build": {
