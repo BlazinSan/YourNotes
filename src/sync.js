@@ -708,6 +708,29 @@ function blobToDataUrl(blob) {
   });
 }
 
+function dataUrlToBlob(dataUrl, expectedMime = "application/octet-stream") {
+  const source = String(dataUrl || "");
+  const comma = source.indexOf(",");
+  if (comma < 5 || !source.toLowerCase().startsWith("data:")) {
+    throw new Error("Could not prepare embedded file for R2");
+  }
+  const header = source.slice(5, comma);
+  const parts = header.split(";");
+  const mime = String(parts[0] || expectedMime || "application/octet-stream").toLowerCase();
+  const encoded = source.slice(comma + 1);
+  try {
+    if (parts.some((part) => part.toLowerCase() === "base64")) {
+      const binary = atob(encoded);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+      return new Blob([bytes], { type: mime });
+    }
+    return new Blob([decodeURIComponent(encoded)], { type: mime });
+  } catch {
+    throw new Error(`Could not decode embedded ${mime} for R2`);
+  }
+}
+
 async function sha256Hex(bytes) {
   if (!(globalThis.crypto && globalThis.crypto.subtle)) throw new Error("This device cannot securely hash an R2 upload");
   const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
@@ -736,12 +759,10 @@ async function externalizeInlineData(value, assetMap) {
     let marker = replacements.get(dataUrl);
     if (!marker) {
       const mime = String(match[1] || "application/octet-stream").toLowerCase();
-      const response = await fetch(dataUrl);
-      if (!response.ok) throw new Error(`Could not prepare ${mime} for R2`);
-      const buffer = await response.arrayBuffer();
+      const blob = dataUrlToBlob(dataUrl, mime);
+      const buffer = await blob.arrayBuffer();
       const hash = await sha256Hex(buffer);
       const localKey = `inline/${hash}`;
-      const blob = new Blob([buffer], { type: mime });
       marker = `yn-r2://${localKey}?type=${encodeURIComponent(mime)}`;
       replacements.set(dataUrl, marker);
       if (!assetMap.has(localKey)) {
@@ -756,8 +777,7 @@ async function externalizeInlineData(value, assetMap) {
           loadBody: async () => {
             const cached = await cachedInlineBlob(localKey);
             if (cached) return cached;
-            const fallback = await fetch(dataUrl);
-            return fallback.ok ? fallback.blob() : null;
+            return dataUrlToBlob(dataUrl, mime);
           },
         });
         await cacheInlineBlob(localKey, blob);
@@ -881,11 +901,20 @@ async function uploadR2Objects(token, objects) {
         continue;
       }
       const contentType = body.type || object.contentType || "application/octet-stream";
-      const response = await fetchWithTimeout(target.url, {
-        method: "PUT",
-        body,
-        headers: { "content-type": contentType },
-      }, 30000, "R2 upload");
+      let response;
+      if (window.electronAPI && window.electronAPI.putR2) {
+        response = await withTimeout(
+          window.electronAPI.putR2(target.url, contentType, await body.arrayBuffer()),
+          30000,
+          "R2 upload"
+        );
+      } else {
+        response = await fetchWithTimeout(target.url, {
+          method: "PUT",
+          body,
+          headers: { "content-type": contentType },
+        }, 30000, "R2 upload");
+      }
       if (!response.ok) throw new Error(`R2 upload failed (${response.status})`);
       registered.push({
         localKey: object.localKey,

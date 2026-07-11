@@ -8,7 +8,7 @@ import { Share } from '@capacitor/share'
 
 // Android uses the phone's native text-selection handles and action mode.
 // Keep the former web toolbar implementation dormant for older experiments.
-const IS_ANDROID_APP = false;
+const IS_ANDROID_APP = /Android/i.test(navigator.userAgent) && !!window.Capacitor;
 
 // Global drop/dragover safety net: without this, dropping a file anywhere the
 // app doesn't have its own handler falls through to the OS default, which in
@@ -3052,7 +3052,24 @@ function captureAndroidSelection() {
 function showAndroidSelectionActions(snapshot) {
   if (!snapshot || !String(snapshot.text || '').trim()) return;
   androidSelectionSnapshot = snapshot;
-  ensureAndroidSelectionActions().classList.add('is-visible');
+  const bar = ensureAndroidSelectionActions();
+  bar.classList.add('is-visible');
+  requestAnimationFrame(() => {
+    const rect = snapshot.type === 'range'
+      ? snapshot.range.getBoundingClientRect()
+      : snapshot.element.getBoundingClientRect();
+    const half = Math.max(80, bar.offsetWidth / 2);
+    const x = Math.max(half + 8, Math.min(innerWidth - half - 8, rect.left + rect.width / 2));
+    const above = rect.top - bar.offsetHeight - 10;
+    const y = above >= 8 ? above : Math.min(innerHeight - bar.offsetHeight - 8, rect.bottom + 10);
+    bar.style.left = `${x}px`;
+    bar.style.top = `${Math.max(8, y)}px`;
+  });
+}
+
+function paintAndroidSelection(range) {
+  if (!CSS.highlights || typeof Highlight === 'undefined') return;
+  CSS.highlights.set('yn-phone-selection', new Highlight(range));
 }
 
 function androidWordBounds(value, requestedOffset) {
@@ -3128,11 +3145,7 @@ function applyAndroidLongPressSelection(pointer) {
 
   const range = androidRangeAtPoint(target, pointer.x, pointer.y);
   if (!range || !String(range.toString()).trim()) return;
-  androidApplyingSelection = true;
-  const selection = window.getSelection();
-  selection.removeAllRanges();
-  selection.addRange(range);
-  androidApplyingSelection = false;
+  paintAndroidSelection(range);
   showAndroidSelectionActions({ type: 'range', element: target, range: range.cloneRange(), text: range.toString() });
 }
 
@@ -3151,9 +3164,7 @@ function restoreAndroidSelection(snapshot) {
     }
     return true;
   }
-  const selection = window.getSelection();
-  selection.removeAllRanges();
-  selection.addRange(snapshot.range);
+  paintAndroidSelection(snapshot.range);
   return true;
 }
 
@@ -3186,7 +3197,7 @@ function hideAndroidSelectionActions(clearSelection = false) {
         try { androidSelectionSnapshot.element.setSelectionRange(end, end); } catch (_) {}
       }
     } else {
-      window.getSelection()?.removeAllRanges();
+      CSS.highlights?.delete('yn-phone-selection');
     }
   }
   androidSelectionSnapshot = null;
@@ -3223,9 +3234,8 @@ function ensureAndroidSelectionActions() {
       } else {
         const range = document.createRange();
         range.selectNodeContents(snapshot.element);
-        const selection = window.getSelection();
-        selection.removeAllRanges();
-        selection.addRange(range);
+        paintAndroidSelection(range);
+        showAndroidSelectionActions({ ...snapshot, range, text: range.toString() });
       }
       if (snapshot.type !== 'field') setTimeout(updateAndroidSelectionActions, 0);
       return;
@@ -3294,8 +3304,8 @@ if (IS_ANDROID_APP) {
   document.addEventListener('selectstart', (event) => {
     if (!androidApplyingSelection && editableSelectionTarget(event.target)) event.preventDefault();
   }, true);
-  document.addEventListener('selectionchange', () => setTimeout(updateAndroidSelectionActions, 0));
-  document.addEventListener('select', () => setTimeout(updateAndroidSelectionActions, 0), true);
+  // Native selection events are deliberately not observed here: the Android
+  // WebView action window is suppressed and our highlight owns this lifecycle.
   document.addEventListener('focusout', () => setTimeout(updateAndroidSelectionActions, 80), true);
 }
 
@@ -4914,6 +4924,7 @@ function showBoardViewer(item, src, isBlob = false) {
   closeBoardViewer();
   const isImage = item.type === 'image' || /^image\//.test(item.mime || '') || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(item.name || '');
   const isPdf = /pdf/i.test(item.mime || '') || /\.pdf$/i.test(item.name || '');
+  const isVideo = /^video\//.test(item.mime || '') || /\.(mp4|webm|m4v|mov)$/i.test(item.name || '');
   const overlay = document.createElement('div');
   overlay.className = `board-viewer-overlay ${isImage ? 'board-viewer-image' : ''} ${isPdf ? 'board-viewer-pdf' : ''}`;
   if (isBlob) overlay.dataset.blobUrl = src;
@@ -4931,11 +4942,12 @@ function showBoardViewer(item, src, isBlob = false) {
       </div>
       <div class="board-viewer-body">
         ${isImage ? `<div class="board-viewer-img-wrap"><img src="${src}" alt="${gsEscape(item.name || 'Pinned image')}"></div>` : ''}
+        ${isVideo ? `<div class="board-viewer-video-wrap"><video src="${src}" controls playsinline preload="metadata"></video></div>` : ''}
         ${!isImage && isPdf ? `<iframe src="${iframeSrc}" title="${gsEscape(item.name || 'Pinned file')}"></iframe>` : ''}
-        ${!isImage && !isPdf ? `<div class="board-viewer-file"><svg viewBox="0 0 24 24" width="42" height="42" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg><span>${gsEscape(item.name || 'Pinned file')}</span></div>` : ''}
+        ${!isImage && !isPdf && !isVideo ? `<div class="board-viewer-file"><svg viewBox="0 0 24 24" width="42" height="42" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg><span>${gsEscape(item.name || 'Pinned file')}</span></div>` : ''}
       </div>
       <div class="board-viewer-actions">
-        <button type="button" class="board-viewer-open">Open file</button>
+        <button type="button" class="board-viewer-open">Open externally</button>
       </div>
     </div>
   `;
@@ -5081,7 +5093,8 @@ async function openBoardItem(item) {
     const localPath = desktopPath(item.path);
     const exists = window.electronAPI.fileExists ? window.electronAPI.fileExists(localPath) : true;
     if (exists) {
-      return await openElectronPath(localPath, item.name || 'pinned-file');
+      openBoardResolved(item, fileUrlOf(localPath));
+      return true;
     }
   }
   // 2) inline data URL (small images pinned on mobile/web)
@@ -5129,7 +5142,9 @@ const BOARD_BASE_WIDTH = 1000;
 const BOARD_REFERENCE_HEIGHT = 700; // legacy x/y fallback only; never viewport-derived
 const BOARD_SCHEMA_VERSION = 3;
 const BOARD_FINE_MIN_CSS = { w: 120, h: 88 };
-const BOARD_COARSE_MIN_CSS = { w: 132, h: 96 }; // 3 independent 44px interaction zones
+// 84x64 keeps a 44px delete/resize target plus useful preview/drag area without
+// making two ordinary pins mathematically impossible on a narrow phone.
+const BOARD_COARSE_MIN_CSS = { w: 84, h: 64 };
 const BOARD_PIN_OVERHANG_CSS = 16;
 const BOARD_EDGE_INSET_CSS = 4;
 const BOARD_ITEM_GAP_CSS = 10;
@@ -5163,13 +5178,14 @@ function boardMetrics() {
   const banner = document.getElementById('dashboard-banner');
   const boardWidth = Math.max(1, boardFinite(banner && banner.clientWidth, BOARD_BASE_WIDTH));
   const boardHeight = Math.max(1, boardFinite(banner && banner.clientHeight, BOARD_REFERENCE_HEIGHT));
-  const scale = Math.max(0.01, boardWidth / BOARD_BASE_WIDTH);
   const coarse = window.matchMedia('(pointer: coarse)').matches;
+  const scale = Math.max(coarse ? 0.55 : 0.01, Math.min(1, boardWidth / BOARD_BASE_WIDTH));
   const minCss = coarse ? BOARD_COARSE_MIN_CSS : BOARD_FINE_MIN_CSS;
+  const heightBase = Math.max(BOARD_REFERENCE_HEIGHT, 700 + Math.max(0, Math.ceil(boardItems.length / 8) - 1) * 300);
   return {
     scale,
     coarse,
-    heightBase: Math.max(1, boardHeight / scale),
+    heightBase,
     minWbase: minCss.w / scale,
     minHbase: minCss.h / scale,
     pinOverhangBase: BOARD_PIN_OVERHANG_CSS / scale,
@@ -5341,18 +5357,12 @@ function boardPreferredLayout(item, m) {
   const size = boardEffectiveSize(item, m);
   const base = { id: item.id, x: 0, y: 0, w: size.w, h: size.h, rot: item.rot || 0 };
   const range = boardPositionRange(base, m);
-  const suffix = m.coarse ? 'c' : 'f';
-  const bucketX = Number(item[`nx${suffix}`]);
-  const bucketY = Number(item[`ny${suffix}`]);
   const sharedX = Number(item.nx);
   const sharedY = Number(item.ny);
-  const hasBucket = boardStoredNumberIsValid(item[`nx${suffix}`]) && boardStoredNumberIsValid(item[`ny${suffix}`]);
   const hasShared = boardStoredNumberIsValid(item.nx) && boardStoredNumberIsValid(item.ny);
-  if (hasBucket || hasShared) {
-    const nx = hasBucket ? bucketX : sharedX;
-    const ny = hasBucket ? bucketY : sharedY;
-    base.x = range.minX + clampNum(0, 1, nx) * Math.max(0, range.maxX - range.minX);
-    base.y = range.minY + clampNum(0, 1, ny) * Math.max(0, range.maxY - range.minY);
+  if (hasShared) {
+    base.x = range.minX + clampNum(0, 1, sharedX) * Math.max(0, range.maxX - range.minX);
+    base.y = range.minY + clampNum(0, 1, sharedY) * Math.max(0, range.maxY - range.minY);
   } else {
     base.x = boardFinite(item.x, range.minX);
     base.y = boardFinite(item.y, range.minY);
@@ -5430,12 +5440,6 @@ function boardWriteCanonical(item, layout, m, sizeChanged = false) {
   const range = boardPositionRange(layout, m);
   const nx = clampNum(0, 1, boardRound(range.maxX > range.minX ? (layout.x - range.minX) / (range.maxX - range.minX) : 0, 6));
   const ny = clampNum(0, 1, boardRound(range.maxY > range.minY ? (layout.y - range.minY) / (range.maxY - range.minY) : 0, 6));
-  const suffix = m.coarse ? 'c' : 'f';
-  item[`nx${suffix}`] = nx;
-  item[`ny${suffix}`] = ny;
-  // Shared coordinates remain as a backward-compatible fallback. Current builds
-  // read the pointer-specific bucket first, so automatic phone repairs cannot
-  // overwrite a desktop placement (or vice versa).
   item.nx = nx;
   item.ny = ny;
   item.boardV = BOARD_SCHEMA_VERSION;
@@ -5452,8 +5456,7 @@ function boardBuildLayouts(m, migrateLegacy = false) {
   let overflowCount = 0;
   boardItems.forEach((item, index) => {
     changed = sanitizeBoardItem(item, index, seenIds) || changed;
-    const suffix = m.coarse ? 'c' : 'f';
-    const hadBucket = boardStoredNumberIsValid(item[`nx${suffix}`]) && boardStoredNumberIsValid(item[`ny${suffix}`]);
+    const hadPosition = boardStoredNumberIsValid(item.nx) && boardStoredNumberIsValid(item.ny);
     const preferred = boardPreferredLayout(item, m);
     const repaired = boardFindNearestSlot(preferred, m, placed);
     if (!repaired) {
@@ -5466,7 +5469,7 @@ function boardBuildLayouts(m, migrateLegacy = false) {
     layouts.set(item.id, repaired);
     placed.push(repaired);
     const displaced = Math.abs(repaired.x - preferred.x) > 0.01 || Math.abs(repaired.y - preferred.y) > 0.01;
-    if (migrateLegacy && (!hadBucket || displaced)) {
+    if (migrateLegacy && !hadPosition) {
       boardWriteCanonical(item, repaired, m, false);
       changed = true;
     }
@@ -5734,6 +5737,8 @@ function renderBoard() {
 
   const m = boardMetrics();
   const scale = m.scale;
+  board.style.width = `${BOARD_BASE_WIDTH * scale}px`;
+  board.style.height = `${m.heightBase * scale}px`;
   const built = boardBuildLayouts(m, true);
   activeBoardLayouts = built.layouts;
   activeBoardMetrics = m;
@@ -5742,13 +5747,7 @@ function renderBoard() {
     const label = hint.querySelector('span');
     if (label) label.textContent = 'These pins need a larger board to stay separate.';
   }
-  if (built.overflow && !boardOverflowWarned) {
-    boardOverflowWarned = true;
-    const count = built.overflowCount;
-    showAppToast(`${count} ${count === 1 ? 'pin is' : 'pins are'} hidden at this screen size so nothing overlaps. Remove a pin or open the board on a larger screen.`, { duration: 6200 });
-  } else if (!built.overflow) {
-    boardOverflowWarned = false;
-  }
+  boardOverflowWarned = built.overflow;
 
   boardItems.forEach(item => {
     const layout = built.layouts.get(item.id);
@@ -5800,15 +5799,26 @@ let cancelActiveBoardGesture = null;
 
 function trackBoardPointer(target, startEvent, onMove, onFinish) {
   let active = true;
+  let frame = 0;
+  let pendingMove = null;
   const pointerId = startEvent.pointerId;
   const move = (event) => {
     if (!active || event.pointerId !== pointerId) return;
     event.preventDefault();
-    onMove(event);
+    pendingMove = event;
+    if (!frame) frame = requestAnimationFrame(() => {
+      frame = 0;
+      const next = pendingMove;
+      pendingMove = null;
+      if (active && next) onMove(next);
+    });
   };
   const finish = (event, cancelled) => {
     if (!active || (event && event.pointerId !== undefined && event.pointerId !== pointerId)) return;
     active = false;
+    if (frame) cancelAnimationFrame(frame);
+    frame = 0;
+    pendingMove = null;
     window.removeEventListener('pointermove', move);
     window.removeEventListener('pointerup', up);
     window.removeEventListener('pointercancel', cancel);
@@ -5914,8 +5924,9 @@ function makeBoardCardInteractive(card, item, initialLayout, m) {
         if (snapped) lastValid = snapped;
       }
       boardWriteCanonical(item, lastValid, m, false);
+      activeBoardLayouts.set(item.id, { ...lastValid });
       saveBoard();
-      renderBoard();
+      applyBoardLayoutToCard(card, lastValid, m);
     });
   });
 
@@ -5950,8 +5961,9 @@ function makeBoardCardInteractive(card, item, initialLayout, m) {
         card.classList.remove('dragging', 'board-blocked');
         if (cancelled || !changedSize) { applyBoardLayoutToCard(card, start, m); return; }
         boardWriteCanonical(item, lastValid, m, true);
+        activeBoardLayouts.set(item.id, { ...lastValid });
         saveBoard();
-        renderBoard();
+        applyBoardLayoutToCard(card, lastValid, m);
       });
     });
   }
@@ -6823,10 +6835,14 @@ function openPicCropper(img) {
   overlay.className = 'pic-crop-overlay';
   overlay.innerHTML = `
     <div class="pic-crop-card">
-      <h4>Position your photo</h4>
-      <p>Drag to move · scroll or slide to zoom</p>
-      <div class="pic-crop-stage"><canvas width="340" height="340"></canvas><div class="pic-crop-mask"></div></div>
-      <input type="range" class="pic-crop-zoom" min="1" max="4" step="0.01" value="1" />
+      <header class="pic-crop-header"><div><h4>Edit profile photo</h4><p>Drag the image to frame your face</p></div><button class="pic-crop-x" aria-label="Close">×</button></header>
+      <div class="pic-crop-stage"><canvas width="420" height="420"></canvas><div class="pic-crop-mask"></div></div>
+      <div class="pic-crop-tools" aria-label="Photo controls">
+        <button type="button" data-crop-zoom="out" aria-label="Zoom out">−</button>
+        <input type="range" class="pic-crop-zoom" aria-label="Zoom" min="1" max="4" step="0.01" value="1" />
+        <button type="button" data-crop-zoom="in" aria-label="Zoom in">+</button>
+        <button type="button" data-crop-reset>Reset</button>
+      </div>
       <div class="pic-crop-actions">
         <button class="pic-crop-cancel">Cancel</button>
         <button class="pic-crop-save">Save photo</button>
@@ -6835,7 +6851,7 @@ function openPicCropper(img) {
   document.body.appendChild(overlay);
   const canvas = overlay.querySelector('canvas'), ctx = canvas.getContext('2d');
   const zoomEl = overlay.querySelector('.pic-crop-zoom');
-  const S = 340;
+  const S = 420;
   // cover-fit base scale, then user zoom on top
   const base = Math.max(S / img.width, S / img.height);
   let zoom = 1, ox = 0, oy = 0; // offsets in canvas px
@@ -6860,9 +6876,15 @@ function openPicCropper(img) {
   stage.addEventListener('pointerup', () => { dragging = false; });
   stage.addEventListener('wheel', (e) => { e.preventDefault(); zoom = Math.min(4, Math.max(1, zoom * (e.deltaY < 0 ? 1.08 : 1 / 1.08))); zoomEl.value = zoom; draw(); }, { passive: false });
   zoomEl.addEventListener('input', () => { zoom = parseFloat(zoomEl.value); draw(); });
+  overlay.querySelectorAll('[data-crop-zoom]').forEach(button => button.onclick = () => {
+    zoom = Math.min(4, Math.max(1, zoom + (button.dataset.cropZoom === 'in' ? 0.15 : -0.15)));
+    zoomEl.value = zoom; draw();
+  });
+  overlay.querySelector('[data-crop-reset]').onclick = () => { zoom = 1; ox = 0; oy = 0; zoomEl.value = '1'; draw(); };
 
   const close = () => overlay.remove();
   overlay.querySelector('.pic-crop-cancel').onclick = close;
+  overlay.querySelector('.pic-crop-x').onclick = close;
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   overlay.querySelector('.pic-crop-save').onclick = async () => {
     // re-render the visible square at 512px

@@ -733,9 +733,9 @@ export function build(ctx) {
     {
       // Requested left-side composition: droplets and frame close at left;
       // the two fire-facing chairs, chess table and hearth recede to the right.
-      desktop: { pos: [-1.6, 1.86, 2.7], look: [-2.1, 1.04, -1.8], fov: 68 },
-      phoneLandscape: { pos: [-1.55, 1.82, 2.82], look: [-2.0, 1.04, -1.78], fov: 70 },
-      portrait: { pos: [-1.5, 1.9, 2.82], look: [-2.08, 1.04, -1.72], fov: 86 },
+      desktop: { pos: [-1.72, 1.86, 2.55], look: [0.08, 0.95, -2.35], fov: 63 },
+      phoneLandscape: { pos: [-1.68, 1.82, 2.72], look: [0.04, 0.96, -2.34], fov: 66 },
+      portrait: { pos: [-1.58, 1.9, 3.0], look: [0.02, 0.98, -2.18], fov: 78 },
     },
     {
       desktop: { pos: [2.48, 1.42, 3.35], look: [-0.28, 0.9, -2.78], fov: 55 },

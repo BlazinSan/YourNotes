@@ -10,6 +10,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 
 // Keep scene imports in this chunk. Electron loads the app from app.asar and
 // must not depend on scene chunks being fetched after the engine has opened.
@@ -185,9 +186,13 @@ class HavenEngine {
     if (!this.mobile) {
       this.composer = new EffectComposer(this.renderer);
       this.renderPass = new RenderPass(new THREE.Scene(), this.camera);
+      this.gtao = new GTAOPass(this.renderPass.scene, this.camera, 1, 1);
+      this.gtao.blendIntensity = 0.62;
+      this.gtao.updateGtaoMaterial({ radius: 0.22, thickness: 1.4, distanceFallOff: 0.8, samples: 8 });
       this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.28, 0.38, 0.9);
       this.outputPass = new OutputPass();
       this.composer.addPass(this.renderPass);
+      this.composer.addPass(this.gtao);
       this.composer.addPass(this.bloom);
       this.composer.addPass(this.outputPass);
     }
@@ -255,6 +260,7 @@ class HavenEngine {
     this.scene = nextScene;
     this.active = nextActive;
     if (this.renderPass) this.renderPass.scene = nextScene;
+    if (this.gtao) this.gtao.scene = nextScene;
 
     const sceneBloom = this.active?.bloom || {};
     if (this.bloom) {
@@ -374,6 +380,7 @@ class HavenEngine {
     this.active = null;
     this.scene = null;
     if (this.renderPass) this.renderPass.scene = new THREE.Scene();
+    if (this.gtao) this.gtao.scene = this.renderPass?.scene || new THREE.Scene();
   }
 
   async retry() {

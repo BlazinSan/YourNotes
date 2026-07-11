@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, shell, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, shell, safeStorage, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { fileURLToPath } = require('url');
@@ -373,6 +373,19 @@ function registerIpcHandlers() {
       if (!norm.startsWith(base)) return null;
       return fs.readFileSync(norm);
     } catch (_) { return null; }
+  });
+
+  ipcMain.handle('r2-put', async (_event, url, contentType, buffer) => {
+    const target = new URL(String(url || ''));
+    if (target.protocol !== 'https:' || !target.hostname.endsWith('.r2.cloudflarestorage.com')) {
+      throw new Error('Refused an untrusted upload destination');
+    }
+    const response = await net.fetch(target.toString(), {
+      method: 'PUT',
+      headers: { 'content-type': String(contentType || 'application/octet-stream') },
+      body: Buffer.from(buffer),
+    });
+    return { ok: response.ok, status: response.status };
   });
 
   const credsPath = path.join(app.getPath('userData'), 'creds.bin');
