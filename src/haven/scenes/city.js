@@ -419,10 +419,10 @@ export async function build(ctx) {
   ]);
   sofa.visible = false;
   coffee.visible = false;
-  fitAsset(realSofa, 3.15, [-3.18, 0, 0.72], 0.08);
-  fitAsset(loungeChair, 1.18, [0.62, 0, 0.18], -0.62);
-  fitAsset(marbleTable, 1.42, [-1.05, 0, -0.48], 0.12);
-  fitAsset(realPlant, 1.05, [4.78, 0, -2.72], -0.35);
+  fitAsset(realSofa, 2.68, [-3.12, 0, 0.92], -0.04);
+  fitAsset(loungeChair, 0.68, [1.15, 0, 0.28], -0.72);
+  fitAsset(marbleTable, 1.06, [-1.12, 0, -0.28], 0.12);
+  fitAsset(realPlant, 0.84, [4.86, 0, -2.82], -0.35);
 
   const livingPool = new THREE.PointLight(0xffa96a, mobile ? 1.25 : 3.2, 7.5, 2);
   livingPool.position.set(-1.25, 1.6, 0.15);
@@ -432,6 +432,76 @@ export async function build(ctx) {
     livingPool.shadow.bias = -0.0003;
   }
   root.add(livingPool);
+
+  // Architectural and lived-in layers inspired by dense loft interiors.
+  const oak = new THREE.MeshStandardMaterial({ color:0x7b4930, roughness:0.72, metalness:0.02 });
+  const charcoal = new THREE.MeshStandardMaterial({ color:0x19171b, roughness:0.58, metalness:0.28 });
+  const linen = new THREE.MeshStandardMaterial({ color:0xb98272, roughness:0.96 });
+  const cream = new THREE.MeshStandardMaterial({ color:0xd6c2a6, roughness:0.9 });
+  const brass = new THREE.MeshStandardMaterial({ color:0x8f5b2f, roughness:0.34, metalness:0.72 });
+  const addBox = (w,h,d,mat,x,y,z,ry=0) => { const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat); m.position.set(x,y,z); m.rotation.y=ry; root.add(m); return m; };
+
+  // Right-wall library: alternating shelves, closed storage and warm objects.
+  addBox(0.42,2.45,3.25,charcoal,5.66,1.23,0.58);
+  for (const y of [0.34,0.88,1.42,1.96,2.5]) addBox(0.68,0.055,3.02,oak,5.35,y,0.58);
+  for (let i=0;i<22;i++) {
+    const shelf=i%5, z=-0.62+(i%4)*0.36+(shelf%2)*0.08;
+    const book=addBox(0.22+((i*7)%5)*0.025,0.27+((i*11)%4)*0.035,0.07,
+      [linen,cream,oak,charcoal][i%4],5.0,0.51+shelf*0.54,z,Math.PI/2);
+    book.rotation.z=((i%3)-1)*0.035;
+  }
+  addBox(1.28,0.54,2.82,oak,5.02,0.28,0.6);
+
+  // The third camera looks across the left wall, so treat it as a complete
+  // library nook instead of an empty painted plane. Shallow walnut millwork
+  // keeps the circulation clear while giving the sunset view a layered,
+  // inhabited background.
+  addBox(0.32,2.72,3.55,charcoal,-5.72,1.36,0.45);
+  for (const z of [-0.62,0.48,1.58]) {
+    addBox(0.62,2.5,0.055,oak,-5.4,1.27,z);
+  }
+  for (const y of [0.38,0.91,1.44,1.97,2.5]) {
+    addBox(0.63,0.055,3.35,oak,-5.39,y,0.45);
+  }
+  for (let i=0;i<27;i++) {
+    const shelf=i%5, bay=i%3;
+    const book=addBox(0.075,0.25+((i*13)%5)*0.025,0.19+((i*7)%4)*0.018,
+      [linen,cream,oak,charcoal][i%4],-5.04,0.53+shelf*0.53,-0.97+bay*1.1+((i%3)-1)*0.1);
+    book.rotation.z=((i%4)-1.5)*0.025;
+  }
+  // Two low amber pools reveal the sofa leather and shelf objects without
+  // flattening the blue-hour skyline.
+  for (const z of [-0.66,1.52]) {
+    const sconcePlate=addBox(0.035,0.24,0.28,brass,-5.02,2.22,z);
+    const sconce=new THREE.PointLight(0xff9a55,mobile?0.45:1.35,3.1,2);
+    sconce.position.set(-4.85,2.18,z); root.add(sconce);
+  }
+
+  // Low media console and layered art keep the solid wall visually occupied.
+  addBox(2.8,0.52,0.48,oak,2.15,0.28,3.48);
+  for (const x of [1.35,2.15,2.95]) addBox(0.035,0.38,0.38,charcoal,x,0.28,3.23);
+  const artColors=[0x78465b,0xb26f55,0x315166];
+  [[1.25,1.95,0.82,0.96],[2.25,2.14,0.72,1.28],[3.16,1.86,0.62,0.82]].forEach((a,i)=>{
+    addBox(a[2]+0.09,a[3]+0.09,0.045,brass,a[0],a[1],3.72);
+    addBox(a[2],a[3],0.055,new THREE.MeshStandardMaterial({color:artColors[i],roughness:0.88}),a[0],a[1],3.68);
+  });
+
+  // Pendant cluster over the living area. Keep the floor clear in the wide
+  // camera: a foreground reading lamp used to sit directly on the view axis
+  // and its shade expanded into a distracting silhouette.
+  const warmGlass=new THREE.MeshStandardMaterial({color:0xffc184,emissive:0xff8a3c,emissiveIntensity:1.35,transparent:true,opacity:0.72,roughness:0.22});
+  [[-1.72,2.42],[-1.05,2.18],[-0.42,2.48]].forEach(([x,y],i)=>{
+    addBox(0.018,3.15-y,0.018,charcoal,x,(3.15+y)/2,-0.3);
+    const globe=new THREE.Mesh(new THREE.SphereGeometry(0.12+i*0.018,16,12),warmGlass); globe.position.set(x,y,-0.3); root.add(globe);
+  });
+  const pendantPool=new THREE.PointLight(0xffa45d,mobile?0.9:2.4,6,2); pendantPool.position.set(-1.05,2.06,-0.3); root.add(pendantPool);
+
+  // Small-scale clutter stops the polished surfaces reading as empty props.
+  for (let i=0;i<4;i++) addBox(0.34+i*0.025,0.045,0.24,[linen,cream,oak,charcoal][i],-1.5,0.56+i*0.047,-0.3,0.18-i*0.05);
+  const ceramic=new THREE.MeshStandardMaterial({color:0xc99b78,roughness:0.78});
+  const mug=new THREE.Mesh(new THREE.CylinderGeometry(0.065,0.055,0.13,16),ceramic); mug.position.set(-0.95,0.62,-0.15); root.add(mug);
+  addBox(0.52,0.09,0.52,linen,-3.85,0.58,0.88,-0.05);
+  addBox(0.48,0.08,0.48,cream,-3.18,0.62,0.86,0.08);
 
   // ---------------------------------------------------------------- glass wall + mullions
   const glass = new THREE.Mesh(new THREE.PlaneGeometry(W, H),
@@ -731,23 +801,23 @@ export async function build(ctx) {
     {
       // Window desk: a clean centre aisle frames the laptop and skyline while
       // the bed and sofa remain small, readable edge vignettes.
-      desktop: { pos: [0, 1.52, 2.32], look: [0, 0.92, -5.1], fov: 58 },
-      phoneLandscape: { pos: [0, 1.5, 2.72], look: [0, 0.91, -5.2], fov: 60 },
-      portrait: { pos: [0, 1.56, 3.2], look: [0, 0.9, -5.05], fov: 64 },
+      desktop: { pos: [0.15, 1.66, 3.62], look: [-0.55, 0.9, -3.9], fov: 53 },
+      phoneLandscape: { pos: [0.15, 1.6, 3.68], look: [-0.55, 0.91, -4.1], fov: 57 },
+      portrait: { pos: [0, 1.58, 3.72], look: [0, 0.9, -5.05], fov: 62 },
     },
     {
       // Bed-at-the-glass: viewed diagonally from its open side so the duvet is
       // a cosy lower-right foreground detail, never a wall across the image.
-      desktop: { pos: [-0.9, 2.0, 4.55], look: [3.35, 0.66, 0.0], fov: 54 },
+      desktop: { pos: [-1.0, 1.82, 4.35], look: [3.3, 0.78, 0.15], fov: 56 },
       phoneLandscape: { pos: [-0.55, 1.92, 4.8], look: [3.3, 0.7, 0.0], fov: 57 },
       portrait: { pos: [-0.15, 2.08, 5.55], look: [3.15, 0.72, 0.05], fov: 62 },
     },
     {
       // Sofa viewpoint: the camera now sits at the cushion rather than behind
       // the opaque backrest. The book, mug and blue-hour city lead the frame.
-      desktop: { pos: [-3.62, 1.03, 0.08], look: [-1.35, 1.15, -6.6], fov: 55 },
-      phoneLandscape: { pos: [-3.5, 1.08, 0.3], look: [-1.3, 1.14, -6.7], fov: 57 },
-      portrait: { pos: [-3.34, 1.15, 0.62], look: [-1.18, 1.12, -6.3], fov: 62 },
+      desktop: { pos: [4.62, 1.68, 3.34], look: [-1.25, 0.92, -1.55], fov: 55 },
+      phoneLandscape: { pos: [4.55, 1.62, 3.42], look: [-1.15, 0.94, -1.8], fov: 58 },
+      portrait: { pos: [4.55, 1.72, 3.62], look: [-1.05, 0.96, -1.9], fov: 64 },
     },
   ];
 

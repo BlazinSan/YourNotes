@@ -126,6 +126,23 @@ Storage.prototype.clear = function() {
   throw new Error('yn:store-not-ready-retrying'); // halt the rest of main.js this pass
 })();
 
+// Local visual-QA entry point for the heavyweight Haven renderer. This branch
+// is removed by Vite from production builds and avoids making camera reviews
+// depend on navigating the entire application shell.
+if (import.meta.env.DEV && new URLSearchParams(location.search).get('haven-preview')) {
+  const previewTheme = new URLSearchParams(location.search).get('haven-preview') || 'city';
+  window.addEventListener('load', () => setTimeout(async () => {
+    try {
+      if (previewTheme !== 'cabin') await window.setHavenTheme?.(previewTheme);
+      await window.openHaven?.();
+      const previewSpot = Number(new URLSearchParams(location.search).get('haven-spot'));
+      if (Number.isInteger(previewSpot)) window.setHavenSpot?.(previewSpot);
+    } catch (error) {
+      console.error('Haven preview failed', error);
+    }
+  }, 250));
+}
+
 // Android WebView can render native alert text with poor contrast on some
 // themes. Keep alerts inside the app's own surface instead.
 let activeAppAlert = null;
