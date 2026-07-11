@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveBoardFile: (name, buffer) => ipcRenderer.invoke('save-board-file', name, buffer),
   readFileBytes: (p) => ipcRenderer.invoke('read-file-bytes', p),
   putR2: (url, contentType, buffer) => ipcRenderer.invoke('r2-put', url, contentType, buffer),
+  getR2: (url) => ipcRenderer.invoke('r2-get', url),
   // Await the OS hand-off so the renderer can distinguish a successful open
   // from a blocked type, missing association, or shell error.
   openPath: (p) => ipcRenderer.invoke('open-path', p),

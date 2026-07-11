@@ -3018,6 +3018,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // -----------------------------------------
 let androidSelectionSnapshot = null;
 let androidSelectionActions = null;
+let androidSelectionHandles = null;
 let androidLongPressTimer = null;
 let androidLongPressPointer = null;
 let androidApplyingSelection = false;
@@ -3064,12 +3065,89 @@ function showAndroidSelectionActions(snapshot) {
     const y = above >= 8 ? above : Math.min(innerHeight - bar.offsetHeight - 8, rect.bottom + 10);
     bar.style.left = `${x}px`;
     bar.style.top = `${Math.max(8, y)}px`;
+    positionAndroidSelectionHandles(snapshot);
   });
 }
 
 function paintAndroidSelection(range) {
   if (!CSS.highlights || typeof Highlight === 'undefined') return;
   CSS.highlights.set('yn-phone-selection', new Highlight(range));
+}
+
+function rangeEdgeRect(range, atStart) {
+  const edge = range.cloneRange();
+  edge.collapse(atStart);
+  const rect = edge.getBoundingClientRect();
+  if (rect && (rect.width || rect.height)) return rect;
+  const boxes = range.getClientRects();
+  return boxes.length ? boxes[atStart ? 0 : boxes.length - 1] : range.getBoundingClientRect();
+}
+
+function ensureAndroidSelectionHandles() {
+  if (androidSelectionHandles) return androidSelectionHandles;
+  const wrap = document.createElement('div');
+  wrap.id = 'android-selection-handles';
+  wrap.innerHTML = '<button type="button" data-selection-edge="start" aria-label="Adjust selection start"></button><button type="button" data-selection-edge="end" aria-label="Adjust selection end"></button>';
+  wrap.querySelectorAll('[data-selection-edge]').forEach(handle => {
+    handle.addEventListener('pointerdown', event => {
+      if (!androidSelectionSnapshot || androidSelectionSnapshot.type !== 'range') return;
+      event.preventDefault(); event.stopPropagation();
+      const edge = handle.dataset.selectionEdge;
+      const pointerId = event.pointerId;
+      handle.setPointerCapture?.(pointerId);
+      const move = moveEvent => {
+        if (moveEvent.pointerId !== pointerId || !androidSelectionSnapshot) return;
+        moveEvent.preventDefault();
+        const caret = androidCaretAtPoint(moveEvent.clientX, moveEvent.clientY);
+        if (!caret) return;
+        const current = androidSelectionSnapshot.range;
+        const next = current.cloneRange();
+        try {
+          if (edge === 'start') next.setStart(caret.node, caret.offset);
+          else next.setEnd(caret.node, caret.offset);
+        } catch (_) { return; }
+        if (next.collapsed || !String(next.toString()).trim()) return;
+        const snapshot = { ...androidSelectionSnapshot, range: next, text: next.toString() };
+        androidSelectionSnapshot = snapshot;
+        paintAndroidSelection(next);
+        positionAndroidSelectionHandles(snapshot);
+      };
+      const finish = finishEvent => {
+        if (finishEvent.pointerId !== pointerId) return;
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', finish);
+        window.removeEventListener('pointercancel', finish);
+        showAndroidSelectionActions(androidSelectionSnapshot);
+      };
+      window.addEventListener('pointermove', move, { passive: false });
+      window.addEventListener('pointerup', finish);
+      window.addEventListener('pointercancel', finish);
+    });
+  });
+  document.body.appendChild(wrap);
+  androidSelectionHandles = wrap;
+  return wrap;
+}
+
+function positionAndroidSelectionHandles(snapshot) {
+  const handles = ensureAndroidSelectionHandles();
+  if (!snapshot || snapshot.type !== 'range') { handles.classList.remove('is-visible'); return; }
+  const startRect = rangeEdgeRect(snapshot.range, true);
+  const endRect = rangeEdgeRect(snapshot.range, false);
+  const start = handles.querySelector('[data-selection-edge="start"]');
+  const end = handles.querySelector('[data-selection-edge="end"]');
+  start.style.left = `${startRect.left}px`; start.style.top = `${startRect.bottom}px`;
+  end.style.left = `${endRect.right}px`; end.style.top = `${endRect.bottom}px`;
+  handles.classList.add('is-visible');
+}
+
+function androidCaretAtPoint(clientX, clientY) {
+  if (document.caretPositionFromPoint) {
+    const result = document.caretPositionFromPoint(clientX, clientY);
+    return result ? { node: result.offsetNode, offset: result.offset } : null;
+  }
+  const result = document.caretRangeFromPoint?.(clientX, clientY);
+  return result ? { node: result.startContainer, offset: result.startOffset } : null;
 }
 
 function androidWordBounds(value, requestedOffset) {
@@ -3201,6 +3279,7 @@ function hideAndroidSelectionActions(clearSelection = false) {
     }
   }
   androidSelectionSnapshot = null;
+  androidSelectionHandles?.classList.remove('is-visible');
 }
 
 function ensureAndroidSelectionActions() {
@@ -3909,7 +3988,9 @@ function updateAmbientTime() {
     dateEl.textContent = now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
   }
 }
-setInterval(updateAmbientTime, 1000);
+// The clock only displays minutes; a one-second global timer caused needless
+// wakeups and layout checks throughout long mobile sessions.
+setInterval(updateAmbientTime, 30000);
 updateAmbientTime();
 
 // -----------------------------------------
@@ -4992,6 +5073,11 @@ async function openBoardViewerFile(item, src, fallbackName) {
     if (dataUrl) { const r = await fetch(dataUrl); return await r.blob(); } // same-origin data: is safe
     if (src && src.startsWith('blob:')) { const r = await fetch(src); return await r.blob(); }
     if (isHttp) {
+      if (isElectron && window.electronAPI.getR2 && /\.r2\.cloudflarestorage\.com\//i.test(src)) {
+        const native = await window.electronAPI.getR2(src);
+        if (!native || !native.ok || !native.buffer) throw new Error(`Download failed (${native?.status || 'network'}).`);
+        return new Blob([native.buffer], { type: native.contentType || item.mime || 'application/octet-stream' });
+      }
       const response = await fetch(src);
       if (!response.ok) throw new Error(`Download failed (${response.status}).`);
       return await response.blob();
@@ -5885,7 +5971,7 @@ function makeBoardCardInteractive(card, item, initialLayout, m) {
     e.stopPropagation();
     window.isDraggingBoardCard = true;
     const scale = m.scale;
-    const start = { ...initialLayout };
+    const start = { ...(activeBoardLayouts.get(item.id) || initialLayout) };
     const others = [...activeBoardLayouts.values()].filter(layout => layout && layout.id !== item.id);
     const sx = e.clientX, sy = e.clientY;
     let moved = false;
@@ -5938,7 +6024,7 @@ function makeBoardCardInteractive(card, item, initialLayout, m) {
       e.stopPropagation(); e.preventDefault();
       window.isDraggingBoardCard = true;
       const scale = m.scale;
-      const start = { ...initialLayout };
+      const start = { ...(activeBoardLayouts.get(item.id) || initialLayout) };
       const others = [...activeBoardLayouts.values()].filter(layout => layout && layout.id !== item.id);
       const sx = e.clientX, sy = e.clientY;
       let lastValid = { ...start };
@@ -6935,6 +7021,7 @@ window.isDraggingBoardCard = false;
 window.addEventListener('resize', () => {
   syncGlobalSearchPlaceholder();
   if (window.isDraggingBoardCard) return;
+  if (!boardExpandedForMigration()) return;
   clearTimeout(resizeTimeout);
   resizeTimeout = setTimeout(() => {
     renderBoard();
@@ -7101,7 +7188,7 @@ document.addEventListener('click', (e) => {
     document.addEventListener('pointerdown', pokeUi);
     document.addEventListener('keydown', onKey);
     try {
-      const engineModule = eng || await import('./haven/engine.js');
+      const engineModule = eng || await import('./haven/cinematic-engine.js');
       // Closing while the split engine chunk is loading used to let this
       // continuation mount a hidden renderer after the overlay was gone.
       if (!isOpen || lifetime !== havenLifetime || sceneRevision !== havenSceneRevision) return;

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>YourNotes Quick Portal</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><img src="icons/icon-48.png" alt=""><div><strong>YourNotes</strong><span>Quick Portal</span></div></div>
+    <button id="theme" class="icon-button" title="Change theme" aria-label="Change theme">◐</button>
+  </header>
+
+  <main>
+    <nav class="tabs" aria-label="Portal sections">
+      <button class="active" data-tab="capture">Capture</button>
+      <button data-tab="recent">Recent <span id="count">0</span></button>
+      <button data-tab="tools">Tools</button>
+    </nav>
+
+    <section class="panel active" data-panel="capture">
+      <label for="capture">Write it down</label>
+      <textarea id="capture" rows="5" placeholder="A thought, task, quote, or reminder…"></textarea>
+      <div class="capture-options">
+        <label><input type="checkbox" id="as-task"> Save as checklist item</label>
+        <button id="attach-page" class="text-button">Add current page</button>
+      </div>
+      <button id="save" class="primary">Save capture <kbd>Ctrl↵</kbd></button>
+      <p id="status" role="status" aria-live="polite"></p>
+    </section>
+
+    <section class="panel" data-panel="recent">
+      <div id="recent-list" class="recent-list"></div>
+      <div id="empty" class="empty"><strong>Nothing captured yet</strong><span>Save text here or use the page context menu.</span></div>
+      <button id="copy-all" class="secondary">Copy all captures</button>
+    </section>
+
+    <section class="panel" data-panel="tools">
+      <article class="focus-tool">
+        <div><span class="eyebrow">Focus timer</span><strong id="clock">25:00</strong></div>
+        <div class="timer-actions"><button id="timer-toggle" class="primary small">Start</button><button id="timer-reset" class="icon-button" title="Reset timer">↺</button></div>
+      </article>
+      <div class="feature-list">
+        <button data-full-feature="Projects"><span>Projects & full notes</span><small>Open in full app</small></button>
+        <button data-full-feature="Dashboard"><span>Pinned dashboard</span><small>Open in full app</small></button>
+        <button data-full-feature="College"><span>College files & PDFs</span><small>Install full app</small></button>
+        <button data-full-feature="Safe Haven"><span>Safe Haven</span><small>Install full app</small></button>
+      </div>
+    </section>
+  </main>
+
+  <footer><button id="full-app">Get the full YourNotes app <span>↗</span></button></footer>
+  <script src="popup.js"></script>
+</body>
+</html>

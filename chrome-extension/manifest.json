@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "YourNotes Quick Portal",
+  "version": "0.0.5",
+  "description": "Capture thoughts, selections and page links without leaving your browser.",
+  "permissions": ["storage", "contextMenus", "tabs"],
+  "action": {
+    "default_title": "YourNotes Quick Portal",
+    "default_popup": "popup.html"
+  },
+  "background": { "service_worker": "service-worker.js" },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  }
+}

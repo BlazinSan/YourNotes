@@ -387,6 +387,20 @@ function registerIpcHandlers() {
     });
     return { ok: response.ok, status: response.status };
   });
+  ipcMain.handle('r2-get', async (_event, url) => {
+    const target = new URL(String(url || ''));
+    if (target.protocol !== 'https:' || !target.hostname.endsWith('.r2.cloudflarestorage.com')) {
+      throw new Error('Refused an untrusted download destination');
+    }
+    const response = await net.fetch(target.toString());
+    if (!response.ok) return { ok: false, status: response.status };
+    return {
+      ok: true,
+      status: response.status,
+      contentType: response.headers.get('content-type') || 'application/octet-stream',
+      buffer: Buffer.from(await response.arrayBuffer()),
+    };
+  });
 
   const credsPath = path.join(app.getPath('userData'), 'creds.bin');
   ipcMain.handle('cred-save', async (event, { email, password }) => {
