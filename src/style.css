@@ -1505,11 +1505,8 @@ body {
 }
 
 .haven-cinematic { position:absolute; inset:0; overflow:hidden; background:#090a0e; }
-.haven-cinematic-plate,.haven-cinematic-depth { position:absolute; inset:-2%; width:104%; height:104%; object-fit:cover; will-change:transform,opacity; filter:saturate(1.03) contrast(1.02); opacity:1; transition:opacity .38s ease,transform .9s cubic-bezier(.2,.75,.2,1); }
-.haven-cinematic-depth { z-index:1; clip-path:polygon(0 61%,100% 67%,100% 100%,0 100%); filter:saturate(1.06) contrast(1.03); pointer-events:none; }
-.haven-cinematic[data-theme="cabin"] .haven-cinematic-depth { clip-path:polygon(0 57%,24% 48%,58% 61%,100% 49%,100% 100%,0 100%); }
-.haven-cinematic[data-theme="city"] .haven-cinematic-depth { clip-path:polygon(0 61%,31% 56%,57% 64%,100% 49%,100% 100%,0 100%); }
-.haven-cinematic.is-travelling .haven-cinematic-plate,.haven-cinematic.is-travelling .haven-cinematic-depth { opacity:0; transform:scale(1.07) !important; }
+.haven-cinematic-plate { position:absolute; inset:-2%; width:104%; height:104%; object-fit:cover; will-change:transform,opacity; filter:saturate(1.03) contrast(1.02); opacity:1; transition:opacity .38s ease,transform .9s cubic-bezier(.2,.75,.2,1); }
+.haven-cinematic.is-travelling .haven-cinematic-plate { opacity:0; transform:scale(1.07) !important; }
 .haven-cinematic-fx { position:absolute; z-index:2; inset:0; width:100%; height:100%; pointer-events:none; mix-blend-mode:screen; }
 .haven-cinematic::after { content:""; position:absolute; inset:0; pointer-events:none; background:radial-gradient(ellipse at center,transparent 44%,rgba(3,4,8,.28) 100%),linear-gradient(180deg,rgba(0,0,0,.1),transparent 24%,transparent 78%,rgba(0,0,0,.18)); }
 @media (prefers-reduced-motion: reduce) { .haven-cinematic-plate { transition:none !important; } }
