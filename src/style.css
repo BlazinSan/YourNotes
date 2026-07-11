@@ -1514,10 +1514,8 @@ body {
 .board-viewer-video-wrap { width:100%; height:100%; min-height:0; display:flex; align-items:center; justify-content:center; overflow:hidden; background:#0c0c0c; }
 .board-viewer-video-wrap video { display:block; width:100%; height:100%; min-height:0; max-height:calc(100dvh - 190px); object-fit:contain; }
 
-/* ColorOS renders Chromium's framework-owned selection popups as opaque black
-   surfaces. Android uses an app-owned action bar instead, and selection is
-   intentionally limited to editable content so normal navigation labels can
-   never invoke those broken OEM popup windows. */
+/* Android owns selection end-to-end: native handles, drag updates and the OEM
+   action menu. Only editable surfaces opt into selection. */
 html.yn-android body * {
   -webkit-user-select: none !important;
   user-select: none !important;
@@ -1531,73 +1529,12 @@ html.yn-android [contenteditable="true"],
 html.yn-android [contenteditable="true"] * {
   -webkit-user-select: text !important;
   user-select: text !important;
-  -webkit-touch-callout: none;
-}
-
-#android-selection-actions {
-  position: fixed;
-  z-index: 2147483000;
-  top: max(12px, env(safe-area-inset-top));
-  left: 50%;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  max-width: calc(100vw - 24px);
-  padding: 6px;
-  border: 1px solid rgba(255, 255, 255, .12);
-  border-radius: 10px;
-  background: #363438;
-  box-shadow: 0 5px 14px rgba(0, 0, 0, .3);
-  opacity: 0;
-  pointer-events: none;
-  transform: translate(-50%, -4px);
-  transition: opacity .14s ease, transform .14s ease;
-}
-
-#android-selection-actions.is-visible {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translate(-50%, 0);
-}
-
-#android-selection-actions button {
-  min-width: 52px;
-  min-height: 40px;
-  padding: 0 12px;
-  border: 0;
-  border-radius: 12px;
-  background: transparent;
-  color: #f8f6f3;
-  font: 700 14px/1 system-ui, sans-serif;
-  white-space: nowrap;
-}
-
-::highlight(yn-phone-selection) {
-  color: inherit;
-  background: color-mix(in srgb, var(--accent-color) 42%, transparent);
 }
 
 @media (max-width: 820px) {
   .dashboard-banner.expanded { overflow: auto; }
   .dashboard-banner.expanded #dashboard-board { overflow: visible; }
 }
-
-#android-selection-actions button:active {
-  background: rgba(255, 255, 255, .12);
-}
-
-#android-selection-actions button:last-child {
-  min-width: 42px;
-  padding: 0;
-  color: #d9cbc0;
-  font-size: 22px;
-}
-
-#android-selection-handles { position:fixed; inset:0; z-index:2147482999; pointer-events:none; display:none; }
-#android-selection-handles.is-visible { display:block; }
-#android-selection-handles button { position:fixed; width:32px; height:38px; margin-left:-16px; margin-top:-3px; padding:0; border:0; background:transparent; pointer-events:auto; touch-action:none; }
-#android-selection-handles button::before { content:""; display:block; width:18px; height:18px; margin:0 auto; border-radius:2px 2px 10px 10px; background:var(--accent-color); box-shadow:0 1px 3px rgba(0,0,0,.28); }
-#android-selection-handles [data-selection-edge="start"]::before { border-radius:2px 2px 10px 10px; }
 
 .board-drop-hint {
   position: absolute; inset: 0; z-index: 3;
@@ -5083,20 +5020,27 @@ body.haven-open {
   }
 
   #mood-heatmap {
-    display: grid !important;
-    grid-template-columns: repeat(26, minmax(0, 1fr));
-    width: 100% !important;
-    min-width: 0 !important;
-    gap: 2px !important;
+    display:flex !important;
+    width:100% !important;
+    min-width:0 !important;
+    gap:3px !important;
+    overflow-x:auto !important;
+    overflow-y:hidden !important;
+    padding:4px 1px 8px;
+    scrollbar-width:thin;
+    scroll-snap-type:x proximity;
   }
 
   #mood-heatmap > div {
-    min-width: 0;
-    gap: 2px !important;
+    flex:0 0 12px !important;
+    width:12px !important;
+    min-width:12px !important;
+    gap:3px !important;
+    scroll-snap-align:end;
   }
 
-  #mood-heatmap .mood-day { width:100% !important; height:12px !important; }
-  #mood-heatmap .mood-day::before { inset:3px 1px; }
+  #mood-heatmap .mood-day { width:12px !important; height:12px !important; flex:0 0 12px; }
+  #mood-heatmap .mood-day::before { inset:2px; border-radius:2px; }
 
   .expense-add-form {
     flex-wrap: wrap;
@@ -6534,4 +6478,69 @@ body.haven-open {
 @keyframes ynFadeInScale {
   from { opacity: 0; transform: scale(0.95); }
   to { opacity: 1; transform: scale(1); }
+}
+
+/* Phone composition: edge-to-edge content without compacting long copy. */
+@media (max-width: 600px) {
+  .home-page {
+    padding-inline:max(10px, env(safe-area-inset-left)) max(10px, env(safe-area-inset-right)) !important;
+  }
+
+  .home-session,
+  .home-settings,
+  .home-college,
+  .home-favourites,
+  .home-tasks { padding:12px !important; }
+
+  .tool-section,
+  .settings-section,
+  .profile-section,
+  .task-section,
+  .college-section {
+    width:100% !important;
+    max-width:none !important;
+    padding:14px !important;
+    border-radius:15px !important;
+  }
+
+  textarea,
+  [contenteditable="true"],
+  .modal textarea {
+    min-height:96px;
+    height:auto;
+    line-height:1.45;
+  }
+
+  button,
+  .nav-link,
+  .app-select-trigger,
+  .setting-row,
+  .task-item,
+  .book-card-title,
+  .project-card-title,
+  .file-name {
+    min-width:0;
+    max-width:100%;
+    white-space:normal !important;
+    overflow-wrap:anywhere;
+    word-break:normal;
+    text-overflow:clip !important;
+    height:auto;
+  }
+
+  input:not([type="range"]):not([type="checkbox"]):not([type="radio"]),
+  select {
+    min-height:44px;
+    width:100%;
+    max-width:100%;
+    font-size:16px;
+  }
+
+  .tasks-row,
+  .settings-grid,
+  .profile-grid,
+  .session-grid {
+    width:100%;
+    gap:12px !important;
+  }
 }

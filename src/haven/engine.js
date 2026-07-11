@@ -174,7 +174,8 @@ class HavenEngine {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.04;
-    this.renderer.shadowMap.enabled = false;
+    this.renderer.shadowMap.enabled = !this.mobile;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.domElement.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;display:block;';
     this.renderer.domElement.setAttribute('aria-label', 'Safe Haven scenery');
     container.appendChild(this.renderer.domElement);
@@ -187,8 +188,8 @@ class HavenEngine {
       this.composer = new EffectComposer(this.renderer);
       this.renderPass = new RenderPass(new THREE.Scene(), this.camera);
       this.gtao = new GTAOPass(this.renderPass.scene, this.camera, 1, 1);
-      this.gtao.blendIntensity = 0.62;
-      this.gtao.updateGtaoMaterial({ radius: 0.22, thickness: 1.4, distanceFallOff: 0.8, samples: 8 });
+      this.gtao.blendIntensity = 0.72;
+      this.gtao.updateGtaoMaterial({ radius: 0.18, thickness: 1.25, distanceFallOff: 0.86, samples: 16 });
       this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.28, 0.38, 0.9);
       this.outputPass = new OutputPass();
       this.composer.addPass(this.renderPass);
@@ -259,6 +260,14 @@ class HavenEngine {
 
     this.scene = nextScene;
     this.active = nextActive;
+    if (!this.mobile) {
+      nextScene.traverse((object) => {
+        if (object.isMesh && !object.material?.transparent) {
+          object.castShadow = true;
+          object.receiveShadow = true;
+        }
+      });
+    }
     if (this.renderPass) this.renderPass.scene = nextScene;
     if (this.gtao) this.gtao.scene = nextScene;
 

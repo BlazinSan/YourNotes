@@ -3353,7 +3353,10 @@ function updateAndroidSelectionActions() {
   ensureAndroidSelectionActions().classList.add('is-visible');
 }
 
-if (IS_ANDROID_APP) {
+// Android's native WebView selection is the single owner of long-press,
+// draggable handles and the OEM action popup. The former app-owned range
+// implementation remains inert for compatibility with old saved documents.
+if (false && IS_ANDROID_APP) {
   document.addEventListener('pointerdown', (event) => {
     if (event.pointerType && event.pointerType !== 'touch' && event.pointerType !== 'pen') return;
     const target = editableSelectionTarget(event.target);
@@ -4162,6 +4165,9 @@ function renderMoodHeatmap() {
       col.appendChild(cell);
     }
     heatmapEl.appendChild(col);
+  }
+  if (window.matchMedia('(max-width: 820px), (pointer: coarse)').matches) {
+    requestAnimationFrame(() => { heatmapEl.scrollLeft = heatmapEl.scrollWidth; });
   }
 }
 
@@ -7251,8 +7257,8 @@ document.addEventListener('click', (e) => {
     document.addEventListener('keydown', onKey);
     try {
       const engineModule = eng || (import.meta.env.VITE_HAVEN_EDITION === 'heavy'
-        ? await import('./haven/engine3d.js')
-        : await import('./haven/engine.js'));
+        ? await import('./haven/engine.js')
+        : await import('./haven/cinematic-engine.js'));
       // Closing while the split engine chunk is loading used to let this
       // continuation mount a hidden renderer after the overlay was gone.
       if (!isOpen || lifetime !== havenLifetime || sceneRevision !== havenSceneRevision) return;

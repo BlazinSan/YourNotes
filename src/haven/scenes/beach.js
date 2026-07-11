@@ -129,14 +129,15 @@ export function build(ctx) {
     g.fillStyle = gr;
     g.fillRect(0, 0, w, h);
   });
-  const glowMat = new THREE.SpriteMaterial({
-    map: glowTex, blending: THREE.AdditiveBlending,
-    depthWrite: false, transparent: true, opacity: 0.85, fog: false
+  // Layered circles avoid the rectangular alpha fringe some Windows GPUs
+  // produced around the old canvas sprite.
+  const haloMat = new THREE.MeshBasicMaterial({
+    color: 0xffa66f, transparent: true, opacity: 0.12,
+    blending: THREE.AdditiveBlending, depthWrite: false, fog: false
   });
-  const glow = new THREE.Sprite(glowMat);
-  glow.position.set(-7, 5.3, -120.5);
-  glow.scale.set(38, 28, 1);
-  root.add(glow);
+  const halo = new THREE.Mesh(new THREE.CircleGeometry(10.5, mobile ? 24 : 48), haloMat);
+  halo.position.set(-7, 5.1, -121.2);
+  root.add(halo);
 
   // ----------------------------------------------------------------- ocean
   const oSegX = mobile ? 40 : 72;
@@ -852,6 +853,13 @@ export function build(ctx) {
   root.add(hemi);
   const sunLight = new THREE.DirectionalLight(0xffcfaa, 1.15);
   sunLight.position.set(10, 14, 8);
+  sunLight.castShadow = !mobile;
+  if (!mobile) {
+    sunLight.shadow.mapSize.set(1536, 1536);
+    sunLight.shadow.camera.left = -18; sunLight.shadow.camera.right = 18;
+    sunLight.shadow.camera.top = 16; sunLight.shadow.camera.bottom = -10;
+    sunLight.shadow.bias = -0.00025;
+  }
   root.add(sunLight);
   root.add(sunLight.target);
   const lanternLight = new THREE.PointLight(0xffb36b, 1.6, 9, 2);

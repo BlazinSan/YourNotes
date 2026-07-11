@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "YourNotes Quick Portal",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "Capture thoughts, selections and page links without leaving your browser.",
   "permissions": ["storage", "contextMenus", "tabs"],
   "action": {

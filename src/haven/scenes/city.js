@@ -66,13 +66,23 @@ export function build(ctx) {
   lampLightL.position.set(-0.55, 1.7, -1.35);
   const lampLightR = new THREE.PointLight(0xffaa68, 4.65, 7, 2);
   lampLightR.position.set(BED_X + 0.75, 1.05, 1.75);
+  lampLightL.castShadow = !mobile;
+  lampLightR.castShadow = !mobile;
+  if (!mobile) {
+    for (const light of [lampLightL, lampLightR]) {
+      light.shadow.mapSize.set(1024, 1024);
+      light.shadow.bias = -0.00035;
+      light.shadow.normalBias = 0.035;
+    }
+  }
   root.add(lampLightL, lampLightR);
 
   // ---------------------------------------------------------------- room shell
-  const wallMat = new THREE.MeshLambertMaterial({
-    color: 0x574052,
-    emissive: 0x160d16,
-    emissiveIntensity: 0.28,
+  const wallMat = new THREE.MeshStandardMaterial({
+    color: 0x5e4655,
+    emissive: 0x1e1018,
+    emissiveIntensity: 0.2,
+    roughness: 0.9,
   });
 
   const floorTex = makeTex(256, 256, (g, w, h) => {
@@ -104,7 +114,9 @@ export function build(ctx) {
   floor.rotation.x = -Math.PI / 2;
   root.add(floor);
 
-  const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(W, D), wallMat);
+  const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(W, D), new THREE.MeshStandardMaterial({
+    color: 0x6c505c, emissive: 0x24131a, emissiveIntensity: 0.3, roughness: 0.96
+  }));
   ceiling.rotation.x = Math.PI / 2; ceiling.position.y = H;
   root.add(ceiling);
 
@@ -125,6 +137,9 @@ export function build(ctx) {
   const cove3 = new THREE.Mesh(coveGeoZ, coveMat); cove3.position.set(-W / 2 + 0.22, H - 0.07, 0);
   const cove4 = new THREE.Mesh(coveGeoZ, coveMat); cove4.position.set(W / 2 - 0.22, H - 0.07, 0);
   root.add(cove1, cove2, cove3, cove4);
+  const ceilingFill = new THREE.PointLight(0xffc39b, mobile ? 1.1 : 2.1, 13, 1.7);
+  ceilingFill.position.set(0, H - 0.25, 0.2);
+  root.add(ceilingFill);
 
   // rug
   const rugTex = makeTex(192, 192, (g, w, h) => {
