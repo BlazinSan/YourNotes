@@ -1511,8 +1511,8 @@ body {
 .haven-cinematic::after { content:""; position:absolute; inset:0; pointer-events:none; background:radial-gradient(ellipse at center,transparent 44%,rgba(3,4,8,.28) 100%),linear-gradient(180deg,rgba(0,0,0,.1),transparent 24%,transparent 78%,rgba(0,0,0,.18)); }
 @media (prefers-reduced-motion: reduce) { .haven-cinematic-plate { transition:none !important; } }
 
-.board-viewer-video-wrap { display:flex; align-items:center; justify-content:center; min-height:280px; background:#0c0c0c; }
-.board-viewer-video-wrap video { display:block; width:100%; max-height:72dvh; object-fit:contain; }
+.board-viewer-video-wrap { width:100%; height:100%; min-height:0; display:flex; align-items:center; justify-content:center; overflow:hidden; background:#0c0c0c; }
+.board-viewer-video-wrap video { display:block; width:100%; height:100%; min-height:0; max-height:calc(100dvh - 190px); object-fit:contain; }
 
 /* ColorOS renders Chromium's framework-owned selection popups as opaque black
    surfaces. Android uses an app-owned action bar instead, and selection is
@@ -4040,6 +4040,43 @@ body.haven-open {
 .pic-crop-cancel { background: var(--overlay-medium); color: var(--text-primary); }
 .pic-crop-save { background: var(--accent-color); color: #fff; }
 
+/* Dedicated profile editor. Cover cropping keeps its smaller utility layout. */
+.pic-crop-card.pic-editor { width:min(980px,96vw); padding:0; overflow:hidden; display:grid; grid-template-rows:auto minmax(0,1fr) auto; }
+.pic-editor .pic-crop-header { padding:18px 20px; border-bottom:1px solid var(--panel-border); background:var(--panel-bg); }
+.pic-editor .pic-crop-header span { color:var(--accent-color); font-size:.74rem; font-weight:800; text-transform:uppercase; letter-spacing:.05em; }
+.pic-editor .pic-crop-header h4 { margin:2px 0 0; font-size:1.25rem; }
+.pic-editor .pic-crop-header p { margin:3px 0 0; }
+.pic-editor-body { min-height:0; display:grid; grid-template-columns:minmax(360px,1fr) 250px; gap:24px; padding:24px; overflow:auto; }
+.pic-editor .pic-crop-stage { width:min(520px,100%); height:auto; align-self:center; box-shadow:0 8px 30px rgba(0,0,0,.24); }
+.pic-crop-grid { position:absolute; inset:4%; z-index:2; pointer-events:none; border-radius:50%; background:linear-gradient(90deg,transparent 33%,rgba(255,255,255,.22) 33%,rgba(255,255,255,.22) calc(33% + 1px),transparent calc(33% + 1px),transparent 66%,rgba(255,255,255,.22) 66%,rgba(255,255,255,.22) calc(66% + 1px),transparent calc(66% + 1px)),linear-gradient(0deg,transparent 33%,rgba(255,255,255,.22) 33%,rgba(255,255,255,.22) calc(33% + 1px),transparent calc(33% + 1px),transparent 66%,rgba(255,255,255,.22) 66%,rgba(255,255,255,.22) calc(66% + 1px),transparent calc(66% + 1px)); }
+.pic-editor-panel { display:flex; flex-direction:column; align-items:stretch; justify-content:center; min-width:0; }
+.pic-avatar-preview { width:144px; height:144px; margin:0 auto 12px; border-radius:50%; overflow:hidden; border:4px solid var(--bg-color); box-shadow:0 0 0 1px var(--panel-border),0 8px 24px rgba(0,0,0,.18); }
+.pic-editor-panel>strong,.pic-editor-panel>small { text-align:center; }
+.pic-editor-panel>small { color:var(--text-secondary); margin:4px 0 24px; line-height:1.4; }
+.pic-editor-panel>label { margin-bottom:7px; font-size:.78rem; font-weight:800; color:var(--text-secondary); }
+.pic-editor .pic-crop-tools { width:100%; grid-template-columns:40px minmax(80px,1fr) 40px; margin:0; }
+.pic-transform-tools { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:12px; }
+.pic-transform-tools button { min-height:42px; border:1px solid var(--panel-border); border-radius:9px; background:var(--overlay-light); color:var(--text-primary); font-weight:750; cursor:pointer; }
+.pic-transform-tools [data-crop-reset] { grid-column:1/-1; }
+.pic-editor>.pic-crop-actions { justify-content:flex-end; margin:0; padding:14px 20px; border-top:1px solid var(--panel-border); background:var(--panel-bg); }
+.pic-editor>.pic-crop-actions button { flex:0 0 auto; min-width:140px; min-height:44px; }
+
+.mood-day { position:relative; width:14px; height:14px; padding:0; border:0; border-radius:3px; background:transparent; cursor:pointer; }
+.mood-day::before { content:""; position:absolute; inset:3px; border-radius:2px; background:var(--mood-day-color); transition:transform .12s ease,box-shadow .12s ease; }
+.mood-day:hover::before,.mood-day:focus-visible::before { transform:scale(1.5); box-shadow:0 0 0 2px var(--bg-color),0 0 0 3px var(--accent-color); }
+.mood-day:focus-visible { outline:none; }
+.mood-detail-overlay { position:fixed; inset:0; z-index:23000; display:grid; place-items:center; padding:18px; background:rgba(18,16,14,.58); backdrop-filter:blur(8px); }
+.mood-detail-card { width:min(420px,100%); border:1px solid var(--panel-border); border-radius:12px; background:var(--bg-color); box-shadow:0 24px 70px rgba(0,0,0,.32); overflow:hidden; }
+.mood-detail-card header { display:flex; align-items:center; justify-content:space-between; padding:18px 20px; border-bottom:1px solid var(--panel-border); }
+.mood-detail-card header span,.mood-detail-card small { color:var(--text-secondary); font-size:.76rem; font-weight:750; }
+.mood-detail-card h3 { margin:2px 0 0; font-size:1.15rem; }
+.mood-detail-card header button { width:38px; height:38px; border:0; border-radius:9px; background:var(--overlay-medium); color:var(--text-primary); font-size:1.4rem; cursor:pointer; }
+.mood-detail-summary { display:flex; align-items:center; gap:14px; padding:18px 20px 12px; }
+.mood-detail-summary>div { display:grid; }
+.mood-detail-emoji { display:grid; place-items:center; width:50px; height:50px; border-radius:12px; background:var(--overlay-light); font-size:1.7rem; }
+.mood-detail-note { margin:0 20px 20px; padding:14px; border:1px solid var(--panel-border); border-radius:9px; background:var(--panel-bg); }
+.mood-detail-note p { margin:6px 0 0; white-space:pre-wrap; line-height:1.55; }
+
 /* Promise-based prompt modal (replaces disabled window.prompt) */
 .ui-prompt-overlay { position: fixed; inset: 0; z-index: 16000; background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(5px); display: flex; align-items: center; justify-content: center; }
 .ui-prompt-card { background: var(--bg-color); border: 1px solid var(--panel-border); border-radius: 16px; padding: 24px; width: 380px; max-width: 92vw; box-shadow: 0 30px 70px rgba(0, 0, 0, 0.4); }
@@ -4108,6 +4145,24 @@ body.haven-open {
   .haven-enter { padding: 16px; }
   .haven-ui-top, .haven-ui-bottom { padding: 14px 16px; }
   .pic-crop-stage { width: min(340px, 78vw); height: min(340px, 78vw); }
+}
+
+@media (max-width: 720px) {
+  .pic-crop-overlay { align-items:stretch; padding:0; }
+  .pic-crop-card.pic-editor { width:100%; max-width:none; max-height:none; height:100dvh; border:0; border-radius:0; }
+  .pic-editor-body { grid-template-columns:1fr; gap:16px; padding:14px; }
+  .pic-editor .pic-crop-stage { width:min(78vw,390px); }
+  .pic-editor-panel { display:grid; grid-template-columns:72px 1fr; gap:8px 12px; align-items:center; }
+  .pic-avatar-preview { grid-row:1/4; width:72px; height:72px; margin:0; border-width:3px; }
+  .pic-avatar-preview canvas { width:72px; height:72px; }
+  .pic-editor-panel>strong,.pic-editor-panel>small { text-align:left; }
+  .pic-editor-panel>small { margin:0; }
+  .pic-editor-panel>label { grid-column:1/-1; margin:4px 0 0; }
+  .pic-editor .pic-crop-tools,.pic-transform-tools { grid-column:1/-1; }
+  .pic-transform-tools { grid-template-columns:repeat(3,1fr); margin-top:4px; }
+  .pic-transform-tools [data-crop-reset] { grid-column:auto; }
+  .pic-editor>.pic-crop-actions { padding-bottom:max(14px,env(safe-area-inset-bottom)); }
+  .pic-editor>.pic-crop-actions button { min-width:0; flex:1; }
 }
 
 /* ============================================================
@@ -5040,10 +5095,8 @@ body.haven-open {
     gap: 2px !important;
   }
 
-  #mood-heatmap > div > div {
-    width: 100% !important;
-    height: 8px !important;
-  }
+  #mood-heatmap .mood-day { width:100% !important; height:12px !important; }
+  #mood-heatmap .mood-day::before { inset:3px 1px; }
 
   .expense-add-form {
     flex-wrap: wrap;

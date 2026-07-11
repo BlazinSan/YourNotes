@@ -3,6 +3,14 @@ const path = require('path');
 const fs = require('fs');
 const { fileURLToPath } = require('url');
 
+// The optional asset-heavy Haven build has a different product identity but
+// intentionally shares the normal app's local notes, pins, and preferences.
+let packageMeta = {};
+try { packageMeta = require('./package.json'); } catch (_) {}
+if (packageMeta.havenEdition === true) {
+  app.setPath('userData', path.join(app.getPath('appData'), 'YourNotes'));
+}
+
 // Blocklist for shell.openPath / saved board files: refuse launching executables
 // or scripts that arrived via synced/cloud data (poisoned board items, dropped files).
 const BLOCKED_EXT = new Set(['.exe','.bat','.cmd','.com','.msi','.lnk','.ps1','.vbs','.js','.scr','.jar','.hta','.mjs','.cjs','.reg','.wsf','.wsh','.pif','.cpl','.msc','.gadget','.application','.ws']);

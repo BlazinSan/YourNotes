@@ -4114,7 +4114,7 @@ window.saveJournal = function() {
     if (currentMood) {
       const history = JSON.parse(localStorage.getItem('opennotes_mood_history')) || {};
       const todayStr = getLocalDateStr(new Date());
-      history[todayStr] = currentMood;
+      history[todayStr] = { mood: currentMood, text: textEl.value, savedAt: Date.now() };
       localStorage.setItem('opennotes_mood_history', JSON.stringify(history));
       renderMoodHeatmap();
     }
@@ -4148,17 +4148,16 @@ function renderMoodHeatmap() {
       cellDate.setDate(cellDate.getDate() + (week * 7) + day);
       const dateStr = getLocalDateStr(cellDate);
       
-      const cell = document.createElement('div');
-      cell.style.width = '10px';
-      cell.style.height = '10px';
-      cell.style.borderRadius = '2px';
-      cell.title = dateStr + (history[dateStr] ? ` : ${history[dateStr]}` : '');
+      const rawEntry = history[dateStr];
+      const entry = typeof rawEntry === 'string' ? { mood: rawEntry, text: '' } : rawEntry;
+      const cell = document.createElement('button');
+      cell.type = 'button';
+      cell.className = 'mood-day';
+      cell.setAttribute('aria-label', `${dateStr}${entry?.mood ? `, mood ${entry.mood}` : ', no mood logged'}`);
+      cell.title = dateStr + (entry?.mood ? ` : ${entry.mood}` : '');
+      cell.onclick = () => openMoodDay(dateStr, entry);
       
-      if (history[dateStr]) {
-        cell.style.backgroundColor = moodColors[history[dateStr]] || 'var(--overlay-medium)';
-      } else {
-        cell.style.backgroundColor = 'var(--overlay-medium)';
-      }
+      cell.style.setProperty('--mood-day-color', entry?.mood ? (moodColors[entry.mood] || 'var(--overlay-medium)') : 'var(--overlay-medium)');
       
       col.appendChild(cell);
     }
@@ -4779,6 +4778,25 @@ try {
 } catch (err) {
   console.warn('Ignoring invalid pinned-board data', err);
 }
+
+function openMoodDay(dateStr, entry) {
+  document.querySelector('.mood-detail-overlay')?.remove();
+  const date = new Date(`${dateStr}T12:00:00`);
+  const overlay = document.createElement('div');
+  overlay.className = 'mood-detail-overlay';
+  const mood = entry?.mood || '—';
+  const note = String(entry?.text || '').trim();
+  overlay.innerHTML = `
+    <section class="mood-detail-card" role="dialog" aria-modal="true" aria-labelledby="mood-detail-title">
+      <header><div><span>${gsEscape(date.toLocaleDateString([], { weekday: 'long' }))}</span><h3 id="mood-detail-title">${gsEscape(date.toLocaleDateString([], { month: 'long', day: 'numeric', year: 'numeric' }))}</h3></div><button type="button" aria-label="Close">×</button></header>
+      <div class="mood-detail-summary"><span class="mood-detail-emoji">${gsEscape(mood)}</span><div><small>Mood</small><strong>${entry?.mood ? 'Logged' : 'No entry'}</strong></div></div>
+      <div class="mood-detail-note"><small>Journal note</small><p>${note ? gsEscape(note) : 'Nothing was written for this day.'}</p></div>
+    </section>`;
+  const close = () => overlay.remove();
+  overlay.querySelector('header button').onclick = close;
+  overlay.onclick = event => { if (event.target === overlay) close(); };
+  document.body.appendChild(overlay);
+}
 function saveBoard() {
   try {
     localStorage.setItem('opennotes_board', JSON.stringify(boardItems));
@@ -5267,7 +5285,13 @@ function boardMetrics() {
   const coarse = window.matchMedia('(pointer: coarse)').matches;
   const scale = Math.max(coarse ? 0.55 : 0.01, Math.min(1, boardWidth / BOARD_BASE_WIDTH));
   const minCss = coarse ? BOARD_COARSE_MIN_CSS : BOARD_FINE_MIN_CSS;
-  const heightBase = Math.max(BOARD_REFERENCE_HEIGHT, 700 + Math.max(0, Math.ceil(boardItems.length / 8) - 1) * 300);
+  // The virtual board must cover the full visible banner. A fixed 700-unit
+  // height left the lower part of tall desktop dashboards unreachable.
+  const heightBase = Math.max(
+    BOARD_REFERENCE_HEIGHT,
+    boardHeight / scale,
+    700 + Math.max(0, Math.ceil(boardItems.length / 8) - 1) * 300
+  );
   return {
     scale,
     coarse,
@@ -6920,53 +6944,93 @@ function openPicCropper(img) {
   const overlay = document.createElement('div');
   overlay.className = 'pic-crop-overlay';
   overlay.innerHTML = `
-    <div class="pic-crop-card">
-      <header class="pic-crop-header"><div><h4>Edit profile photo</h4><p>Drag the image to frame your face</p></div><button class="pic-crop-x" aria-label="Close">×</button></header>
-      <div class="pic-crop-stage"><canvas width="420" height="420"></canvas><div class="pic-crop-mask"></div></div>
-      <div class="pic-crop-tools" aria-label="Photo controls">
-        <button type="button" data-crop-zoom="out" aria-label="Zoom out">−</button>
-        <input type="range" class="pic-crop-zoom" aria-label="Zoom" min="1" max="4" step="0.01" value="1" />
-        <button type="button" data-crop-zoom="in" aria-label="Zoom in">+</button>
-        <button type="button" data-crop-reset>Reset</button>
+    <div class="pic-crop-card pic-editor">
+      <header class="pic-crop-header"><div><span>Profile photo</span><h4>Frame your photo</h4><p>Drag or pinch the image. Your saved photo will use the circular area.</p></div><button class="pic-crop-x" aria-label="Close">×</button></header>
+      <div class="pic-editor-body">
+        <div class="pic-crop-stage"><canvas width="520" height="520"></canvas><div class="pic-crop-grid"></div><div class="pic-crop-mask"></div></div>
+        <aside class="pic-editor-panel">
+          <div class="pic-avatar-preview"><canvas width="144" height="144"></canvas></div>
+          <strong>Avatar preview</strong><small>Shown as it will appear throughout YourNotes.</small>
+          <label>Zoom</label>
+          <div class="pic-crop-tools" aria-label="Photo zoom">
+            <button type="button" data-crop-zoom="out" aria-label="Zoom out">−</button>
+            <input type="range" class="pic-crop-zoom" aria-label="Zoom" min="1" max="5" step="0.01" value="1" />
+            <button type="button" data-crop-zoom="in" aria-label="Zoom in">+</button>
+          </div>
+          <div class="pic-transform-tools">
+            <button type="button" data-crop-rotate aria-label="Rotate clockwise">↻ <span>Rotate</span></button>
+            <button type="button" data-crop-flip aria-label="Flip horizontally">⇋ <span>Flip</span></button>
+            <button type="button" data-crop-reset>Reset</button>
+          </div>
+        </aside>
       </div>
-      <div class="pic-crop-actions">
-        <button class="pic-crop-cancel">Cancel</button>
-        <button class="pic-crop-save">Save photo</button>
-      </div>
+      <div class="pic-crop-actions"><button class="pic-crop-cancel">Cancel</button><button class="pic-crop-save">Save profile photo</button></div>
     </div>`;
   document.body.appendChild(overlay);
   const canvas = overlay.querySelector('canvas'), ctx = canvas.getContext('2d');
+  const preview = overlay.querySelector('.pic-avatar-preview canvas'), pctx = preview.getContext('2d');
   const zoomEl = overlay.querySelector('.pic-crop-zoom');
-  const S = 420;
-  // cover-fit base scale, then user zoom on top
-  const base = Math.max(S / img.width, S / img.height);
-  let zoom = 1, ox = 0, oy = 0; // offsets in canvas px
+  const S = 520;
+  let zoom = 1, ox = 0, oy = 0, rotation = 0, flipped = false;
+
+  const rotatedDims = () => rotation % 180 ? { w: img.height, h: img.width } : { w: img.width, h: img.height };
+  const baseScale = () => { const d = rotatedDims(); return Math.max(S / d.w, S / d.h); };
 
   function clampPan() {
-    const w = img.width * base * zoom, h = img.height * base * zoom;
+    const d = rotatedDims(), base = baseScale();
+    const w = d.w * base * zoom, h = d.h * base * zoom;
     ox = Math.min((w - S) / 2, Math.max(-(w - S) / 2, ox));
     oy = Math.min((h - S) / 2, Math.max(-(h - S) / 2, oy));
   }
+  function renderInto(targetCtx, size) {
+    const base = baseScale(), scale = base * zoom * (size / S);
+    targetCtx.save();
+    targetCtx.fillStyle = '#161616'; targetCtx.fillRect(0, 0, size, size);
+    targetCtx.translate(size / 2 + ox * size / S, size / 2 + oy * size / S);
+    targetCtx.scale(flipped ? -1 : 1, 1);
+    targetCtx.rotate(rotation * Math.PI / 180);
+    targetCtx.drawImage(img, -img.width * scale / 2, -img.height * scale / 2, img.width * scale, img.height * scale);
+    targetCtx.restore();
+  }
   function draw() {
     clampPan();
-    const w = img.width * base * zoom, h = img.height * base * zoom;
-    ctx.fillStyle = '#111'; ctx.fillRect(0, 0, S, S);
-    ctx.drawImage(img, (S - w) / 2 + ox, (S - h) / 2 + oy, w, h);
+    renderInto(ctx, S);
+    pctx.save(); pctx.clearRect(0, 0, 144, 144); pctx.beginPath(); pctx.arc(72, 72, 72, 0, Math.PI * 2); pctx.clip(); renderInto(pctx, 144); pctx.restore();
   }
   draw();
 
-  let dragging = false, sx = 0, sy = 0, sox = 0, soy = 0;
+  const pointers = new Map();
+  let dragStart = null, pinchStart = null;
   const stage = overlay.querySelector('.pic-crop-stage');
-  stage.addEventListener('pointerdown', (e) => { dragging = true; sx = e.clientX; sy = e.clientY; sox = ox; soy = oy; stage.setPointerCapture(e.pointerId); });
-  stage.addEventListener('pointermove', (e) => { if (!dragging) return; ox = sox + (e.clientX - sx); oy = soy + (e.clientY - sy); draw(); });
-  stage.addEventListener('pointerup', () => { dragging = false; });
-  stage.addEventListener('wheel', (e) => { e.preventDefault(); zoom = Math.min(4, Math.max(1, zoom * (e.deltaY < 0 ? 1.08 : 1 / 1.08))); zoomEl.value = zoom; draw(); }, { passive: false });
+  stage.addEventListener('pointerdown', e => {
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY }); stage.setPointerCapture(e.pointerId);
+    if (pointers.size === 1) dragStart = { x: e.clientX, y: e.clientY, ox, oy };
+    else if (pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      pinchStart = { distance: Math.hypot(a.x - b.x, a.y - b.y), zoom };
+    }
+  });
+  stage.addEventListener('pointermove', e => {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.size === 2 && pinchStart) {
+      const [a, b] = [...pointers.values()];
+      zoom = Math.min(5, Math.max(1, pinchStart.zoom * Math.hypot(a.x - b.x, a.y - b.y) / Math.max(1, pinchStart.distance)));
+      zoomEl.value = zoom; draw(); return;
+    }
+    if (pointers.size === 1 && dragStart) { ox = dragStart.ox + e.clientX - dragStart.x; oy = dragStart.oy + e.clientY - dragStart.y; draw(); }
+  });
+  const endPointer = e => { pointers.delete(e.pointerId); pinchStart = null; dragStart = pointers.size === 1 ? { ...[...pointers.values()][0], ox, oy } : null; };
+  stage.addEventListener('pointerup', endPointer); stage.addEventListener('pointercancel', endPointer);
+  stage.addEventListener('wheel', (e) => { e.preventDefault(); zoom = Math.min(5, Math.max(1, zoom * (e.deltaY < 0 ? 1.08 : 1 / 1.08))); zoomEl.value = zoom; draw(); }, { passive: false });
   zoomEl.addEventListener('input', () => { zoom = parseFloat(zoomEl.value); draw(); });
   overlay.querySelectorAll('[data-crop-zoom]').forEach(button => button.onclick = () => {
-    zoom = Math.min(4, Math.max(1, zoom + (button.dataset.cropZoom === 'in' ? 0.15 : -0.15)));
+    zoom = Math.min(5, Math.max(1, zoom + (button.dataset.cropZoom === 'in' ? 0.15 : -0.15)));
     zoomEl.value = zoom; draw();
   });
-  overlay.querySelector('[data-crop-reset]').onclick = () => { zoom = 1; ox = 0; oy = 0; zoomEl.value = '1'; draw(); };
+  overlay.querySelector('[data-crop-rotate]').onclick = () => { rotation = (rotation + 90) % 360; ox = 0; oy = 0; draw(); };
+  overlay.querySelector('[data-crop-flip]').onclick = () => { flipped = !flipped; draw(); };
+  overlay.querySelector('[data-crop-reset]').onclick = () => { zoom = 1; ox = 0; oy = 0; rotation = 0; flipped = false; zoomEl.value = '1'; draw(); };
 
   const close = () => overlay.remove();
   overlay.querySelector('.pic-crop-cancel').onclick = close;
@@ -6975,10 +7039,8 @@ function openPicCropper(img) {
   overlay.querySelector('.pic-crop-save').onclick = async () => {
     // re-render the visible square at 512px
     const out = document.createElement('canvas'); out.width = out.height = 512;
-    const octx = out.getContext('2d'); const k = 512 / S;
-    const w = img.width * base * zoom, h = img.height * base * zoom;
-    octx.fillStyle = '#111'; octx.fillRect(0, 0, 512, 512);
-    octx.drawImage(img, ((S - w) / 2 + ox) * k, ((S - h) / 2 + oy) * k, w * k, h * k);
+    const octx = out.getContext('2d');
+    renderInto(octx, 512);
     try {
       const blob = await new Promise(res => out.toBlob(res, 'image/jpeg', 0.92));
       if (window.electronAPI && window.electronAPI.saveBoardFile) {
@@ -7188,7 +7250,9 @@ document.addEventListener('click', (e) => {
     document.addEventListener('pointerdown', pokeUi);
     document.addEventListener('keydown', onKey);
     try {
-      const engineModule = eng || await import('./haven/cinematic-engine.js');
+      const engineModule = eng || (import.meta.env.VITE_HAVEN_EDITION === 'heavy'
+        ? await import('./haven/engine3d.js')
+        : await import('./haven/engine.js'));
       // Closing while the split engine chunk is loading used to let this
       // continuation mount a hidden renderer after the overlay was gone.
       if (!isOpen || lifetime !== havenLifetime || sceneRevision !== havenSceneRevision) return;

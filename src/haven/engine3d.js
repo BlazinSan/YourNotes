@@ -13,6 +13,7 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 
 const BASE = import.meta.env.BASE_URL || './';
 let renderer, scene, camera, composer, bloom, raf = 0, container, clock, pmrem;
+let lastFrame = 0;
 let theme = 'cabin', spot = 0, mounted = false;
 let isMobile = false;
 let sceneRoot = null, fireLight = null, flames = [];
@@ -52,7 +53,7 @@ function loadModel(slug) {
       g.scene.traverse(o => {
         if (o.isMesh) {
           o.userData.keep = true;
-          o.castShadow = o.receiveShadow = false;
+          o.castShadow = o.receiveShadow = !isMobile;
           const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
           for (const mat of mats) {
             mat.envMapIntensity = 0.8;
@@ -489,8 +490,12 @@ function applyAngle(sp, instant) {
 function resize() { const r = container.getBoundingClientRect(); const w = r.width || innerWidth, h = r.height || innerHeight; renderer.setSize(w, h); composer.setSize(w, h); camera.aspect = w / h; if (renderer) applyRenderMood(); else camera.updateProjectionMatrix(); }
 function onMove(e) { mouseT.x = (e.clientX / innerWidth) * 2 - 1; mouseT.y = (e.clientY / innerHeight) * 2 - 1; }
 
-function loop() {
+function loop(now = 0) {
   raf = requestAnimationFrame(loop);
+  if (!mounted || document.hidden) return;
+  const frameInterval = isMobile ? 1000 / 30 : 1000 / 60;
+  if (now - lastFrame < frameInterval) return;
+  lastFrame = now - ((now - lastFrame) % frameInterval);
   // NOTE: getDelta() must be read first — getElapsedTime() also consumes the
   // internal delta, which would leave dt≈0 and freeze the camera tween.
   const dt = Math.min(0.05, clock.getDelta()), t = clock.elapsedTime;
@@ -538,7 +543,7 @@ export async function openHaven3D(el, th, sp) {
   bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.34, 0.7, 0.92); composer.addPass(bloom);
   clock = new THREE.Clock(); resize();
   addEventListener('resize', resize); addEventListener('mousemove', onMove);
-  mounted = true;
+  mounted = true; lastFrame = 0;
   await buildScene();
   if (mounted) loop();
   window.__hv3 = { scene, camera, renderer, bloom, get theme() { return theme; }, get spot() { return spot; } };
@@ -553,3 +558,4 @@ export function closeHaven3D() {
 }
 export async function setHavenTheme3D(th) { if (th === theme) return; theme = th; await buildScene(); }
 export function setHavenSeat3D(sp) { if (sp === spot) return; spot = sp; applyAngle(sp, false); }
+export async function retryHaven3D() { if (!container || !renderer) return false; await buildScene(); return true; }
