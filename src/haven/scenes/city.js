@@ -1,14 +1,44 @@
 // city.js — HIGH-RISE BEDROOM AT NIGHT
 // Warm lamp-lit bedroom facing a floor-to-ceiling glass wall over a vast night city.
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-export function build(ctx) {
+export async function build(ctx) {
   const { scene, quality } = ctx;
   const mobile = !!(quality && quality.mobile);
   const SEG = mobile ? 8 : 16;
 
   const root = new THREE.Group();
   scene.add(root);
+
+  const assetLoader = new GLTFLoader();
+  const loadAsset = (id) => new Promise((resolve) => {
+    assetLoader.load(`${import.meta.env.BASE_URL || './'}haven-assets/${id}/${id}.gltf`,
+      gltf => resolve(gltf.scene), undefined, () => resolve(null));
+  });
+  const fitAsset = (object, targetWidth, position, rotationY = 0) => {
+    if (!object) return null;
+    const box = new THREE.Box3().setFromObject(object);
+    const size = box.getSize(new THREE.Vector3());
+    const scale = targetWidth / Math.max(0.001, size.x);
+    object.scale.setScalar(scale);
+    object.rotation.y = rotationY;
+    box.setFromObject(object);
+    object.position.set(position[0], position[1] - box.min.y, position[2]);
+    object.traverse(child => {
+      if (!child.isMesh) return;
+      child.castShadow = !mobile;
+      child.receiveShadow = !mobile;
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      for (const material of materials) {
+        if (!material) continue;
+        material.envMapIntensity = 0.72;
+        material.roughness = Math.max(0.38, material.roughness ?? 0.7);
+      }
+    });
+    root.add(object);
+    return object;
+  };
 
   // ---------------------------------------------------------------- helpers
   function makeTex(w, h, draw) {
@@ -380,6 +410,28 @@ export function build(ctx) {
     new THREE.MeshStandardMaterial({ color: 0xb17656, roughness: 0.72 }));
   coffeeMug.position.set(0.35, 0.51, -0.05); coffee.add(coffeeMug);
   root.add(coffee);
+
+  // Reference-led living zone: real-scale textured furniture overlaps in a
+  // conversational arrangement, rather than reading as isolated primitives.
+  const [realSofa, loungeChair, marbleTable, realPlant] = await Promise.all([
+    loadAsset('sofa_02'), loadAsset('mid_century_lounge_chair'),
+    loadAsset('coffee_table_round_01'), loadAsset('potted_plant_02')
+  ]);
+  sofa.visible = false;
+  coffee.visible = false;
+  fitAsset(realSofa, 3.15, [-3.18, 0, 0.72], 0.08);
+  fitAsset(loungeChair, 1.18, [0.62, 0, 0.18], -0.62);
+  fitAsset(marbleTable, 1.42, [-1.05, 0, -0.48], 0.12);
+  fitAsset(realPlant, 1.05, [4.78, 0, -2.72], -0.35);
+
+  const livingPool = new THREE.PointLight(0xffa96a, mobile ? 1.25 : 3.2, 7.5, 2);
+  livingPool.position.set(-1.25, 1.6, 0.15);
+  livingPool.castShadow = !mobile;
+  if (!mobile) {
+    livingPool.shadow.mapSize.set(1024, 1024);
+    livingPool.shadow.bias = -0.0003;
+  }
+  root.add(livingPool);
 
   // ---------------------------------------------------------------- glass wall + mullions
   const glass = new THREE.Mesh(new THREE.PlaneGeometry(W, H),

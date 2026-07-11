@@ -121,14 +121,6 @@ export function build(ctx) {
   sun.position.set(-7, 5.1, -121);
   root.add(sun);
 
-  const glowTex = makeTexture(128, 128, (g, w, h) => {
-    const gr = g.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);
-    gr.addColorStop(0.0, 'rgba(255,224,168,0.95)');
-    gr.addColorStop(0.35, 'rgba(255,150,95,0.40)');
-    gr.addColorStop(1.0, 'rgba(255,120,80,0)');
-    g.fillStyle = gr;
-    g.fillRect(0, 0, w, h);
-  });
   // Layered circles avoid the rectangular alpha fringe some Windows GPUs
   // produced around the old canvas sprite.
   const haloMat = new THREE.MeshBasicMaterial({
@@ -874,7 +866,7 @@ export function build(ctx) {
     // sun path shimmer
     sunPathMat.opacity = 0.42 + 0.1 * Math.sin(t * 1.4) + 0.06 * Math.sin(t * 2.63 + 1.7);
     sunPath.scale.x = 1 + 0.06 * Math.sin(t * 0.77);
-    glowMat.opacity = 0.8 + 0.06 * Math.sin(t * 0.9);
+    haloMat.opacity = 0.1 + 0.025 * Math.sin(t * 0.9);
 
     // star twinkle (alternating groups)
     starMats[0].opacity = 0.72 + 0.2 * Math.sin(t * 0.6);

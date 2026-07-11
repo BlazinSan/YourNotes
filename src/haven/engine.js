@@ -241,7 +241,7 @@ class HavenEngine {
 
     this.disposeScene();
     const nextScene = new THREE.Scene();
-    const nextActive = mod.build({
+    const nextActive = await mod.build({
       THREE,
       scene: nextScene,
       renderer: this.renderer,
