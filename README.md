@@ -29,7 +29,7 @@ Built and maintained by **[@BlazinSan](https://github.com/BlazinSan)**.
 
 ## Core features
 
-- **Notes & wiki-links** — markdown shortcuts, `[[linking]]`, and a live graph map of how notes connect.
+- **Notes & wiki-links** — markdown shortcuts, linking that connects notes together, and a live graph map of how notes connect.
 - **Tasks, Calendar, Habits, Goals & Books** — plan deadlines and track streaks in one place.
 - **College Notes** — import multiple lecture PDFs into subject folders and read them fullscreen.
 - **Focus Session** — pomodoro timer, daily mood log, expense tracker, and the lofi player.
