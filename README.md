@@ -45,7 +45,7 @@ Built and maintained by **[@BlazinSan](https://github.com/BlazinSan)**.
       <i>A bird's-eye view of every note and project.</i>
     </td>
     <td align="center" width="50%">
-      <img src="gallery/YN2_session.png" width="100%">
+      <img alt="image" src="https://github.com/user-attachments/assets/47ee8d0d-ef3b-4dd1-aaad-1e05c46128c8" width="100%">
       <br><b>Focus Session + Lofi</b><br>
       <i>Timer, daily log, expenses, and royalty-free lofi.</i>
     </td>
