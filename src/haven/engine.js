@@ -1,9 +1,9 @@
 // ============================================================
 // Safe Haven renderer.
 //
-// The scene modules deliberately use lightweight procedural geometry and
-// canvas textures. That keeps the retreat responsive inside Electron and the
-// Android WebView while still allowing nine hand-composed camera views.
+// The scene modules combine authored assets with lightweight realtime effects.
+// Built scenes are retained while the overlay is open so switching themes does
+// not repeatedly parse and upload the same GLBs.
 // ============================================================
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
@@ -32,9 +32,15 @@ function disposeObjectTree(root) {
   const geometries = new Set();
   const materials = new Set();
   const textures = new Set();
+  const shadows = new Set();
 
   root.traverse((object) => {
     if (object.geometry) geometries.add(object.geometry);
+    // LightShadow owns one or more renderer-backed targets after its first
+    // shadow render. Forced retry/context recovery rebuilds a scene in-place,
+    // so release those targets here instead of retaining them until the whole
+    // WebGL renderer is destroyed.
+    if (object.shadow?.dispose) shadows.add(object.shadow);
     const objectMaterials = Array.isArray(object.material)
       ? object.material
       : (object.material ? [object.material] : []);
@@ -56,6 +62,7 @@ function disposeObjectTree(root) {
   textures.forEach((texture) => texture.dispose());
   materials.forEach((material) => material.dispose());
   geometries.forEach((geometry) => geometry.dispose());
+  shadows.forEach((shadow) => shadow.dispose());
 }
 
 class HavenEngine {
@@ -69,6 +76,7 @@ class HavenEngine {
     this.scene = null;
     this.camera = null;
     this.active = null;
+    this.sceneCache = new Map();
     this.container = null;
     this.theme = 'cabin';
     this.seat = 0;
@@ -175,7 +183,7 @@ class HavenEngine {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.04;
     this.renderer.shadowMap.enabled = !this.mobile;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.domElement.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;display:block;';
     this.renderer.domElement.setAttribute('aria-label', 'Safe Haven scenery');
     container.appendChild(this.renderer.domElement);
@@ -236,10 +244,18 @@ class HavenEngine {
     if (!force && this.active && nextTheme === this.theme) return true;
     this.theme = nextTheme;
     const revision = ++this.sceneRevision;
+
+    if (force) this.disposeCachedTheme(nextTheme);
+    const cached = this.sceneCache.get(nextTheme);
+    if (cached) {
+      if (!this.mounted || revision !== this.sceneRevision) return false;
+      this.activateScene(nextTheme, cached);
+      return true;
+    }
+
     const mod = await SCENES[nextTheme]();
     if (!this.mounted || revision !== this.sceneRevision) return false;
 
-    this.disposeScene();
     const nextScene = new THREE.Scene();
     const nextActive = await mod.build({
       THREE,
@@ -258,18 +274,21 @@ class HavenEngine {
       return false;
     }
 
-    this.scene = nextScene;
-    this.active = nextActive;
-    if (!this.mobile) {
-      nextScene.traverse((object) => {
-        if (object.isMesh && !object.material?.transparent) {
-          object.castShadow = true;
-          object.receiveShadow = true;
-        }
-      });
-    }
-    if (this.renderPass) this.renderPass.scene = nextScene;
-    if (this.gtao) this.gtao.scene = nextScene;
+    const entry = { scene: nextScene, active: nextActive };
+    this.sceneCache.set(nextTheme, entry);
+    this.activateScene(nextTheme, entry);
+    return true;
+  }
+
+  activateScene(theme, entry) {
+    this.theme = theme;
+    this.scene = entry.scene;
+    this.active = entry.active;
+    // Each authored scene owns its measured shadow policy. A blanket traversal
+    // here used to turn sky domes, water, glass, and every high-poly prop into
+    // shadow casters after the scene had deliberately disabled them.
+    if (this.renderPass) this.renderPass.scene = entry.scene;
+    if (this.gtao) this.gtao.scene = entry.scene;
 
     const sceneBloom = this.active?.bloom || {};
     if (this.bloom) {
@@ -279,7 +298,6 @@ class HavenEngine {
     }
     this.renderer.toneMappingExposure = clamp(this.active?.exposure ?? 1.04, 0.82, 1.18);
     this.setSeat(this.seat, true);
-    return true;
   }
 
   seatPose(index) {
@@ -381,11 +399,22 @@ class HavenEngine {
     this.lastTickMs = 0;
   }
 
-  disposeScene() {
-    if (this.active?.dispose) {
-      try { this.active.dispose(); } catch (_) {}
+  disposeCachedTheme(theme) {
+    const entry = this.sceneCache.get(theme);
+    if (!entry) return;
+    if (entry.active?.dispose) {
+      try { entry.active.dispose(); } catch (_) {}
     }
-    disposeObjectTree(this.scene);
+    disposeObjectTree(entry.scene);
+    this.sceneCache.delete(theme);
+    if (this.scene === entry.scene) {
+      this.active = null;
+      this.scene = null;
+    }
+  }
+
+  disposeAllScenes() {
+    for (const theme of [...this.sceneCache.keys()]) this.disposeCachedTheme(theme);
     this.active = null;
     this.scene = null;
     if (this.renderPass) this.renderPass.scene = new THREE.Scene();
@@ -411,7 +440,7 @@ class HavenEngine {
   destroy() {
     this.sceneRevision++;
     this.stop();
-    this.disposeScene();
+    this.disposeAllScenes();
     window.removeEventListener('resize', this._onResize);
     window.removeEventListener('pointermove', this._onMove);
     document.removeEventListener('visibilitychange', this._onVisibility);

@@ -554,9 +554,9 @@
                   <select id="lofi-track" onchange="changeLofiTrack()" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--panel-border); background: transparent; color: var(--text-primary); font-family: inherit; cursor: pointer; appearance: auto;">
                     <!-- ponytail: these are royalty-free (Pixabay Content License — free for commercial use, no
                          attribution). If a CDN URL ever 404s, swap it here or use "Load your own track". -->
-                    <option value="https://cdn.pixabay.com/download/audio/2022/05/27/audio_1808fbf07a.mp3?filename=lofi-study-112191.mp3">Lofi Study</option>
-                    <option value="https://cdn.pixabay.com/download/audio/2021/08/09/audio_8a8c2e7d9d.mp3?filename=lofi-chill-medium-version-159456.mp3">Chill Beats</option>
-                    <option value="https://cdn.pixabay.com/download/audio/2023/07/30/audio_e0908e8569.mp3?filename=good-night-160166.mp3">Good Night</option>
+                    <option value="./audio/lofi/lofi-study-112191.mp3">Lofi Study</option>
+                    <option value="./audio/lofi/lofi-chill-159456.mp3">Chill Beats</option>
+                    <option value="./audio/lofi/good-night-160166.mp3">Good Night</option>
                   </select>
                   <div style="display: flex; align-items: center; gap: 12px;">
                     <button id="lofi-toggle" class="lofi-toggle" onclick="toggleLofi()" style="background: var(--accent-color); color: #fff; border: none; width: 44px; height: 44px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
@@ -957,12 +957,34 @@
             <button type="button" class="haven-theme-btn" data-theme="beach" onclick="setHavenTheme('beach')">🏖️ Beach</button>
             <button type="button" class="haven-theme-btn" data-theme="city" onclick="setHavenTheme('city')">🌆 Highrise</button>
           </div>
-          <button class="haven-rotate" id="haven-rotate" onclick="toggleHavenOrientation()" title="Rotate">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 9 9"></path><polyline points="21 3 21 9 15 9"></polyline></svg>
-          </button>
-          <button class="haven-close" onclick="closeHaven()" title="Exit (Esc)">
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-          </button>
+          <div class="haven-top-actions">
+            <div class="haven-lofi-wrap">
+              <button type="button" class="haven-lofi-menu" id="haven-lofi-menu" onclick="toggleHavenLofiPanel(event)" title="Lofi music" aria-label="Open lofi music controls" aria-expanded="false" aria-controls="haven-lofi-panel">
+                <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle><path d="M9 18V6l12-2v12M9 9l12-2"></path></svg>
+              </button>
+              <div class="haven-lofi-panel" id="haven-lofi-panel" hidden role="group" aria-label="Lofi music controls">
+                <div class="haven-lofi-copy">
+                  <span class="haven-lofi-kicker">Now playing</span>
+                  <strong class="lofi-now-playing">Lofi Study</strong>
+                </div>
+                <div class="haven-lofi-controls">
+                  <button type="button" class="lofi-toggle haven-lofi-play" onclick="toggleLofi()" aria-label="Play lofi music" aria-pressed="false">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                  </button>
+                  <button type="button" class="haven-lofi-next" onclick="nextLofiTrack()" title="Next track" aria-label="Next lofi track">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><polygon points="5 4 15 12 5 20 5 4"></polygon><rect x="17" y="4" width="2.5" height="16"></rect></svg>
+                  </button>
+                  <label class="haven-lofi-volume" title="Lofi volume">
+                    <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor" aria-hidden="true"><path d="M3 10v4h4l5 5V5L7 10H3z"></path><path d="M16 8a5 5 0 0 1 0 8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg>
+                    <input class="lofi-vol" type="range" min="0" max="1" step="0.05" value="0.6" oninput="setLofiVolume(this.value)" aria-label="Lofi music volume" />
+                  </label>
+                </div>
+              </div>
+            </div>
+            <button type="button" class="haven-close" onclick="closeHaven()" title="Exit (Esc)" aria-label="Exit Safe Haven">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+          </div>
         </div>
         <div class="haven-ui-bottom">
           <div class="haven-title-badge"><span id="haven-sub">Rain on the glass, chess by a warm hearth.</span></div>

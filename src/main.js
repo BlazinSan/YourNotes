@@ -4725,15 +4725,41 @@ function updateAmbientTemp() {
 // Lofi player (beside Focus Session)
 // -----------------------------------------
 let lofiPlaying = false;
+let lofiCustomObjectUrl = null;
+let lofiLastErrorToastAt = 0;
 function lofiEl() { return document.getElementById('lofi-audio'); }
 function lofiVol() { const v = document.getElementById('lofi-volume'); return v ? parseFloat(v.value) : 0.6; }
+
+function setLofiPlaybackState(playing) {
+  lofiPlaying = !!playing;
+  setLofiIcon(lofiPlaying);
+}
+
+function releaseLofiObjectUrl() {
+  if (!lofiCustomObjectUrl) return;
+  URL.revokeObjectURL(lofiCustomObjectUrl);
+  lofiCustomObjectUrl = null;
+}
+
+function showLofiPlaybackError(message = 'Could not play this track. Try another track or load your own audio file.') {
+  setLofiPlaybackState(false);
+  const now = Date.now();
+  if (now - lofiLastErrorToastAt < 1200) return;
+  lofiLastErrorToastAt = now;
+  showAppToast(message, { duration: 5200 });
+}
 
 // Update every lofi play/pause button (Session panel + Focus fullscreen share one audio)
 function setLofiIcon(playing) {
   const html = playing
     ? '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>'
     : '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>';
-  document.querySelectorAll('.lofi-toggle').forEach(b => { b.innerHTML = html; });
+  document.querySelectorAll('.lofi-toggle').forEach(b => {
+    b.innerHTML = html;
+    b.setAttribute('aria-pressed', String(playing));
+    b.setAttribute('aria-label', playing ? 'Pause lofi music' : 'Play lofi music');
+    b.title = playing ? 'Pause lofi music' : 'Play lofi music';
+  });
 }
 function setLofiNowPlaying(text) {
   document.querySelectorAll('.lofi-now-playing').forEach(el => { el.textContent = text; });
@@ -4746,22 +4772,26 @@ window.toggleLofi = function() {
   if (!audio.src && sel) audio.src = sel.value;
   if (audio.paused) {
     audio.volume = lofiVol();
-    audio.play().then(() => { lofiPlaying = true; setLofiIcon(true); })
-      .catch(() => alert('Could not play this track. Check your connection, or use "Load your own track".'));
+    audio.play().catch(() => showLofiPlaybackError());
   } else {
     audio.pause();
-    lofiPlaying = false;
-    setLofiIcon(false);
   }
 };
 
-window.changeLofiTrack = function() {
+window.changeLofiTrack = function(forcePlay = false) {
   const sel = document.getElementById('lofi-track');
   const audio = lofiEl();
   if (!sel || !audio) return;
+  const shouldResume = forcePlay === true || !audio.paused || lofiPlaying;
+  const previousObjectUrl = lofiCustomObjectUrl;
+  lofiCustomObjectUrl = null;
   audio.src = sel.value;
+  if (previousObjectUrl) URL.revokeObjectURL(previousObjectUrl);
   setLofiNowPlaying(sel.options[sel.selectedIndex].text);
-  if (lofiPlaying) { audio.volume = lofiVol(); audio.play().catch(() => {}); }
+  if (shouldResume) {
+    audio.volume = lofiVol();
+    audio.play().catch(() => showLofiPlaybackError('That lofi track could not be opened. Try another track or load your own audio file.'));
+  }
 };
 
 // Advance to the next built-in track (used by the Focus fullscreen control)
@@ -4769,8 +4799,7 @@ window.nextLofiTrack = function() {
   const sel = document.getElementById('lofi-track');
   if (!sel || !sel.options.length) return;
   sel.selectedIndex = (sel.selectedIndex + 1) % sel.options.length;
-  changeLofiTrack();
-  if (!lofiPlaying) toggleLofi();
+  changeLofiTrack(true);
 };
 
 window.setLofiVolume = function(v) {
@@ -4783,11 +4812,37 @@ window.loadLofiFile = function(e) {
   const file = e.target.files[0];
   const audio = lofiEl();
   if (!file || !audio) return;
-  audio.src = URL.createObjectURL(file);
+  releaseLofiObjectUrl();
+  lofiCustomObjectUrl = URL.createObjectURL(file);
+  audio.src = lofiCustomObjectUrl;
   setLofiNowPlaying(file.name);
   audio.volume = lofiVol();
-  audio.play().then(() => { lofiPlaying = true; setLofiIcon(true); }).catch(() => {});
+  audio.play().catch(() => showLofiPlaybackError('That audio file could not be played on this device.'));
+  // Let the same file be selected again after switching tracks.
+  e.target.value = '';
 };
+
+// The media element is the single source of truth shared by Session, Focus and
+// Safe Haven. Browser/OS media controls and source failures can change playback
+// without going through our buttons, so keep every surface synchronized from
+// native media events rather than optimistic promise state.
+const sharedLofiAudio = lofiEl();
+if (sharedLofiAudio && sharedLofiAudio.dataset.stateSyncReady !== 'true') {
+  sharedLofiAudio.dataset.stateSyncReady = 'true';
+  sharedLofiAudio.addEventListener('play', () => setLofiPlaybackState(true));
+  sharedLofiAudio.addEventListener('playing', () => setLofiPlaybackState(true));
+  sharedLofiAudio.addEventListener('pause', () => setLofiPlaybackState(false));
+  sharedLofiAudio.addEventListener('ended', () => setLofiPlaybackState(false));
+  sharedLofiAudio.addEventListener('emptied', () => setLofiPlaybackState(false));
+  sharedLofiAudio.addEventListener('error', () => {
+    if (!sharedLofiAudio.currentSrc && !sharedLofiAudio.src) return;
+    showLofiPlaybackError('This lofi track could not be decoded or opened. Try another track.');
+  });
+  window.addEventListener('pagehide', releaseLofiObjectUrl, { once: true });
+  const initialTrack = document.getElementById('lofi-track');
+  if (initialTrack?.selectedOptions?.[0]) setLofiNowPlaying(initialTrack.selectedOptions[0].text);
+  setLofiPlaybackState(false);
+}
 
 // -----------------------------------------
 // Dashboard Board — drop files/images/notes; move + resize; persistent.
@@ -7158,7 +7213,7 @@ document.addEventListener('click', (e) => {
   const VIEW_NAMES = {
     cabin: ['Hearth view', 'Rain window view', 'Reading chair view'],
     beach: ['Shore lantern view', 'Palm walk and hut view', 'Stargazing view'],
-    city: ['Window desk view', 'Bed at the glass view', 'Sofa sunset view']
+    city: ['Workstation view', 'Fireside lounge view', 'Wide loft view']
   };
 
   function syncUi() {
@@ -7181,12 +7236,18 @@ document.addEventListener('click', (e) => {
     document.querySelectorAll('#haven-fs .haven-theme-btn, #haven-fs .haven-spot').forEach((button) => {
       button.disabled = !!busy;
     });
+    if (isOpen) pokeUi();
+  }
+
+  function isHavenPhone() {
+    return Capacitor.isNativePlatform() || window.matchMedia('(pointer: coarse)').matches;
   }
 
   function syncHavenLayoutClasses() {
-    const phone = Capacitor.isNativePlatform() || window.matchMedia('(pointer: coarse)').matches;
+    const phone = isHavenPhone();
     fsEl.classList.toggle('haven-mobile-lite', phone);
-    fsEl.classList.toggle('haven-phone-landscape', phone && !havenPortrait);
+    fsEl.classList.toggle('haven-phone-landscape', phone);
+    if (!phone) fsEl.classList.remove('hide-ui');
   }
 
   function onRenderStatus(event) {
@@ -7198,21 +7259,82 @@ document.addEventListener('click', (e) => {
     }
   }
   window.addEventListener('haven-render-status', onRenderStatus);
+  window.addEventListener('resize', () => {
+    if (!isOpen) return;
+    syncHavenLayoutClasses();
+    pokeUi();
+  });
 
   // ---------- Auto-hide UI ----------
   let hideTimer = null;
+  let havenRangeActive = false;
+  const lofiPanel = document.getElementById('haven-lofi-panel');
+  const lofiMenuButton = document.getElementById('haven-lofi-menu');
+
+  function isHavenLofiOpen() {
+    return !!lofiPanel && !lofiPanel.hidden;
+  }
+
+  function canAutoHideHavenUi() {
+    return isOpen
+      && isHavenPhone()
+      && !fsEl.classList.contains('is-loading')
+      && !isHavenLofiOpen()
+      && !havenRangeActive;
+  }
+
+  function scheduleHavenUiHide() {
+    clearTimeout(hideTimer);
+    if (!canAutoHideHavenUi()) return;
+    hideTimer = setTimeout(() => {
+      if (canAutoHideHavenUi()) fsEl.classList.add('hide-ui');
+    }, 3000);
+  }
+
   function pokeUi() {
     fsEl.classList.remove('hide-ui');
-    clearTimeout(hideTimer);
-    hideTimer = setTimeout(() => fsEl.classList.add('hide-ui'), 3000);
+    scheduleHavenUiHide();
   }
-  function onMove() { pokeUi(); }
+
+  function setHavenLofiOpen(open) {
+    if (!lofiPanel || !lofiMenuButton) return;
+    lofiPanel.hidden = !open;
+    lofiMenuButton.setAttribute('aria-expanded', String(open));
+    lofiMenuButton.setAttribute('aria-label', open ? 'Close lofi music controls' : 'Open lofi music controls');
+    fsEl.classList.toggle('haven-lofi-open', open);
+    if (open) {
+      const volumeControl = lofiPanel.querySelector('.lofi-vol');
+      if (volumeControl) volumeControl.value = String(lofiVol());
+      fsEl.classList.remove('hide-ui');
+      clearTimeout(hideTimer);
+    } else {
+      pokeUi();
+    }
+  }
+
+  window.toggleHavenLofiPanel = function (event) {
+    event?.stopPropagation?.();
+    setHavenLofiOpen(!isHavenLofiOpen());
+  };
+
+  function onMove() {
+    if (isHavenPhone()) pokeUi();
+  }
+  function onPointerDown(event) {
+    if (isHavenLofiOpen() && !event.target.closest('.haven-lofi-wrap')) setHavenLofiOpen(false);
+    havenRangeActive = !!event.target.closest('#haven-fs input[type="range"]');
+    pokeUi();
+  }
+  function onPointerUp() {
+    if (!havenRangeActive) return;
+    havenRangeActive = false;
+    pokeUi();
+  }
   function onKey(e) { if (e.key === 'Escape') window.closeHaven(); else pokeUi(); }
 
   // ---------- Public API ----------
-  // On phone, open the haven in landscape (it's a wide cinematic space).
-  // User can flip to portrait with the rotate button; we don't hard-lock.
-  let havenPortrait = false;
+  // On phone, the Haven opens in its authored wide composition. The previous
+  // device orientation is restored when the user exits.
   let havenPreviousOrientation = null;
   async function lockOrientation(orient) {
     if (!Capacitor.isNativePlatform()) return;
@@ -7239,19 +7361,11 @@ document.addEventListener('click', (e) => {
     });
     return havenOrientationQueue;
   }
-  window.toggleHavenOrientation = function () {
-    havenPortrait = !havenPortrait;
-    requestHavenOrientation(havenPortrait ? 'portrait' : 'landscape');
-    syncHavenLayoutClasses();
-    const b = document.getElementById('haven-rotate'); if (b) b.classList.toggle('active', havenPortrait);
-  };
-
   window.openHaven = async function () {
     if (isOpen) return;
     isOpen = true;
     const lifetime = ++havenLifetime;
     const sceneRevision = ++havenSceneRevision;
-    havenPortrait = false;
     havenPreviousOrientation = null;
     if (Capacitor.isNativePlatform()) {
       try {
@@ -7270,7 +7384,9 @@ document.addEventListener('click', (e) => {
     startAudio();
     pokeUi();
     document.addEventListener('mousemove', onMove);
-    document.addEventListener('pointerdown', pokeUi);
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('pointerup', onPointerUp);
+    document.addEventListener('pointercancel', onPointerUp);
     document.addEventListener('keydown', onKey);
     try {
       const engineModule = eng || (import.meta.env.VITE_HAVEN_EDITION === 'heavy'
@@ -7302,11 +7418,15 @@ document.addEventListener('click', (e) => {
     stopAudio();
     try { if (eng) eng.closeHaven3D(); } catch (_) {}
     fsEl.style.display = 'none';
-    fsEl.classList.remove('is-loading', 'has-render-error', 'haven-phone-landscape', 'haven-mobile-lite');
+    setHavenLofiOpen(false);
+    fsEl.classList.remove('is-loading', 'has-render-error', 'hide-ui', 'haven-phone-landscape', 'haven-mobile-lite', 'haven-lofi-open');
     document.body.classList.remove('haven-open');
     clearTimeout(hideTimer);
+    havenRangeActive = false;
     document.removeEventListener('mousemove', onMove);
-    document.removeEventListener('pointerdown', pokeUi);
+    document.removeEventListener('pointerdown', onPointerDown);
+    document.removeEventListener('pointerup', onPointerUp);
+    document.removeEventListener('pointercancel', onPointerUp);
     document.removeEventListener('keydown', onKey);
   };
 

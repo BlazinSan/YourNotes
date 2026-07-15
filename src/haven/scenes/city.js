@@ -1,831 +1,676 @@
-// city.js — HIGH-RISE BEDROOM AT NIGHT
-// Warm lamp-lit bedroom facing a floor-to-ceiling glass wall over a vast night city.
+// city.js — authored blue-hour high-rise loft.
+//
+// The room and every visible furnishing come from the user's Blender scene.
+// Runtime code is intentionally limited to loading, lighting, cameras and
+// ambient motion (glass rain, flames and emissive flicker).
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-export async function build(ctx) {
-  const { scene, quality } = ctx;
-  const mobile = !!(quality && quality.mobile);
-  const SEG = mobile ? 8 : 16;
 
-  const root = new THREE.Group();
-  scene.add(root);
+const fromBlender = (x, y, z) => new THREE.Vector3(x, z, -y);
 
-  const assetLoader = new GLTFLoader();
-  const loadAsset = (id) => new Promise((resolve) => {
-    assetLoader.load(`${import.meta.env.BASE_URL || './'}haven-assets/${id}/${id}.gltf`,
-      gltf => resolve(gltf.scene), undefined, () => resolve(null));
+function createSky(mobile) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 16;
+  canvas.height = 512;
+  const context = canvas.getContext('2d');
+  const gradient = context.createLinearGradient(0, 0, 0, canvas.height);
+  gradient.addColorStop(0, '#0b1538');
+  gradient.addColorStop(0.34, '#202b59');
+  gradient.addColorStop(0.58, '#614061');
+  gradient.addColorStop(0.72, '#bd655f');
+  gradient.addColorStop(0.86, '#e39a78');
+  gradient.addColorStop(1, '#111223');
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const sky = new THREE.Mesh(
+    new THREE.SphereGeometry(90, mobile ? 18 : 28, mobile ? 12 : 18),
+    new THREE.MeshBasicMaterial({ map: texture, side: THREE.BackSide, fog: false, depthWrite: false }),
+  );
+  sky.name = 'Loft_Sunset_Sky';
+  return sky;
+}
+
+function createWindowRain(mobile) {
+  const count = mobile ? 78 : 168;
+  const positions = new Float32Array(count * 6);
+  const speed = new Float32Array(count);
+  const length = new Float32Array(count);
+
+  for (let index = 0; index < count; index += 1) {
+    const offset = index * 6;
+    const x = THREE.MathUtils.lerp(-7.05, 7.05, Math.random());
+    const y = THREE.MathUtils.lerp(0.25, 5.72, Math.random());
+    const streakLength = THREE.MathUtils.lerp(0.055, 0.23, Math.random());
+    positions[offset] = x;
+    positions[offset + 1] = y;
+    positions[offset + 2] = -6.192;
+    positions[offset + 3] = x + THREE.MathUtils.lerp(-0.012, 0.012, Math.random());
+    positions[offset + 4] = y + streakLength;
+    positions[offset + 5] = -6.192;
+    speed[index] = THREE.MathUtils.lerp(0.14, 0.48, Math.random());
+    length[index] = streakLength;
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  const attribute = new THREE.BufferAttribute(positions, 3);
+  attribute.setUsage(THREE.DynamicDrawUsage);
+  geometry.setAttribute('position', attribute);
+  const material = new THREE.LineBasicMaterial({
+    color: 0xb8d9ef,
+    transparent: true,
+    opacity: mobile ? 0.24 : 0.34,
+    depthWrite: false,
+    blending: THREE.NormalBlending,
   });
-  const fitAsset = (object, targetWidth, position, rotationY = 0) => {
-    if (!object) return null;
-    const box = new THREE.Box3().setFromObject(object);
-    const size = box.getSize(new THREE.Vector3());
-    const scale = targetWidth / Math.max(0.001, size.x);
-    object.scale.setScalar(scale);
-    object.rotation.y = rotationY;
-    box.setFromObject(object);
-    object.position.set(position[0], position[1] - box.min.y, position[2]);
-    object.traverse(child => {
-      if (!child.isMesh) return;
-      child.castShadow = !mobile;
-      child.receiveShadow = !mobile;
-      const materials = Array.isArray(child.material) ? child.material : [child.material];
-      for (const material of materials) {
-        if (!material) continue;
-        material.envMapIntensity = 0.72;
-        material.roughness = Math.max(0.38, material.roughness ?? 0.7);
+  const rain = new THREE.LineSegments(geometry, material);
+  rain.name = 'Rain_On_Window_Glass_Only';
+  rain.renderOrder = 12;
+
+  return {
+    object: rain,
+    update(delta) {
+      const step = Math.min(delta, 0.05);
+      for (let index = 0; index < count; index += 1) {
+        const offset = index * 6;
+        let y = positions[offset + 1] - speed[index] * step;
+        if (y < 0.18) y = 5.72 + Math.random() * 0.24;
+        positions[offset + 1] = y;
+        positions[offset + 4] = y + length[index];
       }
-    });
-    root.add(object);
-    return object;
+      attribute.needsUpdate = true;
+    },
+  };
+}
+
+function createFire(mobile) {
+  const uniforms = { time: { value: 0 } };
+  const material = new THREE.ShaderMaterial({
+    uniforms,
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+    vertexShader: `
+      uniform float time;
+      varying vec2 vUv;
+      varying float vPulse;
+      void main() {
+        vec3 p = position;
+        float h = clamp(uv.y, 0.0, 1.0);
+        float taper = smoothstep(0.12, 0.78, h);
+        p.x += sin(time * 4.6 + p.y * 6.4) * 0.052 * taper;
+        p.y *= 0.96 + 0.055 * sin(time * 5.1 + position.x * 9.0);
+        vUv = uv;
+        vPulse = 0.82 + 0.18 * sin(time * 6.0 + p.y * 5.0);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+      }
+    `,
+    fragmentShader: `
+      varying vec2 vUv;
+      varying float vPulse;
+      void main() {
+        float h = clamp(vUv.y, 0.0, 1.0);
+        float x = abs(vUv.x - 0.5) * 2.0;
+        float width = mix(0.78, 0.06, pow(h, 0.72));
+        float waviness = sin(h * 16.0 + vPulse * 3.1) * 0.055 * h;
+        float body = 1.0 - smoothstep(width - 0.12, width + 0.09, x + waviness);
+        float base = smoothstep(0.0, 0.08, h);
+        float tip = 1.0 - smoothstep(0.82, 1.0, h);
+        float alpha = body * base * tip * (0.72 + 0.18 * vPulse);
+        vec3 goldenCore = vec3(1.0, 0.61, 0.12);
+        vec3 emberEdge = vec3(1.0, 0.075, 0.008);
+        vec3 color = mix(goldenCore, emberEdge, smoothstep(0.2, 0.95, h));
+        color *= mix(1.05, 0.68, x) * (0.78 + 0.12 * vPulse);
+        gl_FragColor = vec4(color, alpha);
+      }
+    `,
+  });
+
+  const group = new THREE.Group();
+  group.name = 'Dimensional_Fire';
+  const lobes = mobile ? 3 : 5;
+  for (let index = 0; index < lobes; index += 1) {
+    // Crossed, deforming flame cards have a soft organic silhouette from
+    // every camera, without the hard faceted cone edges of the old fire.
+    const geometry = new THREE.PlaneGeometry(
+      0.34 + (index % 2) * 0.08,
+      0.72 + (index % 3) * 0.13,
+      mobile ? 2 : 4,
+      mobile ? 4 : 7,
+    );
+    const flame = new THREE.Mesh(geometry, material);
+    const column = index - (lobes - 1) / 2;
+    flame.position.set(column * 0.17, 0.37 + (index % 2) * 0.055, (index % 2) * 0.05);
+    flame.rotation.y = index * 1.14;
+    flame.scale.set(0.84 + (index % 3) * 0.08, 0.86 + (index % 2) * 0.15, 1);
+    group.add(flame);
+  }
+  group.position.copy(fromBlender(5.2357, 4.99, 0.62));
+  group.rotation.y = Math.PI;
+  return { object: group, uniforms };
+}
+
+function createLaptopScreenTexture(mobile) {
+  const canvas = document.createElement('canvas');
+  canvas.width = mobile ? 384 : 512;
+  canvas.height = mobile ? 240 : 320;
+  const context = canvas.getContext('2d');
+  const { width, height } = canvas;
+
+  const roundedRect = (x, y, w, h, radius) => {
+    const r = Math.min(radius, w / 2, h / 2);
+    context.beginPath();
+    context.moveTo(x + r, y);
+    context.lineTo(x + w - r, y);
+    context.quadraticCurveTo(x + w, y, x + w, y + r);
+    context.lineTo(x + w, y + h - r);
+    context.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    context.lineTo(x + r, y + h);
+    context.quadraticCurveTo(x, y + h, x, y + h - r);
+    context.lineTo(x, y + r);
+    context.quadraticCurveTo(x, y, x + r, y);
+    context.closePath();
   };
 
-  // ---------------------------------------------------------------- helpers
-  function makeTex(w, h, draw) {
-    const c = document.createElement('canvas');
-    c.width = w; c.height = h;
-    draw(c.getContext('2d'), w, h);
-    const t = new THREE.CanvasTexture(c);
-    t.colorSpace = THREE.SRGBColorSpace;
-    return t;
+  const background = context.createLinearGradient(0, 0, width, height);
+  background.addColorStop(0, '#07111e');
+  background.addColorStop(0.52, '#10283b');
+  background.addColorStop(1, '#173447');
+  context.fillStyle = background;
+  context.fillRect(0, 0, width, height);
+
+  // A restrained, warm lofi player/dashboard UI makes the screen read as a
+  // real workstation without becoming a bright cyan rectangle in the room.
+  context.fillStyle = 'rgba(237, 191, 142, 0.92)';
+  roundedRect(width * 0.065, height * 0.08, width * 0.16, height * 0.045, 6);
+  context.fill();
+  context.fillStyle = 'rgba(214, 232, 236, 0.38)';
+  roundedRect(width * 0.75, height * 0.08, width * 0.18, height * 0.045, 6);
+  context.fill();
+
+  context.fillStyle = 'rgba(5, 13, 25, 0.68)';
+  roundedRect(width * 0.06, height * 0.2, width * 0.56, height * 0.62, 18);
+  context.fill();
+  context.fillStyle = 'rgba(232, 175, 126, 0.92)';
+  roundedRect(width * 0.1, height * 0.26, width * 0.3, height * 0.055, 7);
+  context.fill();
+  context.fillStyle = 'rgba(189, 219, 224, 0.34)';
+  for (let row = 0; row < 3; row += 1) {
+    roundedRect(width * 0.1, height * (0.39 + row * 0.11), width * (0.39 - row * 0.045), height * 0.035, 5);
+    context.fill();
   }
-  const rand = (a, b) => a + Math.random() * (b - a);
 
-  // ---------------------------------------------------------------- sky + fog
-  scene.fog = new THREE.FogExp2(0x151b36, 0.0065);
+  const album = context.createLinearGradient(width * 0.66, height * 0.2, width * 0.94, height * 0.78);
+  album.addColorStop(0, '#b36055');
+  album.addColorStop(0.5, '#563b62');
+  album.addColorStop(1, '#172a40');
+  context.fillStyle = album;
+  roundedRect(width * 0.67, height * 0.2, width * 0.27, height * 0.4, 16);
+  context.fill();
+  context.fillStyle = 'rgba(255, 216, 167, 0.85)';
+  context.beginPath();
+  context.arc(width * 0.805, height * 0.4, height * 0.085, 0, Math.PI * 2);
+  context.fill();
+  context.fillStyle = 'rgba(218, 234, 236, 0.68)';
+  for (let bar = 0; bar < 7; bar += 1) {
+    const barHeight = height * (0.035 + ((bar * 7) % 5) * 0.012);
+    roundedRect(width * (0.68 + bar * 0.038), height * 0.7 - barHeight / 2, width * 0.014, barHeight, 4);
+    context.fill();
+  }
 
-  const skyTex = makeTex(4, 512, (g, w, h) => {
-    const gr = g.createLinearGradient(0, 0, 0, h);
-    gr.addColorStop(0.0, '#101b49');   // rich blue-hour zenith
-    gr.addColorStop(0.34, '#27346c');
-    gr.addColorStop(0.50, '#5a3f86');
-    gr.addColorStop(0.60, '#b95482');  // pink-violet band at the skyline
-    gr.addColorStop(0.68, '#e77b75');
-    gr.addColorStop(1.0, '#0a0c18');
-    g.fillStyle = gr; g.fillRect(0, 0, w, h);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = true;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function createMaterialDetailTexture(kind, mobile) {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = mobile ? 64 : 128;
+  const context = canvas.getContext('2d');
+  const size = canvas.width;
+  context.fillStyle = '#7f7f7f';
+  context.fillRect(0, 0, size, size);
+
+  if (kind === 'fabric') {
+    for (let index = 0; index < size; index += 2) {
+      context.fillStyle = index % 4 === 0 ? '#929292' : '#707070';
+      context.fillRect(index, 0, 1, size);
+      context.fillRect(0, index, size, 1);
+    }
+  } else if (kind === 'leather') {
+    // Deterministic low-frequency grain: enough to catch practical light,
+    // without shimmering or adding a photographic texture dependency.
+    for (let y = 0; y < size; y += 4) {
+      for (let x = 0; x < size; x += 4) {
+        const value = 112 + ((x * 17 + y * 29) % 36);
+        context.fillStyle = `rgb(${value}, ${value}, ${value})`;
+        context.fillRect(x, y, 3, 3);
+      }
+    }
+  } else {
+    for (let y = 0; y < size; y += 3) {
+      context.fillStyle = y % 6 === 0 ? '#8c8c8c' : '#747474';
+      context.fillRect(0, y, size, 1);
+    }
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(kind === 'fabric' ? 18 : 10, kind === 'fabric' ? 18 : 10);
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = true;
+  return texture;
+}
+
+function createRugColorTexture(mobile) {
+  const canvas = document.createElement('canvas');
+  canvas.width = mobile ? 128 : 256;
+  canvas.height = mobile ? 128 : 256;
+  const context = canvas.getContext('2d');
+  const size = canvas.width;
+
+  context.fillStyle = '#4a1725';
+  context.fillRect(0, 0, size, size);
+  context.strokeStyle = '#9c593b';
+  context.lineWidth = size * 0.035;
+  context.strokeRect(size * 0.055, size * 0.055, size * 0.89, size * 0.89);
+  context.strokeStyle = '#d1a064';
+  context.lineWidth = size * 0.012;
+  context.strokeRect(size * 0.105, size * 0.105, size * 0.79, size * 0.79);
+  context.strokeStyle = '#31545a';
+  context.lineWidth = size * 0.022;
+  context.strokeRect(size * 0.145, size * 0.145, size * 0.71, size * 0.71);
+
+  context.save();
+  context.translate(size / 2, size / 2);
+  context.rotate(Math.PI / 4);
+  context.fillStyle = '#7e332d';
+  context.fillRect(-size * 0.19, -size * 0.19, size * 0.38, size * 0.38);
+  context.strokeStyle = '#c58a50';
+  context.lineWidth = size * 0.026;
+  context.strokeRect(-size * 0.145, -size * 0.145, size * 0.29, size * 0.29);
+  context.fillStyle = '#24484e';
+  context.fillRect(-size * 0.075, -size * 0.075, size * 0.15, size * 0.15);
+  context.restore();
+
+  context.fillStyle = 'rgba(213, 161, 98, 0.72)';
+  for (let row = 0; row < 4; row += 1) {
+    for (let column = 0; column < 4; column += 1) {
+      if ((row === 1 || row === 2) && (column === 1 || column === 2)) continue;
+      const x = size * (0.23 + column * 0.18);
+      const y = size * (0.23 + row * 0.18);
+      context.save();
+      context.translate(x, y);
+      context.rotate(Math.PI / 4);
+      context.fillRect(-size * 0.018, -size * 0.018, size * 0.036, size * 0.036);
+      context.restore();
+    }
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.anisotropy = mobile ? 2 : 6;
+  return texture;
+}
+
+function createWoodColorTexture(mobile) {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = mobile ? 64 : 128;
+  const context = canvas.getContext('2d');
+  const size = canvas.width;
+  const gradient = context.createLinearGradient(0, 0, size, 0);
+  gradient.addColorStop(0, '#4a2419');
+  gradient.addColorStop(0.45, '#70402a');
+  gradient.addColorStop(1, '#3a1c16');
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, size, size);
+  context.lineWidth = 1;
+  for (let line = 0; line < 18; line += 1) {
+    context.beginPath();
+    for (let x = 0; x <= size; x += 4) {
+      const y = ((line + 0.5) / 18) * size + Math.sin(x * 0.09 + line * 1.7) * 1.8;
+      if (x === 0) context.moveTo(x, y);
+      else context.lineTo(x, y);
+    }
+    context.strokeStyle = line % 3 === 0 ? 'rgba(32, 12, 8, 0.35)' : 'rgba(219, 132, 80, 0.16)';
+    context.stroke();
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(3, 3);
+  texture.anisotropy = mobile ? 2 : 6;
+  return texture;
+}
+
+function tuneMaterials(root, mobile) {
+  const animated = {
+    candle: [],
+    bulb: [],
+    windows: [],
+    laptop: [],
+  };
+  const laptopScreenTexture = createLaptopScreenTexture(mobile);
+  const fabricDetail = createMaterialDetailTexture('fabric', mobile);
+  const leatherDetail = createMaterialDetailTexture('leather', mobile);
+  const rugDetail = createMaterialDetailTexture('rug', mobile);
+  const rugColor = createRugColorTexture(mobile);
+  const woodColor = createWoodColorTexture(mobile);
+
+  root.traverse((object) => {
+    if (!object.isMesh) return;
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    for (const material of materials) {
+      if (!material) continue;
+      const name = (material.name || '').toLowerCase();
+      if (material.map) {
+        material.map.colorSpace = THREE.SRGBColorSpace;
+        material.map.anisotropy = mobile ? 2 : 6;
+      }
+      if (name.includes('window glass')) {
+        material.transparent = true;
+        material.opacity = 0.12;
+        material.transmission = 0;
+        material.thickness = 0;
+        material.depthWrite = false;
+        material.roughness = 0.12;
+        material.metalness = 0.05;
+        object.renderOrder = 8;
+        object.castShadow = false;
+      } else if (name.includes('candle flame')) {
+        material.emissive = new THREE.Color(0xff7a24);
+        material.emissiveIntensity = 2.4;
+        animated.candle.push(material);
+      } else if (name.includes('warm bulb')) {
+        material.emissive = new THREE.Color(0xff9b49);
+        material.emissiveIntensity = mobile ? 2.85 : 3.35;
+        animated.bulb.push(material);
+      } else if (name.includes('city window glow')) {
+        material.emissive = new THREE.Color(0xffc277);
+        material.emissiveIntensity = 1.45;
+        animated.windows.push(material);
+      } else if (name.includes('laptop screen')) {
+        material.color = new THREE.Color(0xffffff);
+        material.map = laptopScreenTexture;
+        material.emissiveMap = laptopScreenTexture;
+        material.emissive = new THREE.Color(0x91bad1);
+        material.emissiveIntensity = mobile ? 0.66 : 0.78;
+        material.roughness = 0.32;
+        material.metalness = 0.02;
+        animated.laptop.push(material);
+      } else if (name.includes('loft dark wall')) {
+        // The supplied room deliberately uses plum-black walls. In Blender
+        // they are revealed by bounced practical light; without that bake a
+        // realtime PBR renderer crushes them to a featureless black slab.
+        // Preserve the colour while giving the wall its physically plausible
+        // warm bounce so the workstation corner stays readable.
+        material.color = new THREE.Color(0x49323f);
+        material.emissive = new THREE.Color(0x211019);
+        material.emissiveIntensity = mobile ? 0.58 : 0.46;
+        material.roughness = 0.92;
+        material.bumpMap = leatherDetail;
+        material.bumpScale = mobile ? 0.003 : 0.006;
+      } else if (name.includes('loft wood floor')) {
+        material.color.multiplyScalar(1.14);
+        material.emissive = new THREE.Color(0x170b08);
+        material.emissiveIntensity = mobile ? 0.38 : 0.28;
+        material.roughness = 0.78;
+      } else if (name.includes('persian rug')) {
+        material.color = new THREE.Color(0xffffff);
+        material.emissive = new THREE.Color(0x16080f);
+        material.emissiveIntensity = mobile ? 0.3 : 0.22;
+        material.map = rugColor;
+        material.bumpMap = rugDetail;
+        material.bumpScale = mobile ? 0.008 : 0.015;
+      } else if (name.includes('deep teal fabric')) {
+        material.color = new THREE.Color(0x315754);
+        material.emissive = new THREE.Color(0x0b1c1a);
+        material.emissiveIntensity = mobile ? 0.3 : 0.18;
+        material.roughness = 0.84;
+        material.roughnessMap = fabricDetail;
+        material.bumpMap = fabricDetail;
+        material.bumpScale = mobile ? 0.009 : 0.018;
+      } else if (name.includes('rust woven throw')) {
+        material.color = new THREE.Color(0x7a2f23);
+        material.roughness = 0.96;
+        material.roughnessMap = fabricDetail;
+        material.bumpMap = fabricDetail;
+        material.bumpScale = mobile ? 0.012 : 0.022;
+      } else if (name.includes('leather')) {
+        material.color = new THREE.Color(0x642b1f);
+        material.emissive = new THREE.Color(0x160805);
+        material.emissiveIntensity = mobile ? 0.25 : 0.14;
+        material.roughness = 0.44;
+        material.metalness = 0.02;
+        material.bumpMap = leatherDetail;
+        material.bumpScale = mobile ? 0.006 : 0.012;
+      } else if (name.includes('wood') || name.includes('walnut')) {
+        if (!material.map) material.map = woodColor;
+        material.color = new THREE.Color(0xffffff);
+        material.roughness = Math.min(material.roughness ?? 0.72, 0.76);
+      }
+      material.needsUpdate = true;
+    }
   });
-  const sky = new THREE.Mesh(
-    new THREE.SphereGeometry(420, mobile ? 16 : 24, mobile ? 12 : 18),
-    new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, fog: false, depthWrite: false })
+  return animated;
+}
+
+function setShadowPolicy(root, mobile) {
+  root.traverse((object) => {
+    if (!object.isMesh) return;
+    if (mobile) {
+      object.castShadow = false;
+      object.receiveShadow = false;
+      return;
+    }
+    const name = (object.name || '').toLowerCase();
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    const transparent = materials.some((material) => material?.transparent);
+    object.castShadow = !transparent && !name.includes('city_') && !name.includes('window');
+    object.receiveShadow = !transparent && !name.includes('city_');
+  });
+}
+
+function loadLoft(url) {
+  return new Promise((resolve, reject) => {
+    new GLTFLoader().load(url, (gltf) => resolve(gltf.scene), undefined, reject);
+  });
+}
+
+
+export async function build(ctx) {
+  const { scene, quality } = ctx;
+  const mobile = Boolean(quality?.mobile);
+  const root = new THREE.Group();
+  root.name = 'Authored_Cozy_City_Loft';
+  scene.add(root);
+  scene.background = new THREE.Color(0x070914);
+  scene.fog = new THREE.FogExp2(0x11162c, mobile ? 0.008 : 0.006);
+
+  root.add(createSky(mobile));
+  const sunset = new THREE.Mesh(
+    new THREE.SphereGeometry(0.72, mobile ? 14 : 24, mobile ? 10 : 16),
+    new THREE.MeshBasicMaterial({ color: 0xffc18f, fog: false }),
   );
-  root.add(sky);
-  scene.background = new THREE.Color(0x05070f);
+  sunset.name = 'Blue_Hour_Sunset';
+  sunset.position.set(2.2, 3.9, -19.5);
+  root.add(sunset);
 
-  // One continuous loft, composed as three lived-in zones instead of a prop
-  // showroom: sofa at left, window desk in the middle, bed at right.
-  const W = 12, H = 3.2, D = 8;
-  // Keep the large furniture outside the central sightline. Both pieces used
-  // to sit close enough to the camera that their backs became opaque blocks
-  // in the desk view, especially on portrait screens.
-  const BED_X = 3.62;
-  const SOFA_X = -3.62;
+  const assetName = mobile ? 'cozy_city_loft_mobile.glb' : 'cozy_city_loft.glb';
+  const assetUrl = `${import.meta.env.BASE_URL || './'}haven-assets/cozy_city_loft/${assetName}`;
+  let loft;
+  try {
+    loft = await loadLoft(assetUrl);
+  } catch (error) {
+    window.dispatchEvent(new CustomEvent('haven-render-status', {
+      detail: { state: 'error', message: 'The high-rise room could not be loaded. Tap retry.' },
+    }));
+    throw new Error(`High-rise GLB failed to load: ${assetUrl}`, { cause: error });
+  }
+  loft.name = mobile ? 'Cozy_City_Loft_Mobile' : 'Cozy_City_Loft_Desktop';
+  root.add(loft);
 
-  // ---------------------------------------------------------------- lights
-  root.add(new THREE.HemisphereLight(0x91a7d8, 0x5b3a43, 1.42));
-  // A broad, low-cost fill gives every material a readable base value. The
-  // two point lights can then provide warmth without blowing out their lamps.
-  root.add(new THREE.AmbientLight(0x9b7180, 1.02));
+  const animatedMaterials = tuneMaterials(loft, mobile);
+  setShadowPolicy(loft, mobile);
 
-  // Keep only two dynamic lights on phone: one broad lived-in room pool and
-  // one bedside pool. Earlier both lights sat at the bed, leaving the desk
-  // and sofa as black silhouettes against the glass.
-  const lampLightL = new THREE.PointLight(0xffb87a, 4.05, 8, 2);
-  // This pool belongs to the task lamp/desk zone. Bringing it forward from
-  // the bed reveals the walnut, plant and rug while leaving the BasicMaterial
-  // skyline untouched.
-  lampLightL.position.set(-0.55, 1.7, -1.35);
-  const lampLightR = new THREE.PointLight(0xffaa68, 4.65, 7, 2);
-  lampLightR.position.set(BED_X + 0.75, 1.05, 1.75);
-  lampLightL.castShadow = !mobile;
-  lampLightR.castShadow = !mobile;
+  // The authored Blender lights are deliberately not exported. Rebuilding a
+  // restrained realtime rig keeps the same composition while meeting the
+  // phone budget and allowing the fire/lamp pools to breathe.
+  scene.add(new THREE.HemisphereLight(0x91a8db, 0x4a2527, mobile ? 1.85 : 2.2));
+  scene.add(new THREE.AmbientLight(0x9b7180, mobile ? 1.04 : 0.92));
+
+  // A cool, non-shadow-casting window fill supplies the broad blue-hour
+  // bounce that the source Blender render receives from its world/sky. It is
+  // intentionally cheap: one directional evaluation, no shadow texture.
+  const windowFill = new THREE.DirectionalLight(0x7899d4, mobile ? 0.72 : 0.92);
+  windowFill.name = 'Blue_Hour_Window_Fill';
+  windowFill.position.set(0, 4.8, -5.2);
+  windowFill.target.position.set(0, 1.05, 2.2);
+  windowFill.castShadow = false;
+  scene.add(windowFill, windowFill.target);
+
+  // Practical-light bounce along the desk wall. This prevents the authentic
+  // plum wall and walnut desk from collapsing into a black void while the
+  // focused task light below retains the modeled shadows and highlights.
   if (!mobile) {
-    for (const light of [lampLightL, lampLightR]) {
-      light.shadow.mapSize.set(1024, 1024);
-      light.shadow.bias = -0.00035;
-      light.shadow.normalBias = 0.035;
-    }
-  }
-  root.add(lampLightL, lampLightR);
-
-  // ---------------------------------------------------------------- room shell
-  const wallMat = new THREE.MeshStandardMaterial({
-    color: 0x5e4655,
-    emissive: 0x1e1018,
-    emissiveIntensity: 0.2,
-    roughness: 0.9,
-  });
-
-  const floorTex = makeTex(256, 256, (g, w, h) => {
-    g.fillStyle = '#3b281f'; g.fillRect(0, 0, w, h);
-    for (let row = 0; row < 8; row++) {
-      const y = row * 32;
-      g.fillStyle = row % 2 ? '#432d23' : '#37241d';
-      g.fillRect(0, y, w, 32);
-      g.strokeStyle = 'rgba(0,0,0,0.55)'; g.lineWidth = 2;
-      g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke();
-      const seam = ((row * 97) % 256);
-      g.beginPath(); g.moveTo(seam, y); g.lineTo(seam, y + 32); g.stroke();
-      for (let i = 0; i < 6; i++) {
-        g.strokeStyle = 'rgba(60,40,25,0.25)'; g.lineWidth = 1;
-        const gy = y + 4 + Math.random() * 24;
-        g.beginPath(); g.moveTo(0, gy); g.bezierCurveTo(w * 0.3, gy + 3, w * 0.7, gy - 3, w, gy); g.stroke();
-      }
-    }
-  });
-  floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
-  floorTex.repeat.set(5, 3.5);
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(W, D),
-    new THREE.MeshLambertMaterial({
-      map: floorTex,
-      color: 0xe0c2ad,
-      emissive: 0x160b07,
-      emissiveIntensity: 0.2,
-    }));
-  floor.rotation.x = -Math.PI / 2;
-  root.add(floor);
-
-  const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(W, D), new THREE.MeshStandardMaterial({
-    color: 0x6c505c, emissive: 0x24131a, emissiveIntensity: 0.3, roughness: 0.96
-  }));
-  ceiling.rotation.x = Math.PI / 2; ceiling.position.y = H;
-  root.add(ceiling);
-
-  const wallL = new THREE.Mesh(new THREE.PlaneGeometry(D, H), wallMat);
-  wallL.rotation.y = Math.PI / 2; wallL.position.set(-W / 2, H / 2, 0);
-  const wallR = new THREE.Mesh(new THREE.PlaneGeometry(D, H), wallMat);
-  wallR.rotation.y = -Math.PI / 2; wallR.position.set(W / 2, H / 2, 0);
-  const wallF = new THREE.Mesh(new THREE.PlaneGeometry(W, H), wallMat);
-  wallF.rotation.y = Math.PI; wallF.position.set(0, H / 2, D / 2);
-  root.add(wallL, wallR, wallF);
-
-  // ceiling cove — warm emissive perimeter strips
-  const coveMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffad68).multiplyScalar(0.82) });
-  const coveGeoX = new THREE.BoxGeometry(W - 0.5, 0.03, 0.06);
-  const coveGeoZ = new THREE.BoxGeometry(0.06, 0.03, D - 0.5);
-  const cove1 = new THREE.Mesh(coveGeoX, coveMat); cove1.position.set(0, H - 0.07, D / 2 - 0.22);
-  const cove2 = new THREE.Mesh(coveGeoX, coveMat); cove2.position.set(0, H - 0.07, -D / 2 + 0.22);
-  const cove3 = new THREE.Mesh(coveGeoZ, coveMat); cove3.position.set(-W / 2 + 0.22, H - 0.07, 0);
-  const cove4 = new THREE.Mesh(coveGeoZ, coveMat); cove4.position.set(W / 2 - 0.22, H - 0.07, 0);
-  root.add(cove1, cove2, cove3, cove4);
-  const ceilingFill = new THREE.PointLight(0xffc39b, mobile ? 1.1 : 2.1, 13, 1.7);
-  ceilingFill.position.set(0, H - 0.25, 0.2);
-  root.add(ceilingFill);
-
-  // rug
-  const rugTex = makeTex(192, 192, (g, w, h) => {
-    g.fillStyle = '#8c5f72'; g.fillRect(0, 0, w, h);
-    g.strokeStyle = 'rgba(239,188,147,0.48)'; g.lineWidth = 5;
-    for (let y = -w; y < h + w; y += 32) {
-      g.beginPath(); g.moveTo(0, y); g.lineTo(w, y + w); g.stroke();
-    }
-    g.strokeStyle = 'rgba(52,45,77,0.38)'; g.lineWidth = 2;
-    for (let y = -w; y < h + w; y += 32) {
-      g.beginPath(); g.moveTo(0, y + 14); g.lineTo(w, y + w + 14); g.stroke();
-    }
-  });
-  const rugMat = new THREE.MeshLambertMaterial({
-    map: rugTex, color: 0xc4a1aa, emissive: 0x160b13, emissiveIntensity: 0.22
-  });
-  const rug = new THREE.Mesh(new THREE.CircleGeometry(1.9, SEG * 2), rugMat);
-  rug.rotation.x = -Math.PI / 2; rug.scale.set(1.45, 1, 1); rug.position.set(SOFA_X + 0.55, 0.012, -0.35);
-  root.add(rug);
-  const deskRug = new THREE.Mesh(new THREE.PlaneGeometry(3.65, 1.35), rugMat);
-  deskRug.rotation.x = -Math.PI / 2; deskRug.position.set(0, 0.013, -1.92);
-  root.add(deskRug);
-
-  // soft shadow discs
-  const shadowTex = makeTex(128, 128, (g, w, h) => {
-    const gr = g.createRadialGradient(64, 64, 4, 64, 64, 62);
-    gr.addColorStop(0, 'rgba(0,0,0,0.34)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
-    g.fillStyle = gr; g.fillRect(0, 0, w, h);
-  });
-  const shadowMat = new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthWrite: false });
-  function shadowDisc(x, z, sx, sz) {
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), shadowMat);
-    m.rotation.x = -Math.PI / 2; m.position.set(x, 0.02, z); m.scale.set(sx, sz, 1);
-    root.add(m);
-  }
-  shadowDisc(BED_X, 1.15, 3.0, 3.0);
-  shadowDisc(BED_X - 1.35, 1.9, 1.1, 1.1);
-  shadowDisc(BED_X + 1.35, 1.9, 1.1, 1.1);
-  shadowDisc(SOFA_X, 0.7, 3.4, 1.8);
-  shadowDisc(0, -2.65, 3.4, 1.1);
-
-  // ---------------------------------------------------------------- bed
-  const bed = new THREE.Group(); bed.position.set(BED_X, 0, 1.15); root.add(bed);
-
-  const platform = new THREE.Mesh(new THREE.BoxGeometry(2.25, 0.3, 2.35),
-    new THREE.MeshLambertMaterial({ color: 0x514052, emissive: 0x120b13, emissiveIntensity: 0.24 }));
-  platform.position.y = 0.15; bed.add(platform);
-
-  const headboard = new THREE.Mesh(new THREE.BoxGeometry(2.35, 1.0, 0.12),
-    new THREE.MeshLambertMaterial({ color: 0x665166, emissive: 0x170d17, emissiveIntensity: 0.25 }));
-  headboard.position.set(0, 0.65, 1.18); bed.add(headboard);
-
-  const duvetTex = makeTex(256, 256, (g, w, h) => {
-    g.fillStyle = '#cfc7e0'; g.fillRect(0, 0, w, h);
-    for (let i = 0; i < 22; i++) { // low-contrast creases
-      g.strokeStyle = `rgba(90,80,120,${rand(0.05, 0.12)})`;
-      g.lineWidth = rand(1.5, 4);
-      g.beginPath();
-      const x0 = rand(0, w), y0 = rand(0, h);
-      g.moveTo(x0, y0);
-      g.bezierCurveTo(x0 + rand(-70, 70), y0 + rand(-40, 40), x0 + rand(-70, 70), y0 + rand(-40, 40), x0 + rand(-110, 110), y0 + rand(-70, 70));
-      g.stroke();
-    }
-    for (let i = 0; i < 14; i++) {
-      g.fillStyle = `rgba(255,255,255,${rand(0.03, 0.08)})`;
-      g.beginPath(); g.ellipse(rand(0, w), rand(0, h), rand(15, 45), rand(8, 22), rand(0, 3), 0, 6.3); g.fill();
-    }
-  });
-  const duvet = new THREE.Mesh(new THREE.SphereGeometry(1, SEG * 2, SEG),
-    new THREE.MeshStandardMaterial({ map: duvetTex, color: 0xffffff, roughness: 1 }));
-  duvet.scale.set(1.12, 0.22, 1.02);
-  duvet.position.set(0, 0.36, -0.1);
-  bed.add(duvet);
-
-  const pillowMat = new THREE.MeshStandardMaterial({
-    color: 0xf2e7ec, emissive: 0x180f16, emissiveIntensity: 0.16, roughness: 1
-  });
-  const pillowGeo = new THREE.SphereGeometry(1, SEG, SEG);
-  for (let i = 0; i < 4; i++) {
-    const p = new THREE.Mesh(pillowGeo, pillowMat);
-    p.scale.set(0.34, 0.12, 0.22);
-    p.position.set(-0.72 + (i % 2) * 1.44 + (i > 1 ? 0.12 : 0), 0.42 + (i > 1 ? 0.13 : 0), 0.82 - (i > 1 ? 0.1 : 0));
-    p.rotation.x = i > 1 ? -0.35 : -0.15;
-    bed.add(p);
+    const workstationBounce = new THREE.PointLight(0xffb07a, 2.55, 6.6, 1.85);
+    workstationBounce.name = 'Workstation_Wall_Bounce';
+    workstationBounce.position.set(-6.25, 2.35, 0.75);
+    workstationBounce.castShadow = false;
+    scene.add(workstationBounce);
   }
 
-  const throwB = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.07, 0.55),
-    new THREE.MeshLambertMaterial({ color: 0xb56c62, emissive: 0x210d0c, emissiveIntensity: 0.18 }));
-  throwB.position.set(0, 0.51, -0.72); throwB.rotation.x = 0.04;
-  bed.add(throwB);
-
-  // ---------------------------------------------------------------- nightstands + lamps
-  const standMat = new THREE.MeshLambertMaterial({
-    color: 0x6f493c, emissive: 0x160a08, emissiveIntensity: 0.2
-  });
-  const shadeMatL = new THREE.MeshStandardMaterial({
-    color: 0xffd0a0, emissive: 0xff8b49, emissiveIntensity: 0.72,
-    roughness: 0.68, side: THREE.DoubleSide,
-  });
-  const shadeMatR = shadeMatL.clone();
-  function nightstand(x, shadeMat) {
-    const g = new THREE.Group(); g.position.set(x, 0, 1.9);
-    const box = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.5, 0.45), standMat);
-    box.position.y = 0.25; g.add(box);
-    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.03, 0.35, 8),
-      new THREE.MeshLambertMaterial({ color: 0x6a5558 }));
-    stem.position.y = 0.68; g.add(stem);
-    const shade = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, 0.2, SEG, 1, true), shadeMat);
-    shade.position.y = 0.93; g.add(shade);
-    const cap = new THREE.Mesh(new THREE.CircleGeometry(0.1, SEG), shadeMat);
-    cap.rotation.x = -Math.PI / 2; cap.position.y = 1.03; g.add(cap);
-    root.add(g);
-  }
-  nightstand(BED_X - 1.35, shadeMatL);
-  nightstand(BED_X + 1.35, shadeMatR);
-
-  // wall art on front wall above headboard
-  const art = new THREE.Group(); art.position.set(BED_X, 1.95, D / 2 - 0.04); art.rotation.y = Math.PI;
-  const frame = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.65, 0.03),
-    new THREE.MeshLambertMaterial({ color: 0x765243, emissive: 0x150907, emissiveIntensity: 0.16 }));
-  const artTex = makeTex(96, 64, (g, w, h) => {
-    const gr = g.createLinearGradient(0, 0, w, h);
-    gr.addColorStop(0, '#3a2f55'); gr.addColorStop(0.55, '#6b4a6e'); gr.addColorStop(1, '#c98a5e');
-    g.fillStyle = gr; g.fillRect(0, 0, w, h);
-    g.fillStyle = 'rgba(255,210,150,0.5)'; g.beginPath(); g.arc(w * 0.7, h * 0.35, 7, 0, 6.3); g.fill();
-  });
-  const canvasArt = new THREE.Mesh(new THREE.PlaneGeometry(0.85, 0.55),
-    new THREE.MeshLambertMaterial({ map: artTex }));
-  canvasArt.position.z = 0.02;
-  art.add(frame, canvasArt); root.add(art);
-
-  // plant silhouette, corner
-  const plant = new THREE.Group(); plant.position.set(-5.2, 0, 2.8);
-  const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.14, 0.3, SEG),
-    new THREE.MeshLambertMaterial({ color: 0x9b5f4b, emissive: 0x160806, emissiveIntensity: 0.18 }));
-  pot.position.y = 0.15; plant.add(pot);
-  const leafMat = new THREE.MeshLambertMaterial({
-    color: 0x4d745d, emissive: 0x0b1a10, emissiveIntensity: 0.28
-  });
-  const leaves = new THREE.Group(); leaves.position.y = 0.3;
-  for (let i = 0; i < 5; i++) {
-    const leaf = new THREE.Mesh(new THREE.ConeGeometry(0.1, rand(0.7, 1.2), 6), leafMat);
-    const a = (i / 5) * Math.PI * 2;
-    leaf.position.set(Math.cos(a) * 0.1, 0.45, Math.sin(a) * 0.1);
-    leaf.rotation.z = Math.cos(a) * 0.45; leaf.rotation.x = -Math.sin(a) * 0.45;
-    leaves.add(leaf);
-  }
-  plant.add(leaves); root.add(plant);
-
-  // ---------------------------------------------------------------- window desk
-  const desk = new THREE.Group(); desk.position.set(0, 0, -2.65);
-  const walnut = new THREE.MeshStandardMaterial({
-    color: 0xa96f4d, emissive: 0x29150d, emissiveIntensity: 0.18, roughness: 0.82
-  });
-  const blackMetal = new THREE.MeshStandardMaterial({
-    color: 0x373642, emissive: 0x090913, emissiveIntensity: 0.18, roughness: 0.58, metalness: 0.38
-  });
-  const deskTop = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.1, 0.72), walnut);
-  deskTop.position.y = 0.77; desk.add(deskTop);
-  for (const x of [-1.42, 1.42]) {
-    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.75, 0.08), blackMetal);
-    leg.position.set(x, 0.375, 0); desk.add(leg);
-  }
-  const laptopBase = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.035, 0.46), blackMetal);
-  laptopBase.position.set(0.35, 0.84, -0.02); desk.add(laptopBase);
-  const laptopScreenMat = new THREE.MeshBasicMaterial({ color: 0x264864 });
-  const laptopScreen = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.44, 0.025), laptopScreenMat);
-  laptopScreen.position.set(0.35, 1.05, -0.24); laptopScreen.rotation.x = -0.18; desk.add(laptopScreen);
-  const screenGlow = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.35),
-    new THREE.MeshBasicMaterial({ color: 0x80b7cc, transparent: true, opacity: 0.42 }));
-  screenGlow.position.set(0.35, 1.055, -0.253); screenGlow.rotation.x = -0.18; desk.add(screenGlow);
-  const taskLampStem = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.025, 0.62, 8), blackMetal);
-  taskLampStem.position.set(-1.08, 1.06, -0.02); taskLampStem.rotation.z = -0.16; desk.add(taskLampStem);
-  const taskLampShade = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.24, 12, 1, true),
-    new THREE.MeshStandardMaterial({
-      color: 0x5a4540, emissive: 0xffa45d, emissiveIntensity: 0.48,
-      roughness: 0.72, side: THREE.DoubleSide,
-    }));
-  taskLampShade.position.set(-1.14, 1.37, -0.02); taskLampShade.rotation.z = Math.PI; desk.add(taskLampShade);
-  for (let i = 0; i < 3; i++) {
-    const book = new THREE.Mesh(new THREE.BoxGeometry(0.34 + i * 0.02, 0.045, 0.22),
-      new THREE.MeshStandardMaterial({ color: [0x875746, 0x435a68, 0xb08a58][i], roughness: 0.9 }));
-    book.position.set(-0.54, 0.84 + i * 0.047, 0.08); book.rotation.y = -0.08 + i * 0.04; desk.add(book);
-  }
-  const deskPot = new THREE.Mesh(new THREE.CylinderGeometry(0.095, 0.075, 0.15, 10),
-    new THREE.MeshStandardMaterial({ color: 0x9b765f, roughness: 0.95 }));
-  deskPot.position.set(1.12, 0.88, 0.02); desk.add(deskPot);
-  for (let i = 0; i < 5; i++) {
-    const leaf = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.3 + i * 0.025, 6), leafMat);
-    leaf.position.set(1.12 + Math.cos(i * 1.25) * 0.06, 1.08, 0.02 + Math.sin(i * 1.25) * 0.05);
-    leaf.rotation.z = Math.cos(i * 1.25) * 0.38; desk.add(leaf);
-  }
-  root.add(desk);
-
-  // ---------------------------------------------------------------- sofa + coffee table
-  const sofa = new THREE.Group(); sofa.position.set(SOFA_X, 0, 0.58);
-  const sofaMat = new THREE.MeshStandardMaterial({
-    color: 0x78849b, emissive: 0x171c2a, emissiveIntensity: 0.18, roughness: 1
-  });
-  const sofaBase = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.38, 1.0), sofaMat);
-  sofaBase.position.y = 0.3; sofa.add(sofaBase);
-  const sofaBack = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.92, 0.26), sofaMat);
-  sofaBack.position.set(0, 0.76, 0.44); sofa.add(sofaBack);
-  for (const x of [-1.42, 1.42]) {
-    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.55, 1.02), sofaMat);
-    arm.position.set(x, 0.52, 0); sofa.add(arm);
-  }
-  const cushionGeo = new THREE.SphereGeometry(0.5, SEG, Math.max(8, SEG - 2));
-  for (let i = 0; i < 3; i++) {
-    const cushion = new THREE.Mesh(cushionGeo, new THREE.MeshStandardMaterial({
-      color: [0xa96f5c, 0x6d7790, 0xc19a64][i],
-      emissive: [0x1d0c08, 0x101422, 0x231407][i], emissiveIntensity: 0.14,
-      roughness: 1,
-    }));
-    cushion.scale.set(0.86, 0.22, 0.72); cushion.position.set(-0.92 + i * 0.92, 0.58, -0.14); sofa.add(cushion);
-  }
-  // A single draped throw gives the sofa a lived-in silhouette without adding
-  // a costly cloth simulation or a stack of decorative meshes.
-  const sofaThrow = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.055, 1.04),
-    new THREE.MeshStandardMaterial({
-      color: 0xbd765f, emissive: 0x210d08, emissiveIntensity: 0.16, roughness: 1
-    }));
-  sofaThrow.position.set(-0.72, 0.62, -0.03); sofaThrow.rotation.z = -0.06;
-  sofa.add(sofaThrow);
-  root.add(sofa);
-
-  const coffee = new THREE.Group(); coffee.position.set(SOFA_X + 0.68, 0, -1.02);
-  const coffeeTop = new THREE.Mesh(new THREE.CylinderGeometry(0.72, 0.72, 0.07, SEG * 2), walnut);
-  coffeeTop.position.y = 0.42; coffee.add(coffeeTop);
-  const coffeeLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.1, 0.4, 10), blackMetal);
-  coffeeLeg.position.y = 0.2; coffee.add(coffeeLeg);
-  const openBook = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.025, 0.32),
-    new THREE.MeshStandardMaterial({
-      color: 0xeadcc4, emissive: 0x160f08, emissiveIntensity: 0.12, roughness: 0.92
-    }));
-  openBook.position.set(-0.14, 0.48, 0.02); openBook.rotation.y = 0.24; coffee.add(openBook);
-  const coffeeMug = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.05, 0.11, 10),
-    new THREE.MeshStandardMaterial({ color: 0xb17656, roughness: 0.72 }));
-  coffeeMug.position.set(0.35, 0.51, -0.05); coffee.add(coffeeMug);
-  root.add(coffee);
-
-  // Reference-led living zone: real-scale textured furniture overlaps in a
-  // conversational arrangement, rather than reading as isolated primitives.
-  const [realSofa, loungeChair, marbleTable, realPlant] = await Promise.all([
-    loadAsset('sofa_02'), loadAsset('mid_century_lounge_chair'),
-    loadAsset('coffee_table_round_01'), loadAsset('potted_plant_02')
-  ]);
-  sofa.visible = false;
-  coffee.visible = false;
-  fitAsset(realSofa, 2.68, [-3.12, 0, 0.92], -0.04);
-  fitAsset(loungeChair, 0.68, [1.15, 0, 0.28], -0.72);
-  fitAsset(marbleTable, 1.06, [-1.12, 0, -0.28], 0.12);
-  fitAsset(realPlant, 0.84, [4.86, 0, -2.82], -0.35);
-
-  const livingPool = new THREE.PointLight(0xffa96a, mobile ? 1.25 : 3.2, 7.5, 2);
-  livingPool.position.set(-1.25, 1.6, 0.15);
-  livingPool.castShadow = !mobile;
+  const fireLight = new THREE.PointLight(0xff6f2c, mobile ? 3.2 : 5.1, 8.2, 1.85);
+  fireLight.name = 'Fireplace_Light';
+  fireLight.position.copy(fromBlender(5.2357, 4.2139, 1.3028));
+  fireLight.castShadow = !mobile;
   if (!mobile) {
-    livingPool.shadow.mapSize.set(1024, 1024);
-    livingPool.shadow.bias = -0.0003;
+    fireLight.shadow.mapSize.set(768, 768);
+    fireLight.shadow.bias = -0.00035;
+    fireLight.shadow.normalBias = 0.035;
   }
-  root.add(livingPool);
+  scene.add(fireLight);
 
-  // Architectural and lived-in layers inspired by dense loft interiors.
-  const oak = new THREE.MeshStandardMaterial({ color:0x7b4930, roughness:0.72, metalness:0.02 });
-  const charcoal = new THREE.MeshStandardMaterial({ color:0x19171b, roughness:0.58, metalness:0.28 });
-  const linen = new THREE.MeshStandardMaterial({ color:0xb98272, roughness:0.96 });
-  const cream = new THREE.MeshStandardMaterial({ color:0xd6c2a6, roughness:0.9 });
-  const brass = new THREE.MeshStandardMaterial({ color:0x8f5b2f, roughness:0.34, metalness:0.72 });
-  const addBox = (w,h,d,mat,x,y,z,ry=0) => { const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat); m.position.set(x,y,z); m.rotation.y=ry; root.add(m); return m; };
+  const deskLight = new THREE.SpotLight(0xffa761, mobile ? 3.4 : 5.0, 7, Math.PI / 3.1, 0.78, 1.4);
+  deskLight.name = 'Workstation_Lamp_Light';
+  deskLight.position.copy(fromBlender(-5.6214, -0.4672, 1.8272));
+  deskLight.target.position.copy(fromBlender(-5.25, 0.78, 0.88));
+  // GTAO plus the room's single fireplace shadow map gives the task area
+  // contact depth without a second full-scene shadow render on every frame.
+  deskLight.castShadow = false;
+  scene.add(deskLight, deskLight.target);
 
-  // Right-wall library: alternating shelves, closed storage and warm objects.
-  addBox(0.42,2.45,3.25,charcoal,5.66,1.23,0.58);
-  for (const y of [0.34,0.88,1.42,1.96,2.5]) addBox(0.68,0.055,3.02,oak,5.35,y,0.58);
-  for (let i=0;i<22;i++) {
-    const shelf=i%5, z=-0.62+(i%4)*0.36+(shelf%2)*0.08;
-    const book=addBox(0.22+((i*7)%5)*0.025,0.27+((i*11)%4)*0.035,0.07,
-      [linen,cream,oak,charcoal][i%4],5.0,0.51+shelf*0.54,z,Math.PI/2);
-    book.rotation.z=((i%3)-1)*0.035;
-  }
-  addBox(1.28,0.54,2.82,oak,5.02,0.28,0.6);
-
-  // The third camera looks across the left wall, so treat it as a complete
-  // library nook instead of an empty painted plane. Shallow walnut millwork
-  // keeps the circulation clear while giving the sunset view a layered,
-  // inhabited background.
-  addBox(0.32,2.72,3.55,charcoal,-5.72,1.36,0.45);
-  for (const z of [-0.62,0.48,1.58]) {
-    addBox(0.62,2.5,0.055,oak,-5.4,1.27,z);
-  }
-  for (const y of [0.38,0.91,1.44,1.97,2.5]) {
-    addBox(0.63,0.055,3.35,oak,-5.39,y,0.45);
-  }
-  for (let i=0;i<27;i++) {
-    const shelf=i%5, bay=i%3;
-    const book=addBox(0.075,0.25+((i*13)%5)*0.025,0.19+((i*7)%4)*0.018,
-      [linen,cream,oak,charcoal][i%4],-5.04,0.53+shelf*0.53,-0.97+bay*1.1+((i%3)-1)*0.1);
-    book.rotation.z=((i%4)-1.5)*0.025;
-  }
-  // Two low amber pools reveal the sofa leather and shelf objects without
-  // flattening the blue-hour skyline.
-  for (const z of [-0.66,1.52]) {
-    const sconcePlate=addBox(0.035,0.24,0.28,brass,-5.02,2.22,z);
-    const sconce=new THREE.PointLight(0xff9a55,mobile?0.45:1.35,3.1,2);
-    sconce.position.set(-4.85,2.18,z); root.add(sconce);
+  // The visible modeled bulb also gets a tight, shadow-free practical pool.
+  // This is small enough to be inexpensive on phone, but it makes the lamp
+  // itself feel like the source of the warm workstation light.
+  let deskBulbGlow = null;
+  if (!mobile) {
+    deskBulbGlow = new THREE.PointLight(0xffa45f, 1.75, 3.8, 2.05);
+    deskBulbGlow.name = 'Workstation_Visible_Bulb_Glow';
+    deskBulbGlow.position.copy(fromBlender(-5.6214, -0.4672, 1.8272));
+    deskBulbGlow.castShadow = false;
+    scene.add(deskBulbGlow);
   }
 
-  // Low media console and layered art keep the solid wall visually occupied.
-  addBox(2.8,0.52,0.48,oak,2.15,0.28,3.48);
-  for (const x of [1.35,2.15,2.95]) addBox(0.035,0.38,0.38,charcoal,x,0.28,3.23);
-  const artColors=[0x78465b,0xb26f55,0x315166];
-  [[1.25,1.95,0.82,0.96],[2.25,2.14,0.72,1.28],[3.16,1.86,0.62,0.82]].forEach((a,i)=>{
-    addBox(a[2]+0.09,a[3]+0.09,0.045,brass,a[0],a[1],3.72);
-    addBox(a[2],a[3],0.055,new THREE.MeshStandardMaterial({color:artColors[i],roughness:0.88}),a[0],a[1],3.68);
-  });
+  if (!mobile) {
+    const candlePool = new THREE.PointLight(0xffad6a, 1.55, 5.2, 2);
+    candlePool.name = 'Candle_Lounge_Pool';
+    candlePool.position.copy(fromBlender(-2.0, 4.9, 1.55));
+    scene.add(candlePool);
 
-  // Pendant cluster over the living area. Keep the floor clear in the wide
-  // camera: a foreground reading lamp used to sit directly on the view axis
-  // and its shade expanded into a distracting silhouette.
-  const warmGlass=new THREE.MeshStandardMaterial({color:0xffc184,emissive:0xff8a3c,emissiveIntensity:1.35,transparent:true,opacity:0.72,roughness:0.22});
-  [[-1.72,2.42],[-1.05,2.18],[-0.42,2.48]].forEach(([x,y],i)=>{
-    addBox(0.018,3.15-y,0.018,charcoal,x,(3.15+y)/2,-0.3);
-    const globe=new THREE.Mesh(new THREE.SphereGeometry(0.12+i*0.018,16,12),warmGlass); globe.position.set(x,y,-0.3); root.add(globe);
-  });
-  const pendantPool=new THREE.PointLight(0xffa45d,mobile?0.9:2.4,6,2); pendantPool.position.set(-1.05,2.06,-0.3); root.add(pendantPool);
-
-  // Small-scale clutter stops the polished surfaces reading as empty props.
-  for (let i=0;i<4;i++) addBox(0.34+i*0.025,0.045,0.24,[linen,cream,oak,charcoal][i],-1.5,0.56+i*0.047,-0.3,0.18-i*0.05);
-  const ceramic=new THREE.MeshStandardMaterial({color:0xc99b78,roughness:0.78});
-  const mug=new THREE.Mesh(new THREE.CylinderGeometry(0.065,0.055,0.13,16),ceramic); mug.position.set(-0.95,0.62,-0.15); root.add(mug);
-  addBox(0.52,0.09,0.52,linen,-3.85,0.58,0.88,-0.05);
-  addBox(0.48,0.08,0.48,cream,-3.18,0.62,0.86,0.08);
-
-  // ---------------------------------------------------------------- glass wall + mullions
-  const glass = new THREE.Mesh(new THREE.PlaneGeometry(W, H),
-    new THREE.MeshBasicMaterial({ color: 0xd8e4ff, transparent: true, opacity: 0.035, depthWrite: false }));
-  glass.position.set(0, H / 2, -D / 2 + 0.02);
-  glass.renderOrder = 10;
-  root.add(glass);
-
-  const mullionMat = new THREE.MeshLambertMaterial({
-    color: 0x252130, emissive: 0x090713, emissiveIntensity: 0.16
-  });
-  const mullionGeo = new THREE.BoxGeometry(0.06, H, 0.09);
-  [-4.5, -3, -1.5, 0, 1.5, 3, 4.5].forEach(x => {
-    const m = new THREE.Mesh(mullionGeo, mullionMat);
-    m.position.set(x, H / 2, -D / 2 + 0.02); root.add(m);
-  });
-  const sillGeo = new THREE.BoxGeometry(W, 0.08, 0.14);
-  const sillB = new THREE.Mesh(sillGeo, mullionMat); sillB.position.set(0, 0.04, -D / 2 + 0.02);
-  const sillT = new THREE.Mesh(sillGeo, mullionMat); sillT.position.set(0, H - 0.04, -D / 2 + 0.02);
-  root.add(sillB, sillT);
-
-  // faint warm lamp reflections in the glass
-  const streakTex = makeTex(32, 128, (g, w, h) => {
-    const gr = g.createLinearGradient(0, 0, 0, h);
-    gr.addColorStop(0, 'rgba(255,180,110,0)');
-    gr.addColorStop(0.5, 'rgba(255,190,120,1)');
-    gr.addColorStop(1, 'rgba(255,180,110,0)');
-    g.fillStyle = gr; g.fillRect(0, 0, w, h);
-  });
-  const streakMat = new THREE.MeshBasicMaterial({
-    map: streakTex, transparent: true, opacity: 0.05,
-    blending: THREE.AdditiveBlending, depthWrite: false
-  });
-  [BED_X - 1.35, BED_X + 1.35].forEach(x => {
-    const s = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 2.4), streakMat);
-    s.position.set(x, 1.4, -D / 2 + 0.04); s.renderOrder = 11;
-    root.add(s);
-  });
-
-  // ---------------------------------------------------------------- CITY: near towers + instanced windows
-  const towerMat = new THREE.MeshLambertMaterial({ color: 0x141a28 });
-  const nearTowers = [];
-  // Kept LOW and pushed back so a wide band of deep-blue sky + moon reads above
-  // the skyline (like the references) instead of towers filling the glass.
-  const nearDefs = [
-    [-24, -24, 6, 6, 4], [-14, -30, 5, 5, 8], [-6, -36, 7, 6, 0],
-    [3, -26, 4.5, 5, 5.5], [10, -33, 6, 6, 9.5], [20, -23, 5, 5, 2],
-    [30, -32, 7, 6, 6.5], [-34, -34, 6, 6, 3], [42, -27, 5, 5, -1], [-45, -28, 6, 6, 7]
-  ];
-  for (const [x, z, w, d, top] of nearDefs) {
-    const h = top + 60;
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), towerMat);
-    m.position.set(x, top - h / 2, z);
-    root.add(m);
-    nearTowers.push({ x, z, w, d, top });
+    const floorLampPool = new THREE.PointLight(0xff9d61, 1.45, 4.6, 2.0);
+    floorLampPool.name = 'Lounge_Floor_Lamp_Pool';
+    floorLampPool.position.copy(fromBlender(2.45, 2.35, 1.50));
+    scene.add(floorLampPool);
   }
 
-  const MAXW = mobile ? 1200 : 2400;
-  const winGeo = new THREE.PlaneGeometry(0.55, 0.7);
-  const winMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-  const windows = new THREE.InstancedMesh(winGeo, winMat, MAXW);
-  const C_DARK = new THREE.Color(0x0d1120);
-  const C_AMBER = new THREE.Color(0xffd98a).multiplyScalar(1.35);
-  const C_TEAL = new THREE.Color(0x9fd0e0).multiplyScalar(0.8);
-  const winStates = new Uint8Array(MAXW); // 0 dark, 1 amber, 2 teal
-  {
-    const mtx = new THREE.Matrix4();
-    let n = 0;
-    outer:
-    for (const t of nearTowers) {
-      const zf = t.z + t.d / 2 + 0.03;
-      const cols = Math.floor(t.w / 0.9);
-      const yLo = Math.max(-30, t.top - 30);
-      for (let y = yLo; y < t.top - 0.8; y += 1.15) {
-        for (let c = 0; c < cols; c++) {
-          if (Math.random() < 0.25) continue;
-          if (n >= MAXW) break outer;
-          const x = t.x - t.w / 2 + 0.55 + c * 0.9;
-          mtx.makeTranslation(x, y, zf);
-          windows.setMatrixAt(n, mtx);
-          const r = Math.random();
-          const st = r < 0.6 ? 0 : (r < 0.9 ? 1 : 2);
-          winStates[n] = st;
-          windows.setColorAt(n, st === 0 ? C_DARK : st === 1 ? C_AMBER : C_TEAL);
-          n++;
-        }
-      }
-    }
-    windows.count = n;
-  }
-  windows.instanceMatrix.needsUpdate = true;
-  if (windows.instanceColor) windows.instanceColor.needsUpdate = true;
-  root.add(windows);
+  const rain = createWindowRain(mobile);
+  root.add(rain.object);
+  const fire = createFire(mobile);
+  root.add(fire.object);
 
-  // ---------------------------------------------------------------- MID towers (canvas window grids)
-  function midTowerTex(warmth) {
-    return makeTex(128, 256, (g, w, h) => {
-      g.fillStyle = '#0a0e1a'; g.fillRect(0, 0, w, h);
-      for (let y = 6; y < h - 6; y += 12) {
-        for (let x = 6; x < w - 6; x += 11) {
-          if (Math.random() < 0.58) continue;
-          const cool = Math.random() > warmth;
-          const a = rand(0.2, 0.65);
-          g.fillStyle = cool ? `rgba(140,190,210,${a * 0.7})` : `rgba(255,200,130,${a})`;
-          g.fillRect(x, y, 6, 8);
-        }
-      }
-    });
-  }
-  const midTexA = midTowerTex(0.8), midTexB = midTowerTex(0.65);
-  const midMatA = new THREE.MeshBasicMaterial({ map: midTexA });
-  const midMatB = new THREE.MeshBasicMaterial({ map: midTexB });
-  const midDefs = [
-    [-70, -48, 9, 11], [-52, -62, 11, 17], [-30, -55, 8, 6], [-12, -68, 10, 14],
-    [4, -52, 8, 4], [22, -64, 12, 13], [40, -50, 9, 8], [60, -70, 11, 16],
-    [78, -58, 9, 5], [-90, -66, 10, 12], [96, -66, 10, 11], [-8, -78, 9, 20]
-  ];
-  midDefs.forEach(([x, z, w, top], i) => {
-    const h = top + 60;
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, w), i % 2 ? midMatA : midMatB);
-    m.position.set(x, top - h / 2, z);
-    root.add(m);
-  });
-
-  // ---------------------------------------------------------------- FAR skyline silhouette + landmark spire
-  const skylineTex = makeTex(1024, 128, (g, w, h) => {
-    g.clearRect(0, 0, w, h);
-    let x = 0;
-    while (x < w) {
-      const bw = rand(18, 60), bh = rand(22, 88);
-      g.fillStyle = '#0b0e1a';
-      g.fillRect(x, h - bh, bw, bh);
-      for (let i = 0; i < bw * bh / 260; i++) {
-        g.fillStyle = Math.random() < 0.8 ? 'rgba(255,217,138,0.85)' : 'rgba(159,208,224,0.7)';
-        g.fillRect(x + rand(2, bw - 3), h - bh + rand(3, bh - 4), 1.4, 1.4);
-      }
-      x += bw + rand(0, 8);
-    }
-  });
-  const skyline = new THREE.Mesh(new THREE.PlaneGeometry(420, 55),
-    new THREE.MeshBasicMaterial({ map: skylineTex, transparent: true, depthWrite: false }));
-  skyline.position.set(0, -22, -135);
-  root.add(skyline);
-
-  // Empire-style spire, slightly off-center
-  const spire = new THREE.Group(); spire.position.set(14, 0, -118);
-  const spireMat = new THREE.MeshBasicMaterial({ map: midTexA, color: 0x8a90a8 });
-  const tier1 = new THREE.Mesh(new THREE.BoxGeometry(8, 55, 8), spireMat); tier1.position.y = -60 + 27.5;
-  const tier2 = new THREE.Mesh(new THREE.BoxGeometry(5.2, 16, 5.2), spireMat); tier2.position.y = -5 + 8;
-  const tier3 = new THREE.Mesh(new THREE.BoxGeometry(3.2, 10, 3.2), spireMat); tier3.position.y = 11 + 5;
-  const tipMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffd9a0).multiplyScalar(3.5) });
-  const crown = new THREE.Mesh(new THREE.BoxGeometry(2.1, 3, 2.1), tipMat); crown.position.y = 21 + 1.5;
-  const needle = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.4, 8, 8), tipMat); needle.position.y = 24 + 4;
-  spire.add(tier1, tier2, tier3, crown, needle);
-  root.add(spire);
-
-  // red aircraft beacons on two tall near towers
-  const beaconGeo = new THREE.SphereGeometry(0.28, 8, 8);
-  const beaconMatA = new THREE.MeshBasicMaterial({ color: 0xff2a2a });
-  const beaconMatB = new THREE.MeshBasicMaterial({ color: 0xff2a2a });
-  const beaconA = new THREE.Mesh(beaconGeo, beaconMatA); beaconA.position.set(10, 10.1, -33);
-  const beaconB = new THREE.Mesh(beaconGeo, beaconMatB); beaconB.position.set(-14, 8.6, -30);
-  root.add(beaconA, beaconB);
-  const RED = new THREE.Color(0xff2a2a);
-
-  // ---------------------------------------------------------------- moon + stars
-  const moonTex = makeTex(128, 128, (g) => {
-    g.clearRect(0, 0, 128, 128);
-    g.fillStyle = '#fff3d8';
-    g.beginPath(); g.arc(64, 64, 40, 0, 6.3); g.fill();
-    g.globalCompositeOperation = 'destination-out';
-    g.beginPath(); g.arc(46, 56, 38, 0, 6.3); g.fill();
-    g.globalCompositeOperation = 'source-over';
-  });
-  const moon = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: moonTex, color: new THREE.Color(1, 0.95, 0.82).multiplyScalar(2.5),
-    fog: false, depthWrite: false, transparent: true
-  }));
-  moon.position.set(38, 64, -220); moon.scale.set(19, 19, 1);
-  root.add(moon);
-
-  const starTex = makeTex(32, 32, (g) => {
-    const gr = g.createRadialGradient(16, 16, 0, 16, 16, 15);
-    gr.addColorStop(0, 'rgba(255,255,255,1)');
-    gr.addColorStop(0.4, 'rgba(220,230,255,0.5)');
-    gr.addColorStop(1, 'rgba(200,210,255,0)');
-    g.fillStyle = gr; g.fillRect(0, 0, 32, 32);
-  });
-  const N_STARS = mobile ? 175 : 350;
-  const starMats = [];
-  for (let grp = 0; grp < 2; grp++) {
-    const n = Math.floor(N_STARS / 2);
-    const pos = new Float32Array(n * 3);
-    for (let i = 0; i < n; i++) {
-      const az = rand(-1.5, 1.5) - Math.PI / 2; // mostly ahead
-      const el = rand(0.12, 1.25);
-      const r = rand(280, 360);
-      pos[i * 3] = Math.cos(el) * Math.cos(az) * r;
-      pos[i * 3 + 1] = Math.sin(el) * r;
-      pos[i * 3 + 2] = Math.cos(el) * Math.sin(az) * r;
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    const mat = new THREE.PointsMaterial({
-      map: starTex, color: 0xdde6ff, size: grp ? 2.6 : 1.7, sizeAttenuation: false,
-      transparent: true, opacity: 0.8, depthWrite: false, fog: false,
-      blending: THREE.AdditiveBlending
-    });
-    starMats.push(mat);
-    root.add(new THREE.Points(geo, mat));
-  }
-
-  // ---------------------------------------------------------------- drizzle outside the glass
-  const N_RAIN = mobile ? 125 : 250;
-  const rainTex = makeTex(8, 32, (g) => {
-    const gr = g.createLinearGradient(0, 0, 0, 32);
-    gr.addColorStop(0, 'rgba(200,215,235,0)');
-    gr.addColorStop(0.5, 'rgba(200,215,235,0.9)');
-    gr.addColorStop(1, 'rgba(200,215,235,0)');
-    g.fillStyle = gr; g.fillRect(2.5, 0, 3, 32);
-  });
-  const rainPos = new Float32Array(N_RAIN * 3);
-  const rainSpeed = new Float32Array(N_RAIN);
-  for (let i = 0; i < N_RAIN; i++) {
-    rainPos[i * 3] = rand(-8, 8);
-    rainPos[i * 3 + 1] = rand(-7, 9);
-    rainPos[i * 3 + 2] = rand(-10, -3.6);
-    rainSpeed[i] = rand(2.2, 4.2);
-  }
-  const rainGeo = new THREE.BufferGeometry();
-  const rainAttr = new THREE.BufferAttribute(rainPos, 3);
-  rainGeo.setAttribute('position', rainAttr);
-  const rainMat = new THREE.PointsMaterial({
-    map: rainTex, color: 0x9fb0c8, size: 0.4, sizeAttenuation: true,
-    transparent: true, opacity: 0.3, depthWrite: false, blending: THREE.AdditiveBlending
-  });
-  const rain = new THREE.Points(rainGeo, rainMat);
-  root.add(rain);
-
-  // ---------------------------------------------------------------- update (no per-frame allocations)
-  let nextSwap = 0;
-  const swapCount = () => 2 + (Math.random() < 0.5 ? 1 : 0);
-
-  function update(t, dt) {
-    const step = Math.min(dt, 0.1);
-
-    // lamp flicker — subtle warm breathing
-    const n1 = Math.sin(t * 13.7) * 0.5 + Math.sin(t * 7.3 + 1.7) * 0.35 + Math.sin(t * 2.1) * 0.15;
-    lampLightL.intensity = 4.05 * (1 + 0.035 * n1);
-    lampLightR.intensity = 4.65 * (1 + 0.035 * Math.sin(t * 11.3 + 2.4));
-    shadeMatL.emissiveIntensity = 0.72 * (1 + 0.045 * n1);
-    shadeMatR.emissiveIntensity = 0.72 * (1 + 0.045 * Math.sin(t * 11.3 + 2.4));
-
-    // near-tower window twinkle: every 0.5-1s swap 2-3 instances lit<->unlit
-    if (t > nextSwap) {
-      nextSwap = t + 0.5 + Math.random() * 0.5;
-      const k = swapCount();
-      for (let s = 0; s < k; s++) {
-        for (let tries = 0; tries < 12; tries++) {
-          const i = (Math.random() * windows.count) | 0;
-          if (winStates[i] === 2) continue; // leave teal alone
-          winStates[i] = winStates[i] === 0 ? 1 : 0;
-          windows.setColorAt(i, winStates[i] === 0 ? C_DARK : C_AMBER);
-          break;
-        }
-      }
-      windows.instanceColor.needsUpdate = true;
-    }
-
-    // aircraft beacons — slow 2s blink
-    const bA = Math.pow(Math.max(0, Math.sin(t * Math.PI)), 3);
-    const bB = Math.pow(Math.max(0, Math.sin(t * Math.PI + 2.2)), 3);
-    beaconMatA.color.copy(RED).multiplyScalar(0.15 + 3.2 * bA);
-    beaconMatB.color.copy(RED).multiplyScalar(0.15 + 3.2 * bB);
-
-    // stars twinkle (two layers, phased opacity)
-    starMats[0].opacity = 0.65 + 0.2 * Math.sin(t * 1.3);
-    starMats[1].opacity = 0.7 + 0.22 * Math.sin(t * 0.9 + 2.1);
-
-    // drizzle drifting down
-    for (let i = 0; i < N_RAIN; i++) {
-      let y = rainPos[i * 3 + 1] - rainSpeed[i] * step;
-      if (y < -8) y += 17;
-      rainPos[i * 3 + 1] = y;
-    }
-    rainAttr.needsUpdate = true;
-
-    // plant sways gently
-    leaves.rotation.z = Math.sin(t * 0.6) * 0.025;
-    leaves.rotation.x = Math.cos(t * 0.45) * 0.018;
-  }
-
-  function dispose() { /* no timers or listeners */ }
-
-  // ---------------------------------------------------------------- seats
+  let shadowPolicyApplied = false;
   const seats = [
     {
-      // Window desk: a clean centre aisle frames the laptop and skyline while
-      // the bed and sofa remain small, readable edge vignettes.
-      desktop: { pos: [0.15, 1.66, 3.62], look: [-0.55, 0.9, -3.9], fov: 53 },
-      phoneLandscape: { pos: [0.15, 1.6, 3.68], look: [-0.55, 0.91, -4.1], fov: 57 },
-      portrait: { pos: [0, 1.58, 3.72], look: [0, 0.9, -5.05], fov: 62 },
+      // Workstation: the leather chair reads as part of the desk, while the
+      // physical laptop, pipe lamp and rain-lit skyline remain unobstructed.
+      desktop: { pos: [-1.8, 2.65, 3.05], look: [-5.05, 1.2, -0.55], fov: 50 },
+      phoneLandscape: { pos: [-1.45, 2.5, 3.0], look: [-5.0, 1.2, -0.6], fov: 58 },
+      portrait: { pos: [-0.4, 2.45, 3.1], look: [-5.0, 1.25, -0.65], fov: 64 },
     },
     {
-      // Bed-at-the-glass: viewed diagonally from its open side so the duvet is
-      // a cosy lower-right foreground detail, never a wall across the image.
-      desktop: { pos: [-1.0, 1.82, 4.35], look: [3.3, 0.78, 0.15], fov: 56 },
-      phoneLandscape: { pos: [-0.55, 1.92, 4.8], look: [3.3, 0.7, 0.0], fov: 57 },
-      portrait: { pos: [-0.15, 2.08, 5.55], look: [3.15, 0.72, 0.05], fov: 62 },
+      // Fireside lounge: the camera lives by the rain glass, putting the
+      // modeled tea table, sofa cushions and hearth into one intimate layer.
+      desktop: { pos: [-3.45, 1.7, -3.3], look: [2.35, 1.08, -4.25], fov: 50 },
+      phoneLandscape: { pos: [-3.35, 1.65, -3.15], look: [2.2, 1.05, -4.2], fov: 58 },
+      portrait: { pos: [-2.8, 1.75, -3.0], look: [2.1, 1.1, -4.15], fov: 64 },
     },
     {
-      // Sofa viewpoint: the camera now sits at the cushion rather than behind
-      // the opaque backrest. The book, mug and blue-hour city lead the frame.
-      desktop: { pos: [4.62, 1.68, 3.34], look: [-1.25, 0.92, -1.55], fov: 55 },
-      phoneLandscape: { pos: [4.55, 1.62, 3.42], look: [-1.15, 0.94, -1.8], fov: 58 },
-      portrait: { pos: [4.55, 1.72, 3.62], look: [-1.05, 0.96, -1.9], fov: 64 },
+      // Wide loft: the sofa anchors the center while guitar, rain-lit skyline
+      // and fireplace form a complete lived-in composition around it.
+      desktop: { pos: [4.8, 2.2, 3.0], look: [0.15, 1.18, -3.35], fov: 58 },
+      phoneLandscape: { pos: [4.4, 2.0, 2.7], look: [0.2, 1.2, -3.3], fov: 64 },
+      portrait: { pos: [4.0, 2.3, 3.0], look: [0.25, 1.3, -3.3], fov: 68 },
     },
   ];
+
+  function setSeat() {
+    if (!shadowPolicyApplied) {
+      // Engine-level defaults run after build(); re-assert the measured scene
+      // policy here, on the engine's first seat application.
+      setShadowPolicy(loft, mobile);
+      shadowPolicyApplied = true;
+    }
+  }
+
+  function update(elapsed, delta, state = {}) {
+    if (!state.reducedMotion) rain.update(delta);
+    const motion = state.reducedMotion ? 0 : 1;
+    const slow = Math.sin(elapsed * 2.35) * motion;
+    const quick = Math.sin(elapsed * 6.1 + 0.8) * motion;
+    const flicker = 0.91 + slow * 0.045 + quick * 0.028;
+    fire.uniforms.time.value = elapsed;
+    fireLight.intensity = (mobile ? 3.2 : 5.1) * flicker;
+    deskLight.intensity = (mobile ? 3.4 : 5.0) * (0.98 + Math.sin(elapsed * 0.72) * 0.015 * motion);
+    if (deskBulbGlow) {
+      deskBulbGlow.intensity = 1.75 * (0.985 + Math.sin(elapsed * 0.65) * 0.018 * motion);
+    }
+    animatedMaterials.candle.forEach((material, index) => {
+      material.emissiveIntensity = 2.15 + Math.sin(elapsed * 5.4 + index * 1.7) * 0.28 * motion;
+    });
+    animatedMaterials.bulb.forEach((material) => {
+      material.emissiveIntensity = (mobile ? 2.85 : 3.35) + Math.sin(elapsed * 0.65) * 0.1 * motion;
+    });
+    animatedMaterials.windows.forEach((material) => {
+      material.emissiveIntensity = 1.38 + Math.sin(elapsed * 0.24) * 0.05 * motion;
+    });
+    animatedMaterials.laptop.forEach((material) => {
+      material.emissiveIntensity = (mobile ? 0.66 : 0.78) + Math.sin(elapsed * 0.38) * 0.018 * motion;
+    });
+  }
+
+  function dispose() {
+    // The engine owns geometry/material/texture disposal for the whole scene.
+  }
 
   return {
     seats,
+    setSeat,
     update,
     dispose,
-    exposure: 1.08,
-    bloom: { strength: 0.15, radius: 0.24, threshold: 1.0 }
+    exposure: mobile ? 1.14 : 1.16,
+    bloom: { strength: 0.18, radius: 0.25, threshold: 0.94 },
   };
 }
