@@ -209,6 +209,16 @@
               <svg class="search-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position: absolute; left: 32px; top: 10px; color: var(--text-secondary);"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
               <input type="text" id="search-input" class="search-input" placeholder="Search notes..." />
             </div>
+            <div class="editor-sidebar-sort">
+              <label for="sidebar-note-sort">Sort notes</label>
+              <select id="sidebar-note-sort" onchange="setSidebarNoteSort(this.value)">
+                <option value="manual">Custom order</option>
+                <option value="recent">Recently updated</option>
+                <option value="oldest">Oldest updated</option>
+                <option value="az">Title A – Z</option>
+                <option value="za">Title Z – A</option>
+              </select>
+            </div>
             <div class="notes-list" id="notes-list">
               <!-- Notes injected by JS -->
             </div>
@@ -583,18 +593,18 @@
 
               <div class="tasks-row" style="flex: none;">
                 <!-- Daily Journal / Mood (2) -->
-                <div class="tool-section" style="flex: 1.5; min-height: 200px; display: flex; flex-direction: column;">
+                <div class="tool-section daily-log-section" style="flex: 1.5; min-height: 200px; display: flex; flex-direction: column;">
                   <h4 style="font-size: 1.1rem; color: var(--text-primary); margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
                     <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
                     Daily Log
                   </h4>
-                  <div style="display: flex; gap: 12px; margin-bottom: 16px;" id="mood-selector">
-                    <div class="mood-btn" onclick="selectMood(this, '😊')" style="width: 36px; height: 36px; border-radius: 50%; background: #dcfce7; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; cursor: pointer; opacity: 0.5;">😊</div>
-                    <div class="mood-btn" onclick="selectMood(this, '😐')" style="width: 36px; height: 36px; border-radius: 50%; background: var(--panel-bg); display: flex; align-items: center; justify-content: center; font-size: 1.1rem; cursor: pointer; opacity: 0.5;">😐</div>
-                    <div class="mood-btn" onclick="selectMood(this, '😔')" style="width: 36px; height: 36px; border-radius: 50%; background: #ffedd5; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; cursor: pointer; opacity: 0.5;">😔</div>
-                    <div class="mood-btn" onclick="selectMood(this, '😫')" style="width: 36px; height: 36px; border-radius: 50%; background: #fee2e2; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; cursor: pointer; opacity: 0.5;">😫</div>
+                  <div id="mood-selector">
+                    <button type="button" class="mood-btn mood-happy" onclick="selectMood(this, '😊')" aria-label="Happy">😊</button>
+                    <button type="button" class="mood-btn mood-neutral" onclick="selectMood(this, '😐')" aria-label="Neutral">😐</button>
+                    <button type="button" class="mood-btn mood-sad" onclick="selectMood(this, '😔')" aria-label="Sad">😔</button>
+                    <button type="button" class="mood-btn mood-stressed" onclick="selectMood(this, '😫')" aria-label="Stressed">😫</button>
                   </div>
-                  <textarea id="journal-textarea" placeholder="How was your day? Write a brief reflection here..." style="flex: 1; min-height: 40px; width: 100%; resize: none; border: 1px solid var(--panel-border); border-radius: 12px; padding: 12px; font-family: inherit; font-size: 0.95rem; background: var(--bg-color); color: var(--text-primary); outline: none; margin-bottom: 12px;"></textarea>
+                  <textarea id="journal-textarea" placeholder="How was your day? Write a reflection here..."></textarea>
                   
                   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                     <div style="font-size: 0.85rem; color: var(--text-secondary); font-weight: 600;">Mood History</div>
@@ -602,8 +612,8 @@
                   </div>
                   
                   <!-- GitHub Style Heatmap -->
-                  <div style="width: 100%; overflow-x: auto; padding-bottom: 4px;">
-                    <div id="mood-heatmap" style="display: flex; gap: 3px; min-width: max-content;">
+                  <div class="mood-history-frame">
+                    <div id="mood-heatmap">
                       <!-- JavaScript will populate the 52 weeks of 7 days here -->
                     </div>
                   </div>

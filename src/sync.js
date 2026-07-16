@@ -26,7 +26,7 @@ const SYNC_KEYS = [
   "opennotes_calendar_day_colors", "opennotes_expanded_project_groups", "opennotes_sidebar_expanded_groups",
   "opennotes_expenses", "opennotes_journal_text", "opennotes_journal_mood", "opennotes_mood_history",
   "opennotes_books", "opennotes_goals", "opennotes_habits", "opennotes_quicklinks",
-  "opennotes_favourites", "opennotes_pinned_groups", "opennotes_home_sort", "opennotes_nav_order",
+  "opennotes_favourites", "opennotes_pinned_groups", "opennotes_home_sort", "opennotes_sidebar_note_sort", "opennotes_nav_order",
   "opennotes_board", "opennotes_theme", "opennotes_language", "opennotes_currency",
   "opennotes_currency_code", "opennotes_temp_unit", "opennotes_banner_text_color",
   "opennotes_haven_theme", "opennotes_haven_spot", "opennotes_haven_vol",

@@ -726,6 +726,13 @@ function saveStringSet(key, set) {
 
 let archivedNoteIds = loadStringSet('opennotes_archived_notes');
 let expandedSidebarGroups = loadStringSet('opennotes_sidebar_expanded_groups');
+let sidebarNoteSort = localStorage.getItem('opennotes_sidebar_note_sort') || 'manual';
+
+window.setSidebarNoteSort = function(mode) {
+  sidebarNoteSort = ['manual', 'recent', 'oldest', 'az', 'za'].includes(mode) ? mode : 'manual';
+  localStorage.setItem('opennotes_sidebar_note_sort', sidebarNoteSort);
+  renderNotesList(searchInput?.value || '');
+};
 
 function saveArchivedNoteIds() {
   saveStringSet('opennotes_archived_notes', archivedNoteIds);
@@ -789,9 +796,9 @@ function renderNotesList(filterText = '') {
            noteGroup(note).toLowerCase().includes(term);
   });
 
-  // Stable order (matches the grid's manual order) so editing a note doesn't
-  // jump it to the top of the sidebar list either.
-  filteredNotes.sort((a, b) => noteOrderKey(a) - noteOrderKey(b));
+  const orderedNotes = sortNotes(filteredNotes, sidebarNoteSort);
+  const sortSelect = document.getElementById('sidebar-note-sort');
+  if (sortSelect && sortSelect.value !== sidebarNoteSort) sortSelect.value = sidebarNoteSort;
 
   if (filteredNotes.length === 0) {
     notesListEl.innerHTML = `<div style="text-align:center; padding:20px; color:var(--text-secondary); font-size:0.9rem;">No notes found</div>`;
@@ -799,7 +806,7 @@ function renderNotesList(filterText = '') {
   }
 
   const groups = new Map();
-  filteredNotes.forEach(note => {
+  orderedNotes.forEach(note => {
     const group = noteGroup(note);
     if (!groups.has(group)) groups.set(group, []);
     groups.get(group).push(note);
@@ -3542,6 +3549,16 @@ function initGraph() {
   };
   const edgeRgb = GC.edge.startsWith('#') ? hexToRgb(GC.edge) : '168, 123, 81';
 
+  const projectPalette = ['#c76d5b', '#4f8cc9', '#739a5b', '#9a6ac7', '#d39b43', '#3d9d99', '#d16691', '#68788e', '#9a715c', '#5976cf', '#b2783d', '#5c927c'];
+  const projectStrokePalette = ['#8f4034', '#2c6095', '#466d33', '#68418f', '#916522', '#216d6a', '#943d62', '#405066', '#674738', '#354d9d', '#7b4f20', '#356653'];
+  let graphFolderIndex = new Map();
+  const projectGraphColor = (folder, stroke = false) => {
+    const index = graphFolderIndex.get(folder) ?? 0;
+    const palette = stroke ? projectStrokePalette : projectPalette;
+    if (index < palette.length) return palette[index];
+    return `hsl(${Math.round((index * 137.508 + 16) % 360)} 60% ${stroke ? 34 : 56}%)`;
+  };
+
   const rect = homeGraph.getBoundingClientRect();
   // The panel can still be display:none/zero-sized for a frame when switching
   // views — initialising a 0-sized world pins every node into a corner (the
@@ -3568,9 +3585,20 @@ function initGraph() {
   const spread = Math.min(2.2, Math.max(1, Math.sqrt(graphNotes.length) / 5));
   const worldW = rect.width * spread, worldH = rect.height * spread;
   const cx = worldW / 2, cy = worldH / 2;
+  const graphFolders = [...new Set(graphNotes.map(noteGroup))].sort((a, b) => a.localeCompare(b));
+  graphFolderIndex = new Map(graphFolders.map((folder, index) => [folder, index]));
+  const graphLegend = document.getElementById('graph-project-legend') || document.createElement('div');
+  graphLegend.id = 'graph-project-legend';
+  graphLegend.className = 'graph-project-legend';
+  graphLegend.innerHTML = graphFolders.map(folder => `<span><i style="--project-color:${projectGraphColor(folder)}"></i>${gsEscape(folder)}</span>`).join('');
+  if (!graphLegend.parentNode) homeGraph.appendChild(graphLegend);
+
   const gNodes = graphNotes.map(n => ({
     id: n.id,
     title: n.title || 'Untitled',
+    folder: noteGroup(n),
+    color: projectGraphColor(noteGroup(n)),
+    strokeColor: projectGraphColor(noteGroup(n), true),
     // spread across the world so the layout starts open, not collapsed in a ball
     x: cx + (Math.random() - 0.5) * worldW * 0.45,
     y: cy + (Math.random() - 0.5) * worldH * 0.45,
@@ -3913,12 +3941,14 @@ function initGraph() {
       edge.currentAlpha += (targetAlpha - edge.currentAlpha) * 0.15; // Smooth interpolation
       maxAlphaDelta = Math.max(maxAlphaDelta, Math.abs(targetAlpha - edge.currentAlpha));
 
-      ctx.strokeStyle = `rgba(${edgeRgb}, ${edge.currentAlpha})`;
+      ctx.strokeStyle = s.color || `rgb(${edgeRgb})`;
+      ctx.globalAlpha = edge.currentAlpha * 0.62;
       
       ctx.beginPath();
       ctx.moveTo(s.x, s.y);
       ctx.lineTo(t.x, t.y);
       ctx.stroke();
+      ctx.globalAlpha = 1;
     });
     
     gNodes.forEach(n => {
@@ -3946,11 +3976,11 @@ function initGraph() {
 
       ctx.beginPath();
       ctx.arc(n.x, n.y, n.radius, 0, Math.PI * 2);
-      ctx.fillStyle = GC.node;
+      ctx.fillStyle = n.color;
       ctx.fill();
 
       ctx.lineWidth = 3;
-      ctx.strokeStyle = GC.stroke;
+      ctx.strokeStyle = n.strokeColor;
       ctx.stroke();
 
       ctx.fillStyle = GC.text;
@@ -4123,11 +4153,11 @@ const moodColors = {
 window.selectMood = function(el, mood) {
   currentMood = mood;
   document.querySelectorAll('.mood-btn').forEach(btn => {
-    btn.style.opacity = '0.5';
-    btn.style.border = 'none';
+    btn.classList.remove('selected');
+    btn.setAttribute('aria-pressed', 'false');
   });
-  el.style.opacity = '1';
-  el.style.border = '2px solid var(--accent-color)';
+  el.classList.add('selected');
+  el.setAttribute('aria-pressed', 'true');
 };
 
 // Helper for reliable local timezone date strings
@@ -4141,32 +4171,89 @@ function getLocalDateStr(dateObj) {
 window.saveJournal = function() {
   const textEl = document.getElementById('journal-textarea');
   if (textEl) {
-    localStorage.setItem('opennotes_journal_text', textEl.value);
-    localStorage.setItem('opennotes_journal_mood', currentMood || '');
-    
-    // Save to history for the heatmap
-    if (currentMood) {
-      const history = JSON.parse(localStorage.getItem('opennotes_mood_history')) || {};
-      const todayStr = getLocalDateStr(new Date());
-      history[todayStr] = { mood: currentMood, text: textEl.value, savedAt: Date.now() };
-      localStorage.setItem('opennotes_mood_history', JSON.stringify(history));
-      renderMoodHeatmap();
-    }
+    const todayStr = getLocalDateStr(new Date());
+    const history = readMoodHistory();
+    history[todayStr] = { mood: currentMood || history[todayStr]?.mood || '', text: textEl.value.trim(), savedAt: Date.now() };
+    localStorage.setItem('opennotes_mood_history', JSON.stringify(history));
+    // Remove the legacy global fields. They caused yesterday's reflection to
+    // appear forever on every new day instead of loading the selected date.
+    localStorage.removeItem('opennotes_journal_text');
+    localStorage.removeItem('opennotes_journal_mood');
+    renderMoodHeatmap();
+    textEl.value = '';
+    textEl.dispatchEvent(new Event('input'));
+    currentMood = null;
+    document.querySelectorAll('.mood-btn').forEach(btn => {
+      btn.classList.remove('selected');
+      btn.setAttribute('aria-pressed', 'false');
+    });
     
     alert("Daily log saved successfully!");
   }
 };
+
+function readMoodHistory() {
+  try {
+    const value = JSON.parse(localStorage.getItem('opennotes_mood_history') || '{}');
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function configureJournalTextarea() {
+  const textEl = document.getElementById('journal-textarea');
+  if (!textEl) return;
+  const resize = () => {
+    textEl.style.height = 'auto';
+    textEl.style.height = `${Math.max(104, Math.min(260, textEl.scrollHeight))}px`;
+  };
+  textEl.addEventListener('input', resize, { passive: true });
+  requestAnimationFrame(resize);
+}
 
 function renderMoodHeatmap() {
   const heatmapEl = document.getElementById('mood-heatmap');
   if (!heatmapEl) return;
   
   heatmapEl.innerHTML = '';
-  const history = JSON.parse(localStorage.getItem('opennotes_mood_history')) || {};
+  const history = readMoodHistory();
+  const mobile = window.matchMedia('(max-width: 820px), (pointer: coarse)').matches;
+  heatmapEl.classList.toggle('mobile-mood-calendar', mobile);
   
-  // Create 52 columns (weeks)
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+
+  if (mobile) {
+    const weekday = new Intl.DateTimeFormat([], { weekday: 'narrow' });
+    for (let day = 0; day < 7; day++) {
+      const sample = new Date(2026, 0, 4 + day);
+      const label = document.createElement('span');
+      label.className = 'mood-weekday';
+      label.textContent = weekday.format(sample);
+      heatmapEl.appendChild(label);
+    }
+    const startDate = new Date(today);
+    startDate.setDate(today.getDate() - 34);
+    for (let index = 0; index < 35; index++) {
+      const cellDate = new Date(startDate);
+      cellDate.setDate(startDate.getDate() + index);
+      const dateStr = getLocalDateStr(cellDate);
+      const rawEntry = history[dateStr];
+      const entry = typeof rawEntry === 'string' ? { mood: rawEntry, text: '' } : rawEntry;
+      const cell = document.createElement('button');
+      cell.type = 'button';
+      cell.className = `mood-day mood-day-mobile${dateStr === getLocalDateStr(today) ? ' today' : ''}${entry?.mood ? ' logged' : ''}`;
+      cell.setAttribute('aria-label', `${cellDate.toLocaleDateString([], { month: 'long', day: 'numeric' })}${entry?.mood ? `, mood ${entry.mood}` : ', no mood logged'}`);
+      cell.style.setProperty('--mood-day-color', entry?.mood ? (moodColors[entry.mood] || 'var(--overlay-medium)') : 'var(--overlay-medium)');
+      cell.innerHTML = `<span>${cellDate.getDate()}</span><strong>${entry?.mood || ''}</strong>`;
+      cell.onclick = () => openMoodDay(dateStr, entry);
+      heatmapEl.appendChild(cell);
+    }
+    return;
+  }
+
+  // Desktop keeps the compact full-year contribution-style overview.
   const startDate = new Date(today);
   // Start from exactly 52 weeks minus 1 day ago so the very last cell is today
   startDate.setDate(startDate.getDate() - (51 * 7) - 6);
@@ -4197,23 +4284,19 @@ function renderMoodHeatmap() {
     }
     heatmapEl.appendChild(col);
   }
-  if (window.matchMedia('(max-width: 820px), (pointer: coarse)').matches) {
-    requestAnimationFrame(() => { heatmapEl.scrollLeft = heatmapEl.scrollWidth; });
-  }
 }
 
-const savedJournalText = localStorage.getItem('opennotes_journal_text');
-const savedJournalMood = localStorage.getItem('opennotes_journal_mood');
 const journalTextEl = document.getElementById('journal-textarea');
-if (journalTextEl && savedJournalText) journalTextEl.value = savedJournalText;
-if (savedJournalMood) {
-  document.querySelectorAll('.mood-btn').forEach(btn => {
-    if (btn.innerText.includes(savedJournalMood)) {
-      window.selectMood(btn, savedJournalMood);
-    }
-  });
-}
+configureJournalTextarea();
 renderMoodHeatmap();
+let moodLayoutIsMobile = window.matchMedia('(max-width: 820px), (pointer: coarse)').matches;
+window.addEventListener('resize', () => {
+  const nextMobile = window.matchMedia('(max-width: 820px), (pointer: coarse)').matches;
+  if (nextMobile !== moodLayoutIsMobile) {
+    moodLayoutIsMobile = nextMobile;
+    renderMoodHeatmap();
+  }
+});
 
 // -----------------------------------------
 // Expense Tracker Logic

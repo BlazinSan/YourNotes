@@ -521,6 +521,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
+    show: false,
     icon: path.join(__dirname, 'icon.png'),
     autoHideMenuBar: true,
     webPreferences: {
@@ -533,6 +534,15 @@ function createWindow() {
   });
 
   const win = mainWindow;
+  // Open at the full available Windows workspace immediately. Maximized keeps
+  // the native title bar and task switching while avoiding a small first-run
+  // window that the user has to expand manually.
+  win.once('ready-to-show', () => {
+    if (!win.isDestroyed()) {
+      win.maximize();
+      win.show();
+    }
+  });
   // Window-local listeners may be registered for every recreated window; the
   // persistence state and all process-wide IPC/lifecycle handlers remain singletons.
   win.on('blur', () => persistence.flushStore());
