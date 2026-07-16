@@ -1906,6 +1906,20 @@ window.showPanel = function(panelId, btnId) {
       dashboardBannerEl.classList.add('thin');
     }
   }
+  if (homePage) {
+    const dashboardBoardActive = panelId === 'dashboard-expanded';
+    homePage.classList.toggle('dashboard-board-active', dashboardBoardActive);
+    // Old mobile builds made both elements scroll containers. Clear any saved
+    // offset before locking the board so its fixed canvas always starts at (0, 0).
+    if (dashboardBoardActive) {
+      homePage.scrollTop = 0;
+      homePage.scrollLeft = 0;
+      if (dashboardBannerEl) {
+        dashboardBannerEl.scrollTop = 0;
+        dashboardBannerEl.scrollLeft = 0;
+      }
+    }
+  }
 
   const panels = ['home-grid', 'home-graph', 'home-tasks', 'home-session', 'home-settings', 'home-college', 'home-favourites'];
   panels.forEach(p => {
@@ -5103,7 +5117,7 @@ function showBoardViewer(item, src, isBlob = false) {
   const isPdf = /pdf/i.test(item.mime || '') || /\.pdf$/i.test(item.name || '');
   const isVideo = /^video\//.test(item.mime || '') || /\.(mp4|webm|m4v|mov)$/i.test(item.name || '');
   const overlay = document.createElement('div');
-  overlay.className = `board-viewer-overlay ${isImage ? 'board-viewer-image' : ''} ${isPdf ? 'board-viewer-pdf' : ''}`;
+  overlay.className = `board-viewer-overlay ${isImage ? 'board-viewer-image' : ''} ${isPdf ? 'board-viewer-pdf' : ''} ${isVideo ? 'board-viewer-video' : ''}`;
   if (isBlob) overlay.dataset.blobUrl = src;
 
   let iframeSrc = src;
@@ -5361,18 +5375,19 @@ function boardMetrics() {
   const boardWidth = Math.max(1, boardFinite(banner && banner.clientWidth, BOARD_BASE_WIDTH));
   const boardHeight = Math.max(1, boardFinite(banner && banner.clientHeight, BOARD_REFERENCE_HEIGHT));
   const coarse = window.matchMedia('(pointer: coarse)').matches;
-  const scale = Math.max(coarse ? 0.55 : 0.01, Math.min(1, boardWidth / BOARD_BASE_WIDTH));
+  // Below 1000px the complete reference board scales down to the viewport. On
+  // wider desktops cards stay at their designed CSS size while the virtual board
+  // grows to cover the full banner instead of leaving an unreachable strip.
+  const scale = Math.max(0.01, Math.min(1, boardWidth / BOARD_BASE_WIDTH));
+  const widthBase = boardWidth / scale;
   const minCss = coarse ? BOARD_COARSE_MIN_CSS : BOARD_FINE_MIN_CSS;
-  // The virtual board must cover the full visible banner. A fixed 700-unit
-  // height left the lower part of tall desktop dashboards unreachable.
-  const heightBase = Math.max(
-    BOARD_REFERENCE_HEIGHT,
-    boardHeight / scale,
-    700 + Math.max(0, Math.ceil(boardItems.length / 8) - 1) * 300
-  );
+  // The board is a fixed canvas, never a hidden scroll surface. Its virtual size
+  // maps exactly to the visible banner; extra pins are rejected when no slot fits.
+  const heightBase = boardHeight / scale;
   return {
     scale,
     coarse,
+    widthBase,
     heightBase,
     minWbase: minCss.w / scale,
     minHbase: minCss.h / scale,
@@ -5496,12 +5511,12 @@ function boardVisualInsets(layout, m) {
 
 function boardSizeFits(w, h, rot, m) {
   const inset = boardVisualInsets({ w, h, rot }, m);
-  return w + inset.left + inset.right <= BOARD_BASE_WIDTH - m.edgeInsetBase * 2 + 0.01
+  return w + inset.left + inset.right <= m.widthBase - m.edgeInsetBase * 2 + 0.01
     && h + inset.top + inset.bottom <= m.heightBase - m.edgeInsetBase * 2 + 0.01;
 }
 
 function boardEffectiveSize(item, m, requestedW = item.w, requestedH = item.h) {
-  const minW = Math.min(m.minWbase, BOARD_BASE_WIDTH - m.edgeInsetBase * 2);
+  const minW = Math.min(m.minWbase, m.widthBase - m.edgeInsetBase * 2);
   const minH = Math.min(m.minHbase, m.heightBase - m.edgeInsetBase * 2);
   const targetW = Math.max(minW, boardFinite(requestedW, item.w));
   const targetH = Math.max(minH, boardFinite(requestedH, item.h));
@@ -5526,7 +5541,7 @@ function boardEffectiveSize(item, m, requestedW = item.w, requestedH = item.h) {
 function boardPositionRange(layout, m) {
   const inset = boardVisualInsets(layout, m);
   const minX = m.edgeInsetBase + inset.left;
-  const maxX = BOARD_BASE_WIDTH - m.edgeInsetBase - inset.right - layout.w;
+  const maxX = m.widthBase - m.edgeInsetBase - inset.right - layout.w;
   const minY = m.edgeInsetBase + inset.top;
   const maxY = m.heightBase - m.edgeInsetBase - inset.bottom - layout.h;
   return { minX, maxX, minY, maxY, valid: maxX >= minX && maxY >= minY };
@@ -5577,6 +5592,70 @@ function boardCandidateFits(candidate, m, placed) {
   if (!range.valid || candidate.x < range.minX - 0.01 || candidate.x > range.maxX + 0.01 || candidate.y < range.minY - 0.01 || candidate.y > range.maxY + 0.01) return false;
   const rect = boardVisualRect(candidate, m);
   return !placed.some(other => other.id !== candidate.id && boardVisualRectsOverlap(rect, boardVisualRect(other, m), m.gapBase));
+}
+
+// Dragging never changes a card's size or rotation, so cache its visual insets,
+// legal range and every occupied rectangle once per gesture. Pointer-move then
+// becomes cheap rectangle math instead of repeated trigonometry and DOM layout.
+function boardMoveValidator(layout, m, placed) {
+  const range = boardPositionRange(layout, m);
+  const inset = boardVisualInsets(layout, m);
+  const occupied = placed.map(other => boardVisualRect(other, m));
+  return candidate => {
+    if (!range.valid || candidate.x < range.minX - 0.01 || candidate.x > range.maxX + 0.01 || candidate.y < range.minY - 0.01 || candidate.y > range.maxY + 0.01) return false;
+    const rect = {
+      left: candidate.x - inset.left,
+      top: candidate.y - inset.top,
+      right: candidate.x + candidate.w + inset.right,
+      bottom: candidate.y + candidate.h + inset.bottom
+    };
+    return !occupied.some(other => boardVisualRectsOverlap(rect, other, m.gapBase));
+  };
+}
+
+function boardAdvanceWithoutOverlap(from, to, fits) {
+  const dx = to.x - from.x, dy = to.y - from.y;
+  const distance = Math.max(Math.abs(dx), Math.abs(dy));
+  const steps = Math.max(1, Math.min(12, Math.ceil(distance / 36)));
+  let last = from;
+  for (let step = 1; step <= steps; step++) {
+    const amount = step / steps;
+    const candidate = { ...to, x: from.x + dx * amount, y: from.y + dy * amount };
+    if (fits(candidate)) {
+      last = candidate;
+      continue;
+    }
+    // Settle against the first obstacle/edge to sub-pixel precision. This keeps
+    // quick pointer moves from tunnelling through another pin.
+    let low = 0, high = 1, best = last;
+    for (let i = 0; i < 7; i++) {
+      const mid = (low + high) / 2;
+      const probe = {
+        ...candidate,
+        x: last.x + (candidate.x - last.x) * mid,
+        y: last.y + (candidate.y - last.y) * mid
+      };
+      if (fits(probe)) { low = mid; best = probe; } else high = mid;
+    }
+    return best;
+  }
+  return last;
+}
+
+function boardResolveDragLayout(lastValid, proposed, fits) {
+  const straight = boardAdvanceWithoutOverlap(lastValid, proposed, fits);
+  if (Math.abs(straight.x - proposed.x) < 0.25 && Math.abs(straight.y - proposed.y) < 0.25) {
+    return { layout: proposed, blocked: false };
+  }
+
+  // At an obstacle, continue along either free axis and choose the result closest
+  // to the pointer. The card slides around neighbours instead of freezing and
+  // jumping to an unrelated grid slot on release.
+  const horizontal = boardAdvanceWithoutOverlap(straight, { ...straight, x: proposed.x }, fits);
+  const vertical = boardAdvanceWithoutOverlap(straight, { ...straight, y: proposed.y }, fits);
+  const distanceSq = value => (value.x - proposed.x) ** 2 + (value.y - proposed.y) ** 2;
+  const layout = [straight, horizontal, vertical].sort((a, b) => distanceSq(a) - distanceSq(b))[0];
+  return { layout, blocked: true };
 }
 
 function boardFindNearestSlot(preferred, m, placed) {
@@ -5687,7 +5766,7 @@ function boardPlaceNewItem(item, origin, m) {
 
 function boardDefaultPoint(offset = 0) {
   const m = boardMetrics();
-  const w = BOARD_BASE_WIDTH, h = m.heightBase;
+  const w = m.widthBase, h = m.heightBase;
   return {
     x: Math.max(12, Math.min(w - 190, Math.round(w * 0.5 - 95 + offset))),
     y: Math.max(22, Math.min(h - 120, Math.round(h * 0.45 - 65 + offset)))
@@ -5709,14 +5788,21 @@ function waitForBoardReady() {
   if (!banner || !banner.classList.contains('expanded')) return Promise.resolve();
   return new Promise((resolve) => {
     const started = performance.now();
+    const initialHeight = banner.getBoundingClientRect().height;
     let previousHeight = -1;
     let stableFrames = 0;
+    let sawHeightChange = false;
     const check = () => {
       if (!banner.classList.contains('expanded')) { resolve(); return; }
       const height = banner.getBoundingClientRect().height;
+      if (Math.abs(height - initialHeight) > 1) sawHeightChange = true;
       stableFrames = Math.abs(height - previousHeight) < 0.5 ? stableFrames + 1 : 0;
       previousHeight = height;
-      if ((height > 160 && stableFrames >= 2) || performance.now() - started > 560) { resolve(); return; }
+      const elapsed = performance.now() - started;
+      // The collapsed dashboard is already ~200px and can be stable for a few
+      // frames before its delayed 400ms height transition begins. Require both an
+      // observed size change and the full transition window, then settled frames.
+      if ((height > 160 && sawHeightChange && stableFrames >= 2 && elapsed >= 430) || elapsed > 1400) { resolve(); return; }
       requestAnimationFrame(check);
     };
     requestAnimationFrame(check);
@@ -5725,9 +5811,38 @@ function waitForBoardReady() {
 
 function scheduleBoardRenderAfterExpand() {
   const token = ++boardExpandRenderToken;
-  waitForBoardReady().then(() => {
-    if (token === boardExpandRenderToken && boardExpandedForMigration()) renderBoard();
-  });
+  const banner = document.getElementById('dashboard-banner');
+  let lastRenderedSize = '';
+  const renderFinalGeometry = () => {
+    if (token !== boardExpandRenderToken || !boardExpandedForMigration()) return;
+    // Never replace the card DOM beneath an in-flight pointer gesture. The
+    // next resize/transition reconciliation will catch up after release.
+    if (document.querySelector('#dashboard-board .board-card.dragging')) return;
+    const sizeKey = `${banner?.clientWidth || 0}x${banner?.clientHeight || 0}`;
+    if (sizeKey === lastRenderedSize) return;
+    lastRenderedSize = sizeKey;
+    renderBoard();
+  };
+
+  waitForBoardReady().then(renderFinalGeometry);
+
+  // A cold Electron/WebView paint can begin the CSS height transition after
+  // waitForBoardReady has sampled the collapsed 200px banner. Reconcile from
+  // the actual final banner box when the transition completes, with a short
+  // fallback for platforms that do not emit transitionend (notably when
+  // reduced motion is enabled). This prevents the board retaining a shallow
+  // invisible boundary while the expanded banner fills the screen.
+  const onHeightTransitionEnd = (event) => {
+    if (event.target !== banner || event.propertyName !== 'height') return;
+    banner?.removeEventListener('transitionend', onHeightTransitionEnd);
+    clearTimeout(fallbackRender);
+    renderFinalGeometry();
+  };
+  banner?.addEventListener('transitionend', onHeightTransitionEnd);
+  const fallbackRender = setTimeout(() => {
+    banner?.removeEventListener('transitionend', onHeightTransitionEnd);
+    renderFinalGeometry();
+  }, 520);
 }
 
 async function ensureBoardExpanded() {
@@ -5925,7 +6040,7 @@ function renderBoard() {
 
   const m = boardMetrics();
   const scale = m.scale;
-  board.style.width = `${BOARD_BASE_WIDTH * scale}px`;
+  board.style.width = `${m.widthBase * scale}px`;
   board.style.height = `${m.heightBase * scale}px`;
   const built = boardBuildLayouts(m, true);
   activeBoardLayouts = built.layouts;
@@ -5943,9 +6058,9 @@ function renderBoard() {
     const card = document.createElement('div');
     card.className = 'board-card board-card-' + item.type;
     card.dataset.boardId = item.id;
-    card.style.left = (layout.x * scale) + 'px'; card.style.top = (layout.y * scale) + 'px';
+    card.style.left = '0'; card.style.top = '0';
     card.style.width = (layout.w * scale) + 'px'; card.style.height = (layout.h * scale) + 'px';
-    card.style.transform = 'rotate(' + (item.rot || 0) + 'deg)';
+    card.style.transform = boardCardTransform(layout, m);
     let inner = '';
     let imgUrl = '';
     if (item.type === 'image') {
@@ -6038,14 +6153,16 @@ function trackBoardPointer(target, startEvent, onMove, onFinish) {
   try { target.setPointerCapture(pointerId); } catch (_) {}
 }
 
+function boardCardTransform(layout, m) {
+  return `translate3d(${layout.x * m.scale}px, ${layout.y * m.scale}px, 0) rotate(${layout.rot || 0}deg)`;
+}
+
 function applyBoardLayoutToCard(card, layout, m) {
-  card.style.left = (layout.x * m.scale) + 'px';
-  card.style.top = (layout.y * m.scale) + 'px';
   card.style.width = (layout.w * m.scale) + 'px';
   card.style.height = (layout.h * m.scale) + 'px';
-  // The drag shadow provides lift. Scaling here would make the painted card
-  // larger than the geometry used for edge and collision checks.
-  card.style.transform = `rotate(${layout.rot || 0}deg)`;
+  // Position on the compositor instead of changing left/top every frame. This
+  // avoids relayout while dragging; rotation stays identical to the geometry.
+  card.style.transform = boardCardTransform(layout, m);
 }
 
 function makeBoardCardInteractive(card, item, initialLayout, m) {
@@ -6075,11 +6192,11 @@ function makeBoardCardInteractive(card, item, initialLayout, m) {
     const scale = m.scale;
     const start = { ...(activeBoardLayouts.get(item.id) || initialLayout) };
     const others = [...activeBoardLayouts.values()].filter(layout => layout && layout.id !== item.id);
+    const fitsMove = boardMoveValidator(start, m, others);
     const sx = e.clientX, sy = e.clientY;
     let moved = false;
     let blocked = false;
     let lastValid = { ...start };
-    let lastProposed = { ...start };
     card.classList.add('dragging');
     trackBoardPointer(card, e, (ev) => {
       if (!moved) {
@@ -6089,16 +6206,12 @@ function makeBoardCardInteractive(card, item, initialLayout, m) {
       }
       const dx = (ev.clientX - sx) / scale;
       const dy = (ev.clientY - sy) / scale;
-      lastProposed = boardClampLayout({ ...start, x: start.x + dx, y: start.y + dy }, m);
-      if (boardCandidateFits(lastProposed, m, others)) {
-        lastValid = lastProposed;
-        blocked = false;
-        card.classList.remove('board-blocked');
-        applyBoardLayoutToCard(card, lastValid, m, true);
-      } else {
-        blocked = true;
-        card.classList.add('board-blocked');
-      }
+      const proposed = boardClampLayout({ ...start, x: start.x + dx, y: start.y + dy }, m);
+      const resolved = boardResolveDragLayout(lastValid, proposed, fitsMove);
+      lastValid = resolved.layout;
+      blocked = resolved.blocked;
+      card.classList.toggle('board-blocked', blocked);
+      applyBoardLayoutToCard(card, lastValid, m);
     }, (_event, cancelled) => {
       card.classList.remove('dragging', 'board-blocked');
       if (cancelled) { applyBoardLayoutToCard(card, start, m); return; }
@@ -6106,10 +6219,6 @@ function makeBoardCardInteractive(card, item, initialLayout, m) {
         applyBoardLayoutToCard(card, start, m, false);
         if (item.type !== 'text') openBoardItem(item);
         return;
-      }
-      if (blocked) {
-        const snapped = boardFindNearestSlot(lastProposed, m, others);
-        if (snapped) lastValid = snapped;
       }
       boardWriteCanonical(item, lastValid, m, false);
       activeBoardLayouts.set(item.id, { ...lastValid });
