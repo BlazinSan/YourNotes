@@ -1,7 +1,7 @@
 <div align="center">
   <img width="230" height="230" alt="YourNotes app icon" src="https://github.com/user-attachments/assets/93a3d879-2db0-4ab7-8222-9f13d213885e" />
   <h1>YourNotes</h1>
-  <p><b>A calm, local-first productivity workspace for Windows and Android.</b></p>
+  <p><b>Your calm, productivity realm for Windows and Android.</b></p>
   <p>Capture notes, organize projects, plan tasks, study PDFs, focus with lofi, and unwind in Safe Haven—without turning your workspace into clutter.</p>
   <p>
     <img src="https://img.shields.io/badge/release-v0.0.11-a87b51?style=flat" alt="Release v0.0.11" />
